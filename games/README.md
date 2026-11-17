@@ -49,6 +49,9 @@ The folder holds:
   holds no game data; commit it with the pull request that changes it.
 - **`pipelines.kyplst`** (optional) and **`pipelines.kyplst.verified`**: the pipeline list and the record of its
   no-game-code proof. See below.
+- **`contrib/<date>-<hash>.kyplst`** and its **`.verified`** (optional, short-lived): lists shared by players with
+  `nps5 cache share`, waiting to be folded into `pipelines.kyplst`; **`pipelines.contrib.tsv`**: one provenance row
+  per folded contribution. See "Share your list".
 
 ## Pipeline lists
 
@@ -69,7 +72,7 @@ binary. The back end reads a shader's code from your copy of the game and uses i
    reads the code of every listed shader from your copy of the game and fails if any 64-byte window of it occurs
    in the file or in any decompressed section. On success it writes `pipelines.kyplst.verified` (the list's
    SHA-256, the result line, counts, date). It uses no GPU.
-2. `scripts/check.sh` accepts a `.kyplst` only as `games/<title id>/pipelines.kyplst`, only if it parses (known
+2. `scripts/check.sh` accepts a `.kyplst` only as `games/<title id>/pipelines.kyplst` or `games/<title id>/contrib/<date>-<8 hex>.kyplst`, only if it parses (known
    sections, sizes in bounds, nothing after the last section, the title ID of its folder), only if no decompressed
    section contains a shader binary or shader text (SPIR-V, Metal library, LLVM bitcode, ELF/SELF, MSL or AIR
    text) or nested compressed data, only if every section's stored bytes are exactly one zstd frame (a second or
@@ -83,6 +86,21 @@ same call) starts the title once in prepare mode: every
 permutation and pipeline is built through KosmicKrisp from your own dump, and the process exits before the game
 runs (ASTRO BOT: 1,259 of 1,260 built in 85 s on an M4 Pro). It fills the Vulkan driver cache, the program cache,
 the KosmicKrisp pipeline archive and a private OS Metal cache. With KosmicKrisp patch 0020 it runs twice: pass 1 collects every shader's MSL (`KK_LIBCACHE_DIR=<cache>/kk-libcache`), `scripts/kk-libcache-build.sh` builds it into Metal libraries, pass 2 prepares again from an empty cache with those libraries in place (a pipeline archived from a source-compiled library never hits when the shader is later loaded from a prebuilt one); runs then load libraries in 0.3 ms instead of compiling them (`--single-pass` skips pass 2).
+
+### Share your list
+
+`scripts/nps5 cache share <title id> [--from DIR ...] [--pr]` turns the pipeline journals of your own runs into a contribution:
+
+1. It finds the journals under `<scratch>/cache/<title id>/` (or the `--from` folders), exports each against your copy of the game and merges them (`kyty_pipeline_list export` / `merge`).
+2. It compares with the shipped `pipelines.kyplst` and prints your list, the shipped list and **NEW** in the `.verified` record's wording: `shaders N (vertex, pixel, compute), permutations N, pipelines N`. Vertex includes what Kyty treats as primitive / NGG vertex stages; a pipeline entry is its stages, the Vulkan state and the layout signature. Zero new: nothing is written.
+3. A list is for **one title and one app version** (`title` and `version` in its header, e.g. `PPSA21564 01.007.000`). Your journals must be from the version the shipped list is for; another version is refused and gets its own list.
+4. It writes `games/<title id>/contrib/<date>-<8 hex>.kyplst` and runs the no-game-code proof on it (the verifier reads your game and the journals; `.verified` next to it) and the rules of `scripts/check.sh` (one zstd frame per section, size cap, no payload, record for these bytes). The header names the title, version, nps5 commit and machine class only. Nothing it prints or writes contains your user name, home or game paths.
+5. It prints the next steps and the text for the pull request or the "Shader list" issue. `--pr` runs `gh repo fork`, `git switch -c`, `git add` / `commit`, `git push` to your fork and `gh pr create` after showing the plan and asking `[y/N]`; without a yes nothing is pushed or created, and it needs `gh auth login`.
+
+The contribution is your own merged list, so entries the shipped list already has are inside it; the NEW line counts the difference, and the maintainer merge removes the overlap.
+
+**Maintainers.** After checking a contribution (rerun `scripts/verify-pipeline-list.sh` on it with your game copy), fold it in:
+`scripts/nps5 cache merge <title id> --contrib games/<title id>/contrib/*.kyplst --write`. It refuses a file without a valid `.verified` or for another title or app version, merges (duplicates are dropped), writes `pipelines.kyplst`, removes its `.verified` (run `nps5 cache verify-list <title id>` and commit the new record), and appends one row per contribution to `pipelines.contrib.tsv` (date, hash prefix, the contribution's own counts; no names). `git rm` the folded `contrib/` files in the same commit; folding the same file again adds no second row.
 
 **What stays out, always** (git-ignored, generated per checkout, under `NPS5_SCRATCH`): those compiled caches and
 archives, Metal binaries, driver caches, shader and pipeline *journals* (they carry code), MSL / SPIR-V / AIR

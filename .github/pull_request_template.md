@@ -24,6 +24,10 @@
 - [ ] New behaviour is off by default behind an environment switch, or the evidence above shows it is neutral or better on the title and the gates
 - [ ] The run rules in AGENTS.md were kept (one GPU process, memory self-limit untouched, no counter-heap profiling)
 
+## Shader list
+
+<!-- Only for a PR that adds games/<title id>/contrib/<date>-<hash>.kyplst (from `nps5 cache share`): title, app version, new counts (the NEW line), nps5 commit, machine class. Delete otherwise. -->
+
 ## AI assistance
 
 <!-- REQUIRED, a PR without this line is not reviewed. yes / no; if yes, which agent, and confirm a person read the diff and the evidence -->

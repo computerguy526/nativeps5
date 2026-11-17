@@ -77,7 +77,9 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 # carries a title ID in its path is treated as a dump.
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
-                 "pipelines.kyplst", "pipelines.kyplst.verified", "scenes.tsv", "smoke.tsv"}
+                 "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv"}
+# shared shader lists (nps5 cache share): games/<title id>/contrib/<date>-<8 hex>.kyplst with its .verified record
+CONTRIB_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/contrib/\d{4}-\d{2}-\d{2}-[0-9a-f]{8}\.kyplst(\.verified)?$")
 # pad scripts (input timings only): games/<title id>/pad/<name>.vpad
 PROFILE_PAD_RE = re.compile(r"^games/(?:PPSA|CUSA|PCAS|PLAS)\d{5}/pad/[A-Za-z0-9_.-]+\.vpad$")
 KYPLST_MAGIC = b"KYPLST1\0"
@@ -157,7 +159,9 @@ def check_kyplst(path, data, sidecar):
     (scripts/verify-pipeline-list.sh, which needs the game) for exactly these bytes. Returns a list of problems."""
     m = PROFILE_RE.match(path)
     if not m or m.group(2) != "pipelines.kyplst":
-        return ["a pipeline list is only accepted as games/<title id>/pipelines.kyplst"]
+        m = CONTRIB_RE.match(path)
+        if not m or m.group(2):
+            return ["a pipeline list is only accepted as games/<title id>/pipelines.kyplst or games/<title id>/contrib/<date>-<hash>.kyplst"]
     if len(data) > KYPLST_MAX_BYTES:
         return [f"{len(data)} bytes (a pipeline list is keys and hashes: limit {KYPLST_MAX_BYTES})"]
     if len(data) < 16 or data[:8] != KYPLST_MAGIC:
@@ -398,6 +402,10 @@ class Check:
         low = path.lower()
         ext = low.rsplit(".", 1)[-1] if "." in os.path.basename(path) else ""
         profile = PROFILE_RE.match(path)
+        if CONTRIB_RE.match(path) and not ext == "kyplst":     # the .verified record next to a shared list: text only
+            if not data.startswith(b"#") or b"\0" in data or len(data) > 4096:
+                F(": a .verified record is a short text file")
+            return
         if profile and profile.group(2) not in PROFILE_FILES:
             F(": not a profile file (games/README.md lists them); game-derived data stays out")
         if ext == "kyplst":

@@ -1,6 +1,6 @@
 scripts/check.sh --selftest
 for f in scripts/*.sh host/*.sh kosmickrisp/build-kosmickrisp.sh tools/*/*.sh; do bash -n "$f" || exit 1; done
-python3 -I -m py_compile scripts/nps5_check.py tools/xray/xray.py tools/agxdis/agxdis.py tools/shaderlab/*.py host/gpucache_prune.py games/game.py tests/test_game.py scripts/nps5lib/hw.py tests/test_hw.py scripts/nps5 scripts/nps5lib/run.py scripts/nps5lib/patch.py scripts/nps5lib/watch.py
+python3 -I -m py_compile scripts/nps5_check.py tools/xray/xray.py tools/agxdis/agxdis.py tools/shaderlab/*.py host/gpucache_prune.py games/game.py tests/test_game.py scripts/nps5lib/hw.py tests/test_hw.py tests/test_share.py scripts/nps5 scripts/nps5lib/run.py scripts/nps5lib/patch.py scripts/nps5lib/watch.py
 python3 -I tests/test_check.py
 python3 -I tests/test_game.py
 python3 -I tests/test_run.py
@@ -18,3 +18,4 @@ python3 -I tests/test_watch.py
 python3 -I tests/test_cache.py
 python3 -I tests/test_bench.py
 python3 -I tests/test_regress.py
+python3 -I tests/test_share.py

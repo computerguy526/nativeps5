@@ -68,7 +68,7 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    cp titles/example.env titles/PPSA21564.env      # set BIN (the `native` program nps5 build printed), APP0 (your dump), GPU=kyty
    ```
 
-6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's 1,260 pipelines once, about 90 seconds on an M4 Pro, so the first visit to a scene does not stutter:
+6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's listed pipelines once (1,544 in the list; 1,259 of 1,260 built in about 90 seconds on an M4 Pro for the earlier, smaller list), so the first visit to a scene does not stutter:
 
    ```sh
    scripts/nps5 cache prepare PPSA21564
@@ -100,6 +100,18 @@ If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an is
 **AI assistance.** Pull requests written by hand or with a coding agent are welcome on the same terms. Fill in the "AI assistance" line of the pull request template for every PR, name the agent if you used one, and confirm that a person read the diff and the evidence. A person decides what gets in. Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Questions and bugs: open an issue or a discussion on this repository.
+
+## Share your shader list
+
+Every first visit to a scene compiles pipelines and stutters; the shipped list (`games/<title id>/pipelines.kyplst`) lets `nps5 cache prepare` build them before you play. It only knows the scenes somebody has visited, so **your play helps everyone**: the pipelines you hit that the list lacks become the next version's list, and the next player's first visit does not stutter.
+
+```sh
+scripts/nps5 cache share PPSA21564        # after you played with nps5 run; add --pr to open the pull request for you
+```
+
+It reads the pipeline journals your runs left in the scratch folder, compares them with the shipped list for **your game version**, says how many shaders (vertex / pixel / compute), permutations and pipelines are new, and writes only those keys to `games/PPSA21564/contrib/<date>-<hash>.kyplst`. If nothing is new it says thanks and writes nothing. Then it prints the exact steps (fork, branch, `gh pr create`, or "attach the two files to a **Shader list** issue" if you do not use git).
+
+**Privacy.** The file holds keys, hashes and pipeline state only: no shader code, no game files, no user name, paths or machine serial (the header has the title, the app version, the nps5 commit and the machine class such as `m4pro-24g`). `nps5 cache share` proves that against your own copy of the game (`.verified` record) and runs the repository's list rules before it offers the file. Lists are per game version; a different version of the game gets its own list. Details: [games/README.md](games/README.md#share-your-list).
 
 ## Acknowledgements
 

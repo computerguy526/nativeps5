@@ -3,6 +3,9 @@
 
   nps5 cache record  <id> [--scene NAME ...] [--secs N] [--dry-run]   one first visit per scene into an EMPTY cache arm
   nps5 cache merge   <id> [--from DIR ...] [--rebuild] [--write]      export one list per recording, merge with the committed list
+  nps5 cache share   <id> [--from DIR ...] [--pr]                      SHARE YOUR LIST: your journals -> games/<id>/contrib/<date>-<hash>.kyplst
+                                                                      (keys only, verified); prints how many pipelines are new and how to send it
+  nps5 cache merge   <id> --contrib FILE... [--write]                  MAINTAINER: fold verified contributions into the shipped list
   nps5 cache verify-list <id> [--list FILE] [--shaders JOURNAL ...]   no game code in the list; writes <list>.verified
   nps5 cache prepare <id> [--secs N] [--single-pass] [--dry-run]      USERS RUN THIS ONCE: fresh cache + fresh Metal cache id, builds
                                                                       every listed pipeline in a start that exits before the game runs;
@@ -22,7 +25,7 @@ $NPS5_KK_LIBCACHE_BUILD (default scripts/kk-libcache-build.sh) <dir> <jobs> buil
 cache and a fresh Metal cache id with the metallibs in place. (KK's Metal archive keys a pipeline on its library: a pipeline built from
 a source-compiled library never hits when the same shader is later loaded from a metallib, so only pass 2's archive is kept.)
 Tool: $NPS5_KYPLST_TOOL, else <kyty>/build-arm64/kyty_pipeline_list. Exit codes: 0 ok, 1 failed / stale, 2 usage."""
-import hashlib, os, re, shlex, shutil, subprocess, sys, time
+import hashlib, importlib.util, os, re, shlex, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -241,13 +244,38 @@ def status(ctx):
 
 # ---------------------------------------------------------------- list counts and review block
 def parse_info(text):
-    """kyty_pipeline_list info -> dict(shaders, permutations, pipelines) (ints) from its count lines."""
+    """kyty_pipeline_list info -> dict(shaders, permutations, pipelines, vertex, pixel, compute) (ints) and title / version (strings)."""
     d = {}
-    for k in ("shaders", "permutations", "pipelines"):
+    for k in ("shaders", "permutations", "pipelines", "vertex", "pixel", "compute"):
         m = re.search(r"\b%s (\d+)" % k, text)
         if m:
             d[k] = int(m.group(1))
+    m = re.search(r"title (\S+), version ([^,\s]+)", text)
+    if m:
+        d["title"], d["version"] = m.group(1), m.group(2)
     return d
+
+
+def stage_summary(d):
+    """'shaders 832 (vertex 479, pixel 230, compute 123), permutations 878, pipelines 1544' (the .verified record's wording)."""
+    return "shaders %d (vertex %d, pixel %d, compute %d), permutations %d, pipelines %d" % tuple(
+        d.get(k, 0) for k in ("shaders", "vertex", "pixel", "compute", "permutations", "pipelines"))
+
+
+def new_counts(before, after):
+    return {k: after.get(k, 0) - before.get(k, 0) for k in ("shaders", "vertex", "pixel", "compute", "permutations", "pipelines")}
+
+
+PRIVATE = []      # paths of this invocation that must never be printed (the game folder), set by cmd_share
+
+
+def scrub(text, environ=None):
+    """Tool output / errors may carry the user's paths: home and scratch are replaced before anything is printed."""
+    e = environ or os.environ
+    for v, w in [(x, "<game>") for x in PRIVATE] + [(e.get("NPS5_SCRATCH"), "<scratch>"), (REPO, "<repo>"), (e.get("HOME"), "~"), (os.path.expanduser("~"), "~")]:
+        if v and len(v) > 1:
+            text = text.replace(v, w)
+    return re.sub(r"/Users/[^/\s]+", "~", text)
 
 
 def count_diff(before, after):
@@ -308,6 +336,8 @@ def recordings(ctx, extra):
 
 
 def cmd_merge(ctx, o, runner):
+    if o["contrib"]:
+        return cmd_merge_contrib(ctx, o, runner)
     tool, app0 = tool_path(ctx), app0_of(ctx)
     recs = recordings(ctx, o["from"])
     if not recs:
@@ -344,6 +374,204 @@ def cmd_merge(ctx, o, runner):
     return 0
 
 
+# ---------------------------------------------------------------- share (users) and contrib merge (maintainers)
+def kyplst_rules(path_rel, data, sidecar):
+    """scripts/nps5_check.py's rules for a list (single zstd frame, size cap, no payload, .verified for these bytes): -> problems."""
+    spec = importlib.util.spec_from_file_location("nps5_check_for_share", os.path.join(HERE, "..", "nps5_check.py"))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m.check_kyplst(path_rel, data, sidecar)
+
+
+def journal_dirs(ctx, extra):
+    """Directories that hold this title's shader + pipeline journals: --from dirs, else rec/*, the cache dirs of every stack key and
+    their verify clones under <scratch>/cache/<id>/."""
+    cands = list(extra)
+    if not extra and os.path.isdir(ctx.root):
+        for dp, dn, _ in os.walk(ctx.root):
+            if os.path.relpath(dp, ctx.root).count(os.sep) >= 3:
+                dn[:] = []; continue
+            cands.append(dp)
+    seen, out = set(), []
+    for d in cands:
+        r = os.path.realpath(d)
+        if r in seen or not (os.path.isfile(os.path.join(d, ctx.tid + ".pipelines.journal")) and os.path.isfile(os.path.join(d, ctx.tid + ".shaders.journal"))):
+            continue
+        seen.add(r); out.append(d)
+    return out
+
+
+def machine_class(environ):
+    try:
+        import hw as hwmod
+        h = hwmod.detect(environ)
+        return (h.get("class") or h.get("chip_key") or "unknown") if h else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def same_version(a, b, what_a, what_b):
+    """A list is for ONE title and ONE app version: other versions have other shaders (their own list)."""
+    if a.get("title") != b.get("title") or a.get("version") != b.get("version"):
+        raise CacheError("%s is for %s %s but %s is for %s %s: lists are per game version, never mixed (a new version gets its own list)" % (
+            what_a, a.get("title"), a.get("version"), what_b, b.get("title"), b.get("version")), 2)
+
+
+def pr_texts(tid, name, ver, new, cls, commit):
+    title = "Shader list: %s %s, +%d pipelines" % (tid, ver, new["pipelines"])
+    body = ("%s\n\n- title / version: %s %s\n- nps5 commit: %s\n- machine class: %s\n- new vs the shipped list: %s\n\n"
+            "- [x] The list holds keys and hashes only: no game code, no game data (`nps5 cache share` verified it against my own copy of the game)\n\n"
+            "AI assistance: <yes / no; if yes which agent, and a person read this>\n" % (title, tid, ver, commit, cls, stage_summary(new)))
+    return title, body
+
+
+def cmd_share(ctx, o, runner):
+    tool = tool_path(ctx)
+    dirs = journal_dirs(ctx, o["from"])
+    if not dirs:
+        raise CacheError("no journals for %s found (play the title with `nps5 run`, or point --from at a folder holding %s.shaders.journal and %s.pipelines.journal)" % (ctx.tid, ctx.tid, ctx.tid))
+    app0 = app0_of(ctx); PRIVATE[:] = [app0, os.path.dirname(app0), os.path.dirname(os.path.dirname(os.path.dirname(ctx.list_path)))]
+    work = os.path.join(ctx.root, "share"); rmtree_inside(work, ctx.root) if os.path.isdir(work) else None; os.makedirs(work)
+    commit = (runmod.commit_of(REPO) or "unknown")[:12]
+    cls = machine_class(ctx.environ)
+    producer = "nps5-share %s %s" % (commit, cls)
+    exp = []
+    for i, d in enumerate(dirs):
+        out = os.path.join(work, "j%d.kyplst" % i)
+        rc, text = runner([tool, "export", "--out", out, "--game", app0, "--shaders", os.path.join(d, ctx.tid + ".shaders.journal"),
+                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer], env=ctx.environ, capture=True)
+        if rc != 0:
+            print("share: could not export journal set %d: %s" % (i + 1, scrub(text.strip().splitlines()[-1] if text.strip() else "?", ctx.environ))); continue
+        exp.append(out)
+    if not exp:
+        raise CacheError("none of the %d journal set(s) could be exported against your game copy" % len(dirs))
+    mine = os.path.join(work, "mine.kyplst")
+    rc, text = runner([tool, "merge", "--out", mine, "--producer", producer] + exp, env=ctx.environ, capture=True)
+    if rc != 0:
+        raise CacheError("merge of your journals failed: %s" % scrub(text.strip().splitlines()[-1] if text.strip() else "?", ctx.environ))
+    mi = parse_info(runner([tool, "info", mine], env=ctx.environ, capture=True)[1])
+    shipped = os.path.isfile(ctx.list_path)
+    si = parse_info(runner([tool, "info", ctx.list_path], env=ctx.environ, capture=True)[1]) if shipped else {}
+    if shipped:
+        same_version(mi, si, "your journals", "the shipped list")
+    union = os.path.join(work, "union.kyplst")
+    if shipped:
+        rc, text = runner([tool, "merge", "--out", union, ctx.list_path, mine], env=ctx.environ, capture=True)
+        if rc != 0:
+            raise CacheError("could not compare with the shipped list: %s" % scrub(text.strip().splitlines()[-1] if text.strip() else "?", ctx.environ))
+        ui = parse_info(runner([tool, "info", union], env=ctx.environ, capture=True)[1])
+    else:
+        ui = mi
+    new = new_counts(si, ui)
+    print("title %s %s, %d journal set(s) from your machine" % (mi.get("title"), mi.get("version"), len(dirs)))
+    print("your list:    %s" % stage_summary(mi))
+    print("shipped list: %s" % (stage_summary(si) if shipped else "none"))
+    print("NEW:          %s" % stage_summary(new))
+    if new["pipelines"] <= 0 and new["permutations"] <= 0 and new["shaders"] <= 0:
+        print("Thanks! Your journals hold nothing the shipped list does not already have: there is nothing to share.")
+        return 0
+    # The contribution: the user's own list. The tool has no `subtract`, so entries already shipped stay in it; the maintainer merge dedupes.
+    h = file_sha(mine)[:8]
+    cdir = os.path.join(os.path.dirname(ctx.list_path), "contrib"); os.makedirs(cdir, exist_ok=True)
+    name = "%s-%s.kyplst" % (time.strftime("%Y-%m-%d", time.gmtime()), h)
+    dest = os.path.join(cdir, name)
+    shutil.copyfile(mine, dest)
+    rel = "games/%s/contrib/%s" % (ctx.tid, name)
+    print("wrote %s (keys and hashes of %d pipelines, %d of them new)" % (rel, mi.get("pipelines", 0), new["pipelines"]))
+    vo = dict(o, quiet=True, list=dest, shaders=[os.path.join(d, ctx.tid + ".shaders.journal") for d in dirs])
+    if cmd_verify_list(ctx, vo, runner) != 0:
+        os.remove(dest); print("share: the list did NOT pass; it was deleted. Nothing to send. Please open an issue with the message above."); return 1
+    with open(dest, "rb") as f: data = f.read()
+    try:
+        with open(dest + ".verified", "rb") as f: side = f.read()
+    except OSError:
+        side = b""
+    bad = kyplst_rules(rel, data, side)
+    if bad:
+        print("share: the repository's list rules reject it:\n  " + "\n  ".join(bad)); return 1
+    print("share: passed the no-game-code proof and the list rules (one zstd frame, size cap, no payload).")
+    ver = mi.get("version")
+    title, body = pr_texts(ctx.tid, name, ver, new, cls, commit)
+    print("\nNEXT STEPS. Send these two files (both small, keys only):\n  %s\n  %s.verified\n" % (rel, rel))
+    print("With git:\n  gh repo fork --remote --remote-name fork   # once\n  git switch -c share-%s-%s\n  git add %s %s.verified\n"
+          "  git commit -m %s\n  git push -u fork HEAD\n  gh pr create --title %s --body-file <(printf '%%s' \"$BODY\")" % (ctx.tid, h, rel, rel, shlex.quote(title), shlex.quote(title)))
+    print("\nWithout git: open a 'Shader list' issue (New issue -> Shader list) and attach both files. PR / issue text:\n---\n%s---" % body)
+    if o.get("pr"):
+        return open_pr(ctx, o, rel, h, title, body, runner)
+    print("(`nps5 cache share %s --pr` does the git / gh steps for you after asking.)" % ctx.tid)
+    return 0
+
+
+def open_pr(ctx, o, rel, h, title, body, runner):
+    if runner(["gh", "auth", "status"], env=ctx.environ, capture=True)[0] != 0:
+        print("share --pr: gh is not logged in (`gh auth login`); use the steps above."); return 1
+    steps = ["gh repo fork --remote --remote-name fork   (skipped if the fork exists)", "git switch -c share-%s-%s" % (ctx.tid, h),
+             "git add %s %s.verified; git commit" % (rel, rel), "git push -u fork share-%s-%s   <- publishes to YOUR fork on GitHub" % (ctx.tid, h),
+             "gh pr create   <- opens a public pull request"]
+    print("\n--pr will run, in %s:\n  %s" % (REPO, "\n  ".join(steps)))
+    ans = (o.get("confirm") or input)("Push and open the pull request? [y/N] ")
+    if ans.strip().lower() not in ("y", "yes"):
+        print("Nothing was pushed or created."); return 0
+    git = lambda *a: runner(["git", "-C", REPO] + list(a), env=ctx.environ, capture=True)
+    runner(["gh", "repo", "fork", "--remote", "--remote-name", "fork"], env=ctx.environ, capture=True)
+    br = "share-%s-%s" % (ctx.tid, h)
+    for cmd in (["switch", "-c", br], ["add", rel, rel + ".verified"], ["commit", "-m", title], ["push", "-u", "fork", br]):
+        rc, text = git(*cmd)
+        if rc != 0:
+            print("share --pr: git %s failed: %s" % (cmd[0], scrub(text.strip()[-300:], ctx.environ))); return 1
+    rc, text = runner(["gh", "pr", "create", "--title", title, "--body", body], env=ctx.environ, capture=True)
+    print(scrub(text.strip(), ctx.environ)); return 0 if rc == 0 else 1
+
+
+def cmd_merge_contrib(ctx, o, runner):
+    tool = tool_path(ctx)
+    if not os.path.isfile(ctx.list_path):
+        raise CacheError("no shipped list to fold into: %s" % ctx.list_path, 2)
+    si = parse_info(runner([tool, "info", ctx.list_path], env=ctx.environ, capture=True)[1])
+    prov = os.path.join(os.path.dirname(ctx.list_path), "pipelines.contrib.tsv")
+    done = set()
+    if os.path.isfile(prov):
+        done = {l.split("\t")[1] for l in open(prov) if l.strip() and not l.startswith("#") and "\t" in l}
+    good = []
+    for c in o["contrib"]:
+        if c.endswith(".verified") or not os.path.isfile(c):
+            continue
+        rel = "games/%s/contrib/%s" % (ctx.tid, os.path.basename(c))
+        data = open(c, "rb").read()
+        try: side = open(c + ".verified", "rb").read()
+        except OSError: side = b""
+        bad = kyplst_rules(rel, data, side)
+        if bad:
+            raise CacheError("%s refused: %s" % (rel, "; ".join(bad)), 2)
+        ci = parse_info(runner([tool, "info", c], env=ctx.environ, capture=True)[1])
+        same_version(ci, si, rel, "the shipped list")
+        good.append((c, ci, hashlib.sha256(data).hexdigest()[:8]))
+    if not good:
+        raise CacheError("no contribution files given (--contrib games/%s/contrib/*.kyplst)" % ctx.tid, 2)
+    out = os.path.join(ctx.root, "merged-contrib.kyplst"); os.makedirs(ctx.root, exist_ok=True)
+    rc, text = runner([tool, "merge", "--out", out, ctx.list_path] + [g[0] for g in good], env=ctx.environ, capture=True)
+    if rc != 0:
+        raise CacheError("merge failed: %s" % scrub(text.strip()[-300:], ctx.environ))
+    ui = parse_info(runner([tool, "info", out], env=ctx.environ, capture=True)[1])
+    print("folded %d contribution(s) into %s %s\n  before: %s\n  after:  %s\n  gained: %s" % (
+        len(good), ui.get("title"), ui.get("version"), stage_summary(si), stage_summary(ui), stage_summary(new_counts(si, ui))))
+    if not o["write"]:
+        print("candidate only (%s); add --write to adopt it" % out); return 0
+    rows = [(c, sha) for c, _, sha in good if sha not in done]
+    shutil.copyfile(out, ctx.list_path + ".tmp"); os.replace(ctx.list_path + ".tmp", ctx.list_path)
+    try: os.remove(ctx.list_path + ".verified")
+    except OSError: pass
+    new_file = not os.path.isfile(prov)
+    with open(prov, "a") as f:
+        if new_file:
+            f.write("# provenance of pipelines.kyplst: one row per folded contribution (date, sha256 prefix, its own counts). No names.\n")
+        for c, sha in rows:
+            ci = next(g[1] for g in good if g[0] == c)
+            f.write("%s\t%s\t%s\n" % (time.strftime("%Y-%m-%d", time.gmtime()), sha, stage_summary(ci)))
+    print("wrote %s; provenance: %d contribution(s) recorded in total (%d new rows); its .verified is removed: run `nps5 cache verify-list %s`, then git rm the folded contrib files" % (
+        ctx.list_path, len(done) + len(rows), len(rows), ctx.tid))
+    return 0
+
+
 def cmd_verify_list(ctx, o, runner):
     lst = o["list"] or ctx.list_path
     if not os.path.isfile(lst):
@@ -351,15 +579,21 @@ def cmd_verify_list(ctx, o, runner):
     tool = tool_path(ctx)
     before = parse_info(runner([tool, "info", ctx.list_path], env=ctx.environ, capture=True)[1]) if os.path.isfile(ctx.list_path) and lst != ctx.list_path else {}
     r = runner([tool, "check", lst, "--game", app0_of(ctx)], env=ctx.environ, capture=True)
-    print(r[1].strip().splitlines()[-1] if r[1].strip() else "check: (no output)")
+    print(scrub(r[1].strip().splitlines()[-1], ctx.environ) if r[1].strip() else "check: (no output)")
     if r[0] != 0:
         print("verify-list: `check` FAILED; do not commit this list"); return 1
     script = os.path.join(REPO, "scripts", "verify-pipeline-list.sh")
     cmd = ["bash", script, lst, app0_of(ctx)] + sum([["%s" % j] for j in o["shaders"]], [])
-    rc = runner(cmd, env=dict(ctx.environ, NPS5_KYPLST_TOOL=tool))
+    if o.get("quiet"):                                     # share: nothing but scrubbed text reaches the terminal
+        rc, text = runner(cmd, env=dict(ctx.environ, NPS5_KYPLST_TOOL=tool), capture=True)
+        print(scrub(text.strip(), ctx.environ))
+    else:
+        rc = runner(cmd, env=dict(ctx.environ, NPS5_KYPLST_TOOL=tool))
     if rc != 0:
         return 1
     after = parse_info(runner([tool, "info", lst], env=ctx.environ, capture=True)[1])
+    if o.get("quiet"):
+        return 0
     print("review block for the PR: %s" % count_diff(before, after))
     return 0
 
@@ -505,19 +739,22 @@ def default_runner(cmd, env=None, capture=False):
 
 
 def parse(argv):
-    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, list=None, shaders=[], **{"from": []})
+    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, list=None, shaders=[], contrib=[], pr=False, confirm=None, **{"from": []})
     pos, i = [], 0
     VAL = {"--scene": "scene", "--from": "from", "--shaders": "shaders", "--secs": "secs", "--list": "list"}
     while i < len(argv):
         a = argv[i]
-        if a in VAL:
+        if a == "--contrib":                       # takes every following non-option word (a shell glob)
+            while i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                o["contrib"].append(argv[i + 1]); i += 1
+        elif a in VAL:
             if i + 1 >= len(argv):
                 raise CacheError("%s needs a value" % a, 2)
             k = VAL[a]; v = argv[i + 1]
             if isinstance(o[k], list): o[k].append(v)
             else: o[k] = v
             i += 1
-        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass"):
+        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass", "--pr"):
             o[{"--dry-run": "dry", "--single-pass": "single"}.get(a, a[2:])] = True
         elif a.startswith("--"):
             raise CacheError("unknown option %s" % a, 2)
@@ -525,13 +762,13 @@ def parse(argv):
             pos.append(a)
         i += 1
     if len(pos) != 2:
-        raise CacheError("usage: nps5 cache record|merge|verify-list|prepare|check|status <id> [options]; see --help", 2)
+        raise CacheError("usage: nps5 cache record|merge|share|verify-list|prepare|check|status <id> [options]; see --help", 2)
     if o["secs"] is not None and not re.fullmatch(r"\d+", o["secs"]):
         raise CacheError("--secs must be a number", 2)
     return pos[0], pos[1], o
 
 
-CMDS = {"record": cmd_record, "merge": cmd_merge, "verify-list": cmd_verify_list, "prepare": cmd_prepare, "check": cmd_check, "status": cmd_status}
+CMDS = {"record": cmd_record, "merge": cmd_merge, "share": cmd_share, "verify-list": cmd_verify_list, "prepare": cmd_prepare, "check": cmd_check, "status": cmd_status}
 
 
 def main(argv, environ=None, runner=default_runner, ctx=None):

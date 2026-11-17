@@ -1,0 +1,54 @@
+name: Shader list
+description: Share the pipelines you found while playing (made by `nps5 cache share`), without git.
+labels: [shader-list]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Run `scripts/nps5 cache share <title id>` after you played: it writes `games/<title id>/contrib/<date>-<hash>.kyplst` and its `.verified` record. Attach both files below (GitHub accepts them if you zip them). They hold keys, hashes and pipeline state only; see [games/README.md](https://github.com/computerguy526/nativeps5/blob/main/games/README.md) ("Share your list").
+        A list is for one game version. Never attach game files, journals, caches or frame dumps.
+  - type: input
+    id: title
+    attributes:
+      label: Title ID and app version
+      description: The same as in the command output, e.g. PPSA21564 01.007.000.
+      placeholder: PPSA21564 01.007.000
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: nps5 commit
+      description: The "nps5 commit" line of the command's text (or `nps5 doctor`).
+    validations:
+      required: true
+  - type: textarea
+    id: counts
+    attributes:
+      label: NEW counts
+      description: Paste the NEW line of the command output.
+      render: text
+      placeholder: "NEW:  shaders 82 (vertex 36, pixel 27, compute 19), permutations 84, pipelines 76"
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: The two files
+      description: Drag the .kyplst and the .kyplst.verified here.
+    validations:
+      required: true
+  - type: checkboxes
+    id: nodata
+    attributes:
+      label: No game data
+      options:
+        - label: The files are the output of `nps5 cache share` as it is. They contain no game files, shader code, journals or caches, and no personal information.
+          required: true
+  - type: input
+    id: ai
+    attributes:
+      label: AI assistance
+      description: "yes / no; if yes, which agent, and confirm a person looked at the output."
+    validations:
+      required: true

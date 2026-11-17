@@ -18,6 +18,15 @@ executable, permutation keys, pipeline state). It comes with `pipelines.kyplst.v
 no-game-code proof (`scripts/verify-pipeline-list.sh <list> <your dump>`); a maintainer reruns the proof before
 taking a list. Compiled caches built from it stay on your machine ([games/README.md](games/README.md)).
 
+**Shader lists.** Share yours with `scripts/nps5 cache share <title id>` (games/README.md, "Share your list"): a PR may add
+only `games/<title id>/contrib/<date>-<hash>.kyplst` plus its `.verified` (made by that command, from your own
+copy of the game and your own runs), and nothing else; the maintainer folds it into `pipelines.kyplst`. Rules: keys,
+hashes and pipeline state only; one title and one app version per file (the header says which; another version
+gets its own list); the `.verified` must belong to exactly those bytes; nothing from the game and no personal
+detail in the file or the PR text; a list made by an agent needs the AI line as for any PR. A file that fails
+`scripts/check.sh` or the proof is not merged and its branch is deleted. People without git attach the two files to a
+"Shader list" issue.
+
 `scripts/check.sh` enforces this mechanically (file types, file magic, paths, size) together with secrets and
 personal paths. Run it before every commit (`scripts/install-hooks.sh` installs it as the pre-commit hook) and
 paste its last line into the PR. A PR that contains game data is closed, and its branch has to be deleted, not
