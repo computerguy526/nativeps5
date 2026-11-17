@@ -1,57 +1,114 @@
 # nativeps5
 
-Static recompilation of PlayStation 5 games to native arm64 macOS programs. The game's x86-64 code is translated
-ahead of time (no JIT, no interpreter), linked against reimplemented system libraries, and drawn through Vulkan on
-Metal (Mesa KosmicKrisp).
+Play your own PlayStation 5 games natively on Apple silicon Macs. The game's x86-64 code is translated ahead of time into a native arm64 macOS program, linked against reimplemented system libraries and drawn through Vulkan on Metal.
 
-**No game data is distributed here, and none is accepted.** You need your own, legally dumped copy of a game you
-own. Nothing in this repository or its component repositories contains game executables, assets, shaders, keys,
-firmware or anything extracted from them, and pull requests that add any are closed ([CONTRIBUTING.md](CONTRIBUTING.md)).
-This project is not affiliated with or endorsed by Sony Interactive Entertainment or any game publisher.
-"PlayStation" and "PS5" are trademarks of their owners.
+It is not an emulator: there is no JIT and no interpreter. Nothing from any game is in this repository or in its component repositories, and the project is not affiliated with Sony Interactive Entertainment or any game publisher. "PlayStation" and "PS5" are trademarks of their owners.
 
-## What is here
+[Games](#games) · [How it fits together](#how-it-fits-together) · [Requirements](#requirements) · [How to play](#how-to-play) · [For developers](#for-developers) · [Credits and licences](#credits-and-licences)
 
-This repository is the entry point: build instructions, contribution rules, the safety and check scripts, the game
-profiles, the KosmicKrisp patch series and offline shader tools. The code lives in three component repositories, each
-a fork that keeps its upstream's licence ([NOTICE](NOTICE), [components.lock](components.lock)):
+## Games
 
-| Component | What it does | Upstream | Licence |
+Each game's note records the tested version and Mac, frame rates, settings and known issues.
+
+| Game | Title ID | Version | Status |
 |---|---|---|---|
-| [`ps5recomp`](https://github.com/computerguy526/nativeps5-recomp) | x86-64 to arm64 translator, runtime, packager (`nps5 build`, `nps5 play`), regression gates | wie-project/PS4Recomp | GPL-2.0 |
-| [`kyty`](https://github.com/computerguy526/nativeps5-kyty) | the GPU back end as a library (`kyty_gpu.dylib`): KytyPS5's renderer on arm64 macOS | Jetsku/KytyPS5 with the AstroHybrid `kyty-hybrid` series | GPL-2.0 |
-| [`anyps5`](https://github.com/computerguy526/nativeps5-anyps5) | the PS5 system libraries, the AGC graphics driver (the second back end) and the runtime's bridge library, built for arm64 macOS | boykopovar/AnyPS5 | GPL-2.0 |
-| `kosmickrisp/` (here) | patch series on Mesa's Vulkan-on-Metal driver: pipeline archive, mesh shaders, MSL optimisations | Mesa | MIT |
-| `host/` (here) | machine guard, run queue helpers, disk cleanup | - | GPL-2.0 |
-| `tools/` (here) | offline shader tools: shaderlab gate, shader x-ray, AGX disassembly statistics | - | GPL-2.0 |
+| [ASTRO BOT](games/PPSA21564/README.md) | `PPSA21564` | 01.007 | Boots; the title screen, the world map and every level tried show a picture, and the controller works. About 28 fps on the world map and 24 fps in the first level on an M4 Pro; 12 to 47 fps depending on the scene. Not finished: about 9 % of world-map runs crash, some effects flicker, nobody has played beyond the start of a level. |
+| [A Game About Digging A Hole](games/PPSA30552/README.md) | `PPSA30552` | not recorded | Second bring-up target, on the AnyPS5 back end; boots, and the menu, intro cutscene and gameplay run. Not finished; see its note. |
 
-Every title run loads all three components: the `anyps5` libraries provide the PS5 system libraries (libkernel,
-libc, pad, audio and about 1,300 other exports), and the Kyty back end replaces the graphics exports only
-([BUILDING.md](BUILDING.md)).
+Frame rates are below the console's in most scenes. A 16 GB Mac will not run an ASTRO BOT level. [games/README.md](games/README.md) explains the per-game profiles.
 
-## Status
+## How it fits together
 
-Two titles are the bring-up targets (title IDs PPSA30552 and PPSA21564); neither is finished. Expect crashes, missing
-pictures and frame rates below the console's. Status per scene is in the game notes ([games/](games/README.md));
-[docs/learnings.md](docs/learnings.md) records what worked, what was tried and failed, and what the work taught, and
-[docs/playbook.md](docs/playbook.md) is the full measured table for the first title.
+One clone of this repository is all you fetch by hand. `scripts/fetch-components.sh` then clones the three component repositories at the commits pinned in [components.lock](components.lock); you never clone them yourself.
 
-Supported hosts: Apple silicon Macs with macOS 26 or later (Metal 4). Development happens on one machine (M4 Pro,
-24 GB); limits and worker counts are derived from RAM and core count for the others, 16 GB is experimental and
-M1/M2 are untested: [docs/reference/hardware.md](docs/reference/hardware.md), `python3 scripts/nps5lib/hw.py doctor`.
+| Component | What it does | Based on | Licence |
+|---|---|---|---|
+| `ps5recomp` ([nativeps5-recomp](https://github.com/computerguy526/nativeps5-recomp)) | the x86-64 to arm64 translator, the runtime and the packager (`nps5 build`) | PS4Recomp | GPL-2.0 |
+| `kyty` ([nativeps5-kyty](https://github.com/computerguy526/nativeps5-kyty)) | the GPU back end, KytyPS5's renderer built as `kyty_gpu.dylib` for arm64 macOS | KytyPS5, with the AstroHybrid `kyty-hybrid` series | GPL-2.0 |
+| `anyps5` ([nativeps5-anyps5](https://github.com/computerguy526/nativeps5-anyps5)) | the PS5 system libraries (kernel, libc, pad, audio and about 1,300 other exports) | AnyPS5 | GPL-2.0 |
+| `kosmickrisp/` (in this repository) | a patch series on Mesa's KosmicKrisp, the Vulkan-on-Metal driver; built from a pinned Mesa commit | Mesa | MIT |
 
-## Start here
+## Requirements
 
-- Build from source: [BUILDING.md](BUILDING.md)
-- Contribute, by hand or with a coding agent: [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md)
-- How it works and what is known: [docs/README.md](docs/README.md) (map), [docs/reference/](docs/reference/README.md)
-  (architecture, frame rate, rendering, shaders, memory, machine safety, profiling), [docs/learnings.md](docs/learnings.md)
-- Something in a log you do not understand: [docs/agents/symptoms.md](docs/agents/symptoms.md)
-- Per-game profiles (constants, patches, routes, pipeline list): [games/](games/README.md)
-- Before every commit: `scripts/check.sh` (game data, secrets, personal paths); `scripts/install-hooks.sh` makes it a
-  pre-commit hook
+- An Apple silicon Mac with macOS 26 or later (Metal 4). Verified on a MacBook Pro with an M4 Pro and 24 GB of RAM, macOS 26.6. Macs with 24 GB or more should work; 16 GB is experimental; M1 and M2 are untested ([hardware](docs/reference/hardware.md)).
+- Xcode 26 or newer, or at least the Command Line Tools; the shader tools need Xcode's `metal` compiler (`xcodebuild -downloadComponent MetalToolchain`).
+- [Homebrew](https://brew.sh) with the packages listed in [BUILDING.md](BUILDING.md) (git, go, cmake, ninja, meson, llvm, python and others), and an arm64 Python 3 for the Mesa build.
+- About 7 GB of free disk for the sources and build trees, and tens of GB more for one title's translated code and caches, on a disk outside iCloud-synced folders.
+- **Your own, legally dumped copy of a game you own**, decrypted and extracted as it sits on the console. No game data is distributed here and none is accepted. How you dump your console is outside this project. Keep the dump read-only; nothing here writes to it.
 
-## Licence
+## How to play
 
-GPL-2.0-only, except `kosmickrisp/` (MIT, as Mesa). Third-party work and the projects this one learned from are
-credited in [NOTICE](NOTICE).
+From a fresh Mac to a running game. The steps are CPU only until the last one. The full commands, times and what was verified are in [BUILDING.md](BUILDING.md); this is the short path for ASTRO BOT.
+
+1. **Install the tools** (once): Xcode or the Command Line Tools, Homebrew, and the `brew install` line from [BUILDING.md](BUILDING.md), step 0.
+2. **Get the project.** One clone, then one script that fetches and pins the three components:
+
+   ```sh
+   mkdir nativeps5-ws && cd nativeps5-ws
+   git clone https://github.com/computerguy526/nativeps5 && cd nativeps5
+   cp nps5.conf.example nps5.conf       # set NPS5_DUMPS_DIR to the folder that holds your dump
+   scripts/fetch-components.sh          # clones ps5recomp, kyty and anyps5 next to this checkout
+   ```
+
+3. **Check the Mac.** After building the translator (next step), `scripts/nps5 doctor` lists what the toolkit still misses; `python3 scripts/nps5lib/hw.py doctor` prints this Mac's class and limits.
+4. **Build the components** (about 40 minutes in total on the tested Mac):
+
+   ```sh
+   . scripts/nps5-env.sh                # in every new shell
+   scripts/build.sh recomp
+   scripts/build.sh kosmickrisp
+   scripts/build.sh anyps5
+   scripts/build.sh kyty
+   ```
+
+5. **Translate your dump** (about 11 minutes and several GB of scratch for ASTRO BOT):
+
+   ```sh
+   ../ps5recomp/bin/nps5 build "$NPS5_DUMPS_DIR/<your dump folder>" -o "$NPS5_SCRATCH/apps" -j 4
+   cp titles/example.env titles/PPSA21564.env      # set BIN (your translated program), APP0 (your dump), GPU=kyty
+   ```
+
+6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's 1,260 pipelines once, about 90 seconds on an M4 Pro, so the first visit to a scene does not stutter:
+
+   ```sh
+   scripts/nps5 cache prepare PPSA21564
+   scripts/nps5 cache status PPSA21564    # says whether the caches match the current build
+   ```
+
+7. **Run.** Keep `ENV="NPS5_PERF=2"` in `titles/PPSA21564.env`. A binary you translated yourself needs `--patch dr`. A run without `--scene` starts the game normally; a run is capped at 90 seconds unless you give a reason:
+
+   ```sh
+   NPS5_RUN_REASON="playing" scripts/nps5 run PPSA21564 --patch dr --secs 3600
+   ```
+
+   `--scene worldmap` skips the intro; `--dry-run` prints the environment and command and starts nothing. The profile's canonical settings are in [games/PPSA21564/README.md](games/PPSA21564/README.md). It also lists the optional binary patches, including `nt`, which always takes the non-tiled lighting path and skips the tiled-lighting compute kernels; that changes the picture and has not been reviewed.
+8. **Quit** by closing the window. This exits at once, without flushing the shader caches, so pipelines compiled since the last periodic save are lost. Only one title runs at a time, and `nps5 run` refuses to start while another GPU process is running.
+
+`nps5 run` sets a memory limit from your RAM, silences audio by default and scrubs the environment. These rules exist because breaking them has rebooted the development machine; read "Running safely" in [AGENTS.md](AGENTS.md) before doing GPU work of your own.
+
+If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an issue with the command and its output.
+
+## For developers
+
+- [BUILDING.md](BUILDING.md): the build, with the table of what was verified from fresh clones.
+- [AGENTS.md](AGENTS.md): rules for running things without taking the machine down; for people and coding agents.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how a change gets in, what evidence a PR needs, and the rule that no game data is accepted.
+- [docs/README.md](docs/README.md): the map of the documentation; [docs/reference/](docs/reference/README.md) covers architecture, frame rate, rendering, shaders, memory, machine safety and profiling. [docs/learnings.md](docs/learnings.md) and [docs/playbook.md](docs/playbook.md) record what was tried, what worked and what failed.
+- Per-game profiles, pipeline lists and benchmark routes: [games/](games/README.md). Commands: `nps5 doctor | build | patch | run | cache | bench | regress | analyze | report`.
+- Before every commit run `scripts/check.sh` (game data, secrets, personal paths); `scripts/install-hooks.sh` makes it a pre-commit hook.
+
+**AI assistance.** Pull requests written by hand or with a coding agent are welcome on the same terms. Fill in the "AI assistance" line of the pull request template for every PR, name the agent if you used one, and confirm that a person read the diff and the evidence. A person decides what gets in. Details in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Questions and bugs: open an issue or a discussion on this repository.
+
+## Credits and licences
+
+This repository is GPL-2.0-only ([LICENSE](LICENSE)), except `kosmickrisp/`, which is MIT like Mesa. The three components are forks that keep the licence of their upstream: PS4Recomp, KytyPS5 and AnyPS5 (all GPL-2.0), each with its own NOTICE.
+
+- [PS4Recomp](https://github.com/wie-project/PS4Recomp): the translator and runtime this project is built on.
+- [KytyPS5](https://github.com/Jetsku/KytyPS5) (Kyty's original code by InoriRus is MIT) and the AstroHybrid `kyty-hybrid` patch series: running Kyty's renderer inside a natively translated program is that author's idea, and credit for that work belongs to them.
+- [AnyPS5](https://github.com/boykopovar/AnyPS5): the PS5 system libraries.
+- [Mesa](https://gitlab.freedesktop.org/mesa/mesa) and its KosmicKrisp driver; the patches here are MIT.
+- [NXNative](https://github.com/seedds/nxnative) (MIT): read as a reference, with a few ideas reused with attribution; this README and the contribution rules follow the shape of its.
+
+Further credits (FEX-Emu, RPCS3, ARMSX2/3, shadPS4 and others) are in [NOTICE](NOTICE).

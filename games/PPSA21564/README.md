@@ -11,6 +11,16 @@ from here.
   its own temporal upscaler and dynamic resolution; video through the system video player.
 - **Back end:** `kyty` (`GPU=kyty` in `titles/PPSA21564.env`). The `anyps5` back end runs the title 3-4 times
   slower ([architecture](../../docs/reference/architecture.md), section 3).
+- **Tested:** version 01.007 on a MacBook Pro Mac16,8 (M4 Pro, 24 GB), macOS 26.6, at the component commits of
+  [components.lock](../../components.lock) (first public release). Frame time at that release, paired runs, p50:
+  world map 36.0 ms (about 28 fps), `hoover_beach` 41.1 ms (about 24 fps; p95 122 ms, bimodal between runs).
+  Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
+  Patches), shader caches prepared from the shipped pipeline list.
+- **Known issues at release:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not
+  diagnosed); the flower and turtle effects flicker in some places (a fix exists and is not in this release);
+  PlayStation symbols look garbled in the warp from the world map into a level; `hoover_beach` has a read-fault
+  storm in about half the runs; closing the window exits at once without flushing the shader caches. Details in
+  "Known issues" below.
 - **Status as of 2026-11-17** on a Mac16,8 (M4 Pro, 24 GB), macOS 26.6: boots; title, world map and every level
   tried show a picture; controller works; 12-47 fps depending on the scene. [validated.tsv](validated.tsv) has the
   component commits.
@@ -113,6 +123,10 @@ up after 31 updates with room, levels 1080p / 1368p / 1872p / 2160p, timers read
 | `volcano_mountain` is very dark | | unknown; may be right | Compare with a console capture |
 | Title frame time is bimodal with record-time clocks | title | the dynamic-resolution feedback loop | Gone with `cbtime`; do not use 36-40 fps figures from old notes as a baseline |
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
+| About 9 % of world-map runs end in a guest bus error (SIGBUS) | world map | not diagnosed | Open, parked at the first release |
+| Flower and turtle effects flicker | some places in levels | not fully diagnosed; a candidate fix (LOD handling) exists and is not in the first release | Open |
+| Closing the window exits at once, without the renderer teardown and the on-exit cache flush | any run | the window-close path | Pipelines compiled since the last periodic cache save are lost |
+| `hoover_beach` has a fluid-simulation read-fault storm in about half the runs | `hoover_beach` | page-fault handling for the game's fluid simulation | A switch exists (`KYTY_READ_FAULT_PUBLISHED_FRAME_BURST`) and is off by default |
 
 ## How to reach a scene
 
