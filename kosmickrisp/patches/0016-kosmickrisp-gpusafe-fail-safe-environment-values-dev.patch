@@ -1,0 +1,758 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 14:49:31 +0000
+Subject: [PATCH] kosmickrisp: gpusafe: fail-safe environment values, device
+ teardown, uptime clock, clamp after predication
+
+- Environment numbers go through kk_safe_parse_num: a value that is not a
+  plain number inside its range keeps the default and is reported. Before,
+  atof() turned a typo into 0, which switched the guard off, and an
+  out-of-range value reached an integer conversion.
+- kk_safe_device_destroy: the clamp counter and the loop-state chunks live in
+  one device's residency set. They are released with that device and the next
+  device gets its own; a second live device is refused the state instead of
+  being handed addresses that are not resident for it. The device pointer used
+  by the OOM dump is cleared.
+- The watchdog measures awake time (CLOCK_UPTIME_RAW): a commit in flight when
+  the machine sleeps is not overdue on wake.
+- Indirect dispatches predicated by conditional rendering are clamped too; the
+  direct and indirect paths log their first suppression independently.
+- The GPU-free tests of kk_safety_core.h live in vulkan/tests and are
+  registered with meson (suite kosmickrisp).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_dispatch.c      |  40 ++--
+ src/kosmickrisp/vulkan/kk_device.c            |   4 +
+ src/kosmickrisp/vulkan/kk_safety.c            | 173 ++++++++++++----
+ src/kosmickrisp/vulkan/kk_safety.h            |   5 +
+ src/kosmickrisp/vulkan/kk_safety_core.h       |  40 +++-
+ src/kosmickrisp/vulkan/meson.build            |  11 +
+ .../vulkan/tests/kk_safety_core2_test.c       | 193 ++++++++++++++++++
+ src/kosmickrisp/vulkan/tests/kk_safety_test.c |  63 ++++++
+ 8 files changed, 466 insertions(+), 63 deletions(-)
+ create mode 100644 src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c
+ create mode 100644 src/kosmickrisp/vulkan/tests/kk_safety_test.c
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+index a489310..5214539 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+@@ -164,6 +164,7 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+                     (uint32_t)local_size.x, (uint32_t)local_size.y, (uint32_t)local_size.z);
+ 
+    mtl_compute_encoder *encoder = cs_get_compute(cmd);
++   uint64_t addr = pInfo->addressRange.address;
+    if (cmd->state.cond_render.enabled) {
+       struct kk_ptr patched =
+          kk_pool_alloc(cmd, sizeof(VkDispatchIndirectCommand), 4u);
+@@ -171,28 +172,25 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+          return;
+       }
+ 
+-      kk_predicate_compute(cmd, patched.gpu, pInfo->addressRange.address);
++      kk_predicate_compute(cmd, patched.gpu, addr);
++      addr = patched.gpu;
++   }
+ 
+-      /* Flush compute state after predication dispatch */
+-      if (!kk_flush_compute_state(cmd))
+-         return;
+-      mtl_dispatch_threadgroups_with_indirect_buffer(encoder, patched.gpu,
+-                                                     local_size);
+-   } else {
+-      uint64_t addr = pInfo->addressRange.address;
+-      uint32_t limit = kk_safe_dispatch_limit();
+-      if (limit) {
+-         /* nps5 gpusafe: clamp GPU-written counts (one 1-thread dispatch) */
+-         struct kk_ptr clamped = kk_pool_alloc(cmd, sizeof(VkDispatchIndirectCommand), 4u);
+-         uint64_t counter = kk_safe_clamp_counter_addr(kk_cmd_buffer_device(cmd));
+-         if (likely(clamped.gpu != 0 && counter != 0)) {
+-            struct kk_grid grid = kk_grid_1d(1u);
+-            libkk_clamp_indirect_dispatch(cmd, grid, false, clamped.gpu, addr, counter, limit);
+-            addr = clamped.gpu;
+-         }
++   /* nps5 gpusafe: clamp GPU-written counts (one 1-thread dispatch), also
++    * after predication: the predicate copies the counts through. */
++   uint32_t limit = kk_safe_dispatch_limit();
++   if (limit) {
++      struct kk_ptr clamped = kk_pool_alloc(cmd, sizeof(VkDispatchIndirectCommand), 4u);
++      uint64_t counter = kk_safe_clamp_counter_addr(kk_cmd_buffer_device(cmd));
++      if (likely(clamped.gpu != 0 && counter != 0)) {
++         struct kk_grid grid = kk_grid_1d(1u);
++         libkk_clamp_indirect_dispatch(cmd, grid, false, clamped.gpu, addr, counter, limit);
++         addr = clamped.gpu;
+       }
+-      if (!kk_flush_compute_state(cmd))
+-         return;
+-      mtl_dispatch_threadgroups_with_indirect_buffer(encoder, addr, local_size);
+    }
++
++   /* Flush compute state after the helper dispatches */
++   if (!kk_flush_compute_state(cmd))
++      return;
++   mtl_dispatch_threadgroups_with_indirect_buffer(encoder, addr, local_size);
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_device.c b/src/kosmickrisp/vulkan/kk_device.c
+index bde824e..65a2976 100644
+--- a/src/kosmickrisp/vulkan/kk_device.c
++++ b/src/kosmickrisp/vulkan/kk_device.c
+@@ -15,6 +15,7 @@
+ #include "kk_image_view.h"
+ #include "kk_instance.h"
+ #include "kk_physical_device.h"
++#include "kk_safety.h"
+ #include "kk_shader.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+@@ -393,6 +394,9 @@ kk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
+       dev->has_queue = false;
+    }
+ 
++   /* nps5 gpusafe: guard buffers of this device, before its residency set goes */
++   kk_safe_device_destroy(dev);
++
+    /* Release the residency set last once all BOs are released. */
+    mtl_release(dev->residency_set.handle);
+    simple_mtx_destroy(&dev->residency_set.mutex);
+diff --git a/src/kosmickrisp/vulkan/kk_safety.c b/src/kosmickrisp/vulkan/kk_safety.c
+index f9a1c0e..0b5955d 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.c
++++ b/src/kosmickrisp/vulkan/kk_safety.c
+@@ -44,7 +44,7 @@ struct kk_safe_token {
+ static struct kk_safe_slot g_ring[KK_SAFE_RING];
+ static _Atomic uint64_t g_seq;
+ static _Atomic int g_halted;
+-static struct kk_device *g_dev;
++static struct kk_device *_Atomic g_dev; /* the device that committed last; NULL after its destroy */
+ static pthread_once_t g_once = PTHREAD_ONCE_INIT;
+ static double g_wd_s = 4.0;
+ static bool g_wd_on = true, g_error_exit = true, g_wired_on = true;
+@@ -54,10 +54,12 @@ static unsigned g_oom_max = 32;
+ static uint64_t g_oom_window_ns = 60ull * 1000000000ull;
+ static pthread_mutex_t g_oom_lock = PTHREAD_MUTEX_INITIALIZER;
+ static struct kk_safe_window g_oom;
+-static struct kk_bo *g_counter_bo;
++static struct kk_bo *g_counter_bo;      /* under g_counter_lock */
++static const void *g_counter_dev;       /* device whose residency set holds it */
+ static pthread_mutex_t g_counter_lock = PTHREAD_MUTEX_INITIALIZER;
+ static _Atomic uint64_t g_last_wired_check;
+-static bool g_clamp_logged;
++static bool g_clamp_logged;             /* indirect path: watchdog thread and device destroy, under g_counter_lock */
++static _Atomic int g_clamp_direct_logged, g_clamp_other_dev_logged;
+ 
+ /* loopcap */
+ #define KK_LOOP_CHUNK_SLOTS 4096u
+@@ -66,6 +68,8 @@ static struct kk_bo *g_loop_chunk[KK_LOOP_MAX_CHUNKS];
+ static unsigned g_loop_chunks;
+ static uint32_t *g_loop_free;
+ static unsigned g_loop_nfree;
++static const void *g_loop_dev; /* device whose residency set holds the chunks; under g_loop_lock */
++static bool g_loop_orphaned;   /* states were still in use at device destroy: the pool is closed */
+ static pthread_mutex_t g_loop_lock = PTHREAD_MUTEX_INITIALIZER;
+ static struct kk_safe_keyset g_loop_reported;
+ static _Atomic uint64_t g_loop_hits, g_loop_aborts;
+@@ -87,18 +91,35 @@ static _Atomic int g_oom_dumped;
+ static uint64_t
+ now_ns(void)
+ {
++   /* Time the machine was awake: CLOCK_MONOTONIC goes on during system sleep on macOS, and a
++    * commit in flight when the lid closes must not look overdue on wake. */
+    struct timespec ts;
++#ifdef CLOCK_UPTIME_RAW
++   clock_gettime(CLOCK_UPTIME_RAW, &ts);
++#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
++#endif
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+ }
+ 
++/* A value that is not a number inside [lo, hi] keeps the default and is reported: a typo never
++ * switches a guard off (kk_safe_parse_num). */
+ static double
+-env_d(const char *a, const char *b, double def)
++env_d(const char *a, const char *b, double def, double lo, double hi)
+ {
+-   const char *e = getenv(a);
+-   if (!e && b)
++   const char *name = a, *e = getenv(a);
++   if (!e && b) {
+       e = getenv(b);
+-   return e && *e ? atof(e) : def;
++      name = b;
++   }
++   if (!e || !*e)
++      return def;
++   double v;
++   if (!kk_safe_parse_num(e, lo, hi, &v)) {
++      fprintf(stderr, "[kk-safe] %s: not a number in [%g, %g], ignored; using the default %g\n", name, lo, hi, def);
++      return def;
++   }
++   return v;
+ }
+ 
+ static void
+@@ -197,14 +218,16 @@ dump_memory(const char *why)
+ {
+    if (!oom_dump_on())
+       return;
+-   uint64_t cur = g_dev ? mtl_device_current_allocated_size(g_dev->mtl_handle) : 0;
+-   uint64_t rec = g_dev ? mtl_device_recommended_max_working_set_size(g_dev->mtl_handle) : 0;
++   /* Called from a completion handler of this device's queue, which device destroy waits for. */
++   struct kk_device *dev = atomic_load(&g_dev);
++   uint64_t cur = dev ? mtl_device_current_allocated_size(dev->mtl_handle) : 0;
++   uint64_t rec = dev ? mtl_device_recommended_max_working_set_size(dev->mtl_handle) : 0;
+    uint64_t rs_bytes = 0, rs_n = 0;
+-   if (g_dev) {
+-      simple_mtx_lock(&g_dev->residency_set.mutex);
+-      rs_bytes = mtl_residency_set_allocated_size(g_dev->residency_set.handle);
+-      rs_n = mtl_residency_set_allocation_count(g_dev->residency_set.handle);
+-      simple_mtx_unlock(&g_dev->residency_set.mutex);
++   if (dev) {
++      simple_mtx_lock(&dev->residency_set.mutex);
++      rs_bytes = mtl_residency_set_allocated_size(dev->residency_set.handle);
++      rs_n = mtl_residency_set_allocation_count(dev->residency_set.handle);
++      simple_mtx_unlock(&dev->residency_set.mutex);
+    }
+    fprintf(stderr,
+            "[kk-safe] [RED] %s: Metal allocated %llu MiB, recommended working set %llu MiB; residency set %llu allocations, %llu MiB\n",
+@@ -250,6 +273,12 @@ loop_slot_alloc(struct kk_device *dev, uint32_t *slot)
+ {
+    bool ok = false;
+    pthread_mutex_lock(&g_loop_lock);
++   /* The chunks live in one device's residency set: another device gets no state (its guarded
++    * dispatches are skipped and logged) rather than an address that is not resident for it. */
++   if (g_loop_orphaned || !kk_safe_owner_claim(&g_loop_dev, dev)) {
++      pthread_mutex_unlock(&g_loop_lock);
++      return false;
++   }
+    if (!g_loop_nfree && g_loop_chunks < KK_LOOP_MAX_CHUNKS) {
+       if (!g_loop_free)
+          g_loop_free = malloc(sizeof(uint32_t) * KK_LOOP_CHUNK_SLOTS * KK_LOOP_MAX_CHUNKS);
+@@ -415,11 +444,17 @@ watchdog_main(void *arg)
+    for (;;) {
+       struct timespec ts = {0, 100 * 1000 * 1000};
+       nanosleep(&ts, NULL);
+-      if (g_counter_bo && !g_clamp_logged && *(volatile uint32_t *)g_counter_bo->cpu) {
+-         g_clamp_logged = true;
+-         fprintf(stderr,
+-                 "[kk-safe] dispatch clamp: an indirect dispatch above %u threadgroups was suppressed (logged once; %u so far)\n",
+-                 g_clamp, *(volatile uint32_t *)g_counter_bo->cpu);
++      {
++         /* under the lock: device destroy frees the counter */
++         pthread_mutex_lock(&g_counter_lock);
++         uint32_t suppressed = g_counter_bo && !g_clamp_logged ? *(volatile uint32_t *)g_counter_bo->cpu : 0;
++         if (suppressed)
++            g_clamp_logged = true;
++         pthread_mutex_unlock(&g_counter_lock);
++         if (suppressed)
++            fprintf(stderr,
++                    "[kk-safe] dispatch clamp: an indirect dispatch above %u threadgroups was suppressed (logged once; %u so far)\n",
++                    g_clamp, suppressed);
+       }
+       if (!g_wd_on)
+          continue;
+@@ -455,19 +490,20 @@ watchdog_main(void *arg)
+ static void
+ init_once(void)
+ {
+-   g_wd_s = env_d("KK_GPU_WATCHDOG_S", "KYTY_GPU_WATCHDOG_S", 4.0);
++   g_wd_s = env_d("KK_GPU_WATCHDOG_S", "KYTY_GPU_WATCHDOG_S", 4.0, 0.0, 86400.0);
+    g_wd_on = g_wd_s > 0.0;
+-   g_clamp = (uint32_t)env_d("KK_DISPATCH_CLAMP", NULL, 4194304.0);
+-   g_error_exit = env_d("KK_QUEUE_ERROR_EXIT", NULL, 1) != 0;
+-   g_oom_max = (unsigned)env_d("KK_OOM_MAX", NULL, 32);
+-   g_oom_window_ns = (uint64_t)(env_d("KK_OOM_WINDOW_S", NULL, 60) * 1e9);
+-   g_wired_on = env_d("KK_WIRED_GUARD", NULL, 1) != 0;
+-   g_test_lost = (uint64_t)env_d("KK_TEST_GPU_LOST", NULL, 0);
+-   g_test_oom = (uint64_t)env_d("KK_TEST_OOM", NULL, 0);
+-   if (g_dev && g_wired_on) {
+-      double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0);
++   g_clamp = (uint32_t)env_d("KK_DISPATCH_CLAMP", NULL, 4194304.0, 0.0, 4294967295.0);
++   g_error_exit = env_d("KK_QUEUE_ERROR_EXIT", NULL, 1, 0, 1) != 0;
++   g_oom_max = (unsigned)env_d("KK_OOM_MAX", NULL, 32, 1, KK_SAFE_OOM_MAX);
++   g_oom_window_ns = (uint64_t)(env_d("KK_OOM_WINDOW_S", NULL, 60, 0.001, 86400.0) * 1e9);
++   g_wired_on = env_d("KK_WIRED_GUARD", NULL, 1, 0, 1) != 0;
++   g_test_lost = (uint64_t)env_d("KK_TEST_GPU_LOST", NULL, 0, 0, 1e15);
++   g_test_oom = (uint64_t)env_d("KK_TEST_OOM", NULL, 0, 0, 1e15);
++   struct kk_device *dev0 = atomic_load(&g_dev);
++   if (dev0 && g_wired_on) {
++      double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0, 0, 1e9);
+       g_wired_limit = mb > 0 ? (uint64_t)mb << 20
+-                             : kk_safe_default_limit(mtl_device_recommended_max_working_set_size(g_dev->mtl_handle));
++                             : kk_safe_default_limit(mtl_device_recommended_max_working_set_size(dev0->mtl_handle));
+    }
+    /* keep the thread even with the watchdog off: it also reports the dispatch clamp counter */
+    pthread_t th;
+@@ -497,8 +533,7 @@ kk_safe_direct_dispatch_blocked(uint32_t x, uint32_t y, uint32_t z)
+ {
+    if (!kk_safe_groups_exceed(x, y, z, kk_safe_dispatch_limit()))
+       return false;
+-   if (!g_clamp_logged) {
+-      g_clamp_logged = true;
++   if (!atomic_exchange(&g_clamp_direct_logged, 1)) {
+       fprintf(stderr, "[kk-safe] dispatch clamp: direct dispatch %ux%ux%u above %u threadgroups suppressed (logged once)\n",
+               x, y, z, g_clamp);
+    }
+@@ -509,18 +544,75 @@ uint64_t
+ kk_safe_clamp_counter_addr(struct kk_device *dev)
+ {
+    pthread_mutex_lock(&g_counter_lock);
+-   if (!g_counter_bo) {
+-      struct kk_bo *bo = NULL;
+-      if (kk_alloc_bo(dev, &dev->vk.base, 16, 16, &bo, KK_MEM_CMD_POOL) == VK_SUCCESS) {
+-         memset(bo->cpu, 0, 16);
+-         g_counter_bo = bo;
++   uint64_t a = 0;
++   /* The counter lives in one device's residency set: only that device may write to it. */
++   if (kk_safe_owner_claim(&g_counter_dev, dev)) {
++      if (!g_counter_bo) {
++         struct kk_bo *bo = NULL;
++         if (kk_alloc_bo(dev, &dev->vk.base, 16, 16, &bo, KK_MEM_CMD_POOL) == VK_SUCCESS) {
++            memset(bo->cpu, 0, 16);
++            g_counter_bo = bo;
++         }
+       }
++      a = g_counter_bo ? g_counter_bo->gpu : 0;
++      if (!a)
++         kk_safe_owner_release(&g_counter_dev, dev);
++   } else if (!atomic_exchange(&g_clamp_other_dev_logged, 1)) {
++      fprintf(stderr, "[kk-safe] dispatch clamp: a second device is live; its indirect dispatches are not clamped (logged once)\n");
+    }
+-   uint64_t a = g_counter_bo ? g_counter_bo->gpu : 0;
+    pthread_mutex_unlock(&g_counter_lock);
+    return a;
+ }
+ 
++void
++kk_safe_device_destroy(struct kk_device *dev)
++{
++   struct kk_device *expect = dev;
++   atomic_compare_exchange_strong(&g_dev, &expect, NULL);
++
++   pthread_mutex_lock(&g_counter_lock);
++   struct kk_bo *counter = NULL;
++   if (kk_safe_owner_release(&g_counter_dev, dev)) {
++      counter = g_counter_bo;
++      g_counter_bo = NULL;
++      g_clamp_logged = false;
++   }
++   pthread_mutex_unlock(&g_counter_lock);
++   if (counter)
++      kk_destroy_bo(dev, counter);
++
++   /* Loop states: every command buffer of the device is gone and its queue is finished, so all
++    * states are free once the last completion handler returned. Wait briefly for those; if a state
++    * is still out, keep the buffers (a handler may still read them) and close the pool. */
++   struct kk_bo *chunks[KK_LOOP_MAX_CHUNKS];
++   for (unsigned tries = 0; tries < 200; tries++) {
++      pthread_mutex_lock(&g_loop_lock);
++      if (g_loop_dev != dev || g_loop_orphaned) {
++         pthread_mutex_unlock(&g_loop_lock);
++         return;
++      }
++      if (g_loop_nfree == g_loop_chunks * KK_LOOP_CHUNK_SLOTS) {
++         unsigned n = g_loop_chunks;
++         memcpy(chunks, g_loop_chunk, n * sizeof(chunks[0]));
++         g_loop_chunks = 0;
++         g_loop_nfree = 0;
++         kk_safe_owner_release(&g_loop_dev, dev);
++         pthread_mutex_unlock(&g_loop_lock);
++         for (unsigned i = 0; i < n; i++)
++            kk_destroy_bo(dev, chunks[i]);
++         return;
++      }
++      pthread_mutex_unlock(&g_loop_lock);
++      struct timespec ts = {0, 10 * 1000 * 1000};
++      nanosleep(&ts, NULL);
++   }
++   pthread_mutex_lock(&g_loop_lock);
++   g_loop_orphaned = true;
++   pthread_mutex_unlock(&g_loop_lock);
++   fprintf(stderr, "[kk-safe] [RED] loop cap: loop states still in use at device destroy; the pool is closed, "
++                   "guarded compute dispatches of later devices are skipped\n");
++}
++
+ bool
+ kk_safe_halted(void)
+ {
+@@ -531,15 +623,14 @@ struct kk_safe_token *
+ kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd)
+ {
+    struct kk_device *dev = kk_queue_device(queue);
+-   if (!g_dev)
+-      g_dev = dev;
++   atomic_store(&g_dev, dev);
+    pthread_once(&g_once, init_once);
+ 
+    /* The guards may have been initialized by a dispatch recorded before the first commit, when
+     * no device was known yet: the residency limit is then set here. */
+    static _Atomic int wired_set;
+    if (g_wired_on && !g_wired_limit && !atomic_exchange(&wired_set, 1)) {
+-      double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0);
++      double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0, 0, 1e9);
+       g_wired_limit = mb > 0 ? (uint64_t)mb << 20
+                              : kk_safe_default_limit(mtl_device_recommended_max_working_set_size(dev->mtl_handle));
+       fprintf(stderr, "[kk-safe] wired limit %llu MiB\n", (unsigned long long)(g_wired_limit >> 20));
+diff --git a/src/kosmickrisp/vulkan/kk_safety.h b/src/kosmickrisp/vulkan/kk_safety.h
+index 81fca6e..57748e8 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.h
++++ b/src/kosmickrisp/vulkan/kk_safety.h
+@@ -18,6 +18,11 @@ bool kk_safe_direct_dispatch_blocked(uint32_t x, uint32_t y, uint32_t z);
+ /* GPU address of the device-wide 16-byte clamp counter (created lazily; 0 on failure). */
+ uint64_t kk_safe_clamp_counter_addr(struct kk_device *dev);
+ 
++/* Device destroy (after the queue finished, before the residency set is released): forgets the
++ * device and frees the guard buffers that live in its residency set, so the next device starts
++ * with its own. */
++void kk_safe_device_destroy(struct kk_device *dev);
++
+ /* True once the watchdog or an error guard stopped the process: no new submissions. */
+ bool kk_safe_halted(void);
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_safety_core.h b/src/kosmickrisp/vulkan/kk_safety_core.h
+index 0364cf4..5132078 100644
+--- a/src/kosmickrisp/vulkan/kk_safety_core.h
++++ b/src/kosmickrisp/vulkan/kk_safety_core.h
+@@ -1,6 +1,6 @@
+ /*
+  * nps5 gpusafe: pure, dependency-free logic of the KK machine-safety guards, so it can be unit
+- * tested offline (work/s3/kk-safe/test/kk_safety_test.c) without Metal or Mesa headers.
++ * tested offline (tests/kk_safety_test.c) without Metal or Mesa headers.
+  * SPDX-License-Identifier: MIT
+  */
+ #ifndef KK_SAFETY_CORE_H
+@@ -8,8 +8,46 @@
+ 
+ #include <stdbool.h>
+ #include <stdint.h>
++#include <stdlib.h>
+ #include <string.h>
+ 
++/* ---- environment numbers. True and *out set only for a plain finite number inside [lo, hi] with
++ * nothing after it. Anything else (empty, text, "4s", nan, out of range) is refused and the caller
++ * keeps its default: a typo must never switch a guard off, and no out-of-range value reaches an
++ * integer conversion. */
++static inline bool
++kk_safe_parse_num(const char *text, double lo, double hi, double *out)
++{
++   if (!text || !*text)
++      return false;
++   char *end = NULL;
++   double v = strtod(text, &end);
++   if (end == text || *end != 0 || !(v >= lo && v <= hi)) /* !(..) also refuses NaN */
++      return false;
++   *out = v;
++   return true;
++}
++
++/* ---- device-bound state (clamp counter, loop-state pool): the buffers live in one device's
++ * residency set, so only that device may use them. claim: true when `dev` owns the state now
++ * (first claim, or it already did); false while another device owns it. release: true when `dev`
++ * was the owner (the caller then frees the buffers before the device goes away). */
++static inline bool
++kk_safe_owner_claim(const void **owner, const void *dev)
++{
++   if (*owner == NULL)
++      *owner = dev;
++   return *owner == dev;
++}
++static inline bool
++kk_safe_owner_release(const void **owner, const void *dev)
++{
++   if (*owner != dev || dev == NULL)
++      return false;
++   *owner = NULL;
++   return true;
++}
++
+ /* ---- dispatch clamp: true when x*y*z threadgroups exceed limit (limit 0 = clamp off). No overflow. */
+ static inline bool
+ kk_safe_groups_exceed(uint32_t x, uint32_t y, uint32_t z, uint32_t limit)
+diff --git a/src/kosmickrisp/vulkan/meson.build b/src/kosmickrisp/vulkan/meson.build
+index c4425cb..c080d70 100644
+--- a/src/kosmickrisp/vulkan/meson.build
++++ b/src/kosmickrisp/vulkan/meson.build
+@@ -219,3 +219,14 @@ kosmickrisp_icd = custom_target(
+ )
+ 
+ devenv.append('VK_DRIVER_FILES', kosmickrisp_icd.full_path())
++
++# nps5 gpusafe: GPU-free unit tests of the pure guard logic (kk_safety_core.h)
++if with_tests
++  foreach t : ['kk_safety_test', 'kk_safety_core2_test']
++    test(
++      t,
++      executable(t, files('tests/' + t + '.c'), build_by_default : false),
++      suite : ['kosmickrisp'],
++    )
++  endforeach
++endif
+diff --git a/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c b/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c
+new file mode 100644
+index 0000000..1a503bf
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c
+@@ -0,0 +1,193 @@
++/* loopcap / gpusafe pure logic: reported-kernel set, allocation table
++ * (first-OOM dump), waiter-release ring. GPU-free. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include "../kk_safety_core.h"
++static int n;
++#define CHECK(c) do { n++; if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); exit(1);} } while (0)
++
++/* brute-force reference of the allocation table: every live allocation */
++struct ref { uint64_t size; uint32_t cat; int live; };
++static struct ref refs[200000];
++static int nref;
++static int cmp_row(const void *a, const void *b)
++{
++   const struct kk_safe_memrow *x = a, *y = b;
++   if (x->size != y->size) return x->size > y->size ? -1 : 1;
++   if (x->count != y->count) return x->count > y->count ? -1 : 1;
++   return x->cat < y->cat ? -1 : x->cat > y->cat;
++}
++int main(void)
++{
++   alarm(60);
++   /* once-per-kernel set */
++   static struct kk_safe_keyset ks;
++   CHECK(kk_safe_keyset_add(&ks, 0x1111));
++   CHECK(!kk_safe_keyset_add(&ks, 0x1111));
++   CHECK(kk_safe_keyset_add(&ks, 0));          /* key 0 is a key like any other */
++   CHECK(!kk_safe_keyset_add(&ks, 0));
++   for (uint64_t k = 2; k < KK_SAFE_LOOP_KEYS; k++) CHECK(kk_safe_keyset_add(&ks, k * 0x9e3779b97f4a7c15ull));
++   CHECK(ks.count == KK_SAFE_LOOP_KEYS);
++   CHECK(!kk_safe_keyset_add(&ks, 0xdeadbeef)); /* full: bounded log, nothing new */
++   CHECK(!kk_safe_keyset_add(&ks, 0x1111));
++   CHECK(ks.count == KK_SAFE_LOOP_KEYS);
++
++   /* allocation table: basics */
++   static struct kk_safe_memtab t;
++   struct kk_safe_memrow top[KK_SAFE_MEM_TOP];
++   CHECK(kk_safe_memtab_top(&t, top, KK_SAFE_MEM_TOP) == 0);
++   kk_safe_memtab_note(&t, 1, KK_SAFE_MEM_MIN - 1);          /* too small */
++   CHECK(t.used == 0);
++   kk_safe_memtab_note(&t, 1, 64 << 20);
++   kk_safe_memtab_note(&t, 1, 64 << 20);
++   kk_safe_memtab_note(&t, 2, 64 << 20);
++   kk_safe_memtab_note(&t, 3, 512 << 20);
++   kk_safe_memtab_note(&t, 3, KK_SAFE_MEM_MIN);
++   CHECK(kk_safe_memtab_top(&t, top, KK_SAFE_MEM_TOP) == 4);
++   CHECK(top[0].size == 512 << 20 && top[0].cat == 3 && top[0].count == 1);
++   CHECK(top[1].size == 64 << 20 && top[1].cat == 1 && top[1].count == 2);   /* tie on size: more of them first */
++   CHECK(top[2].size == 64 << 20 && top[2].cat == 2 && top[2].count == 1);
++   CHECK(top[3].size == KK_SAFE_MEM_MIN);
++   CHECK(kk_safe_memtab_top(&t, top, 2) == 2 && top[1].cat == 1);            /* n smaller than rows */
++   kk_safe_memtab_note(&t, 3, -(512ll << 20));                               /* free the biggest */
++   CHECK(kk_safe_memtab_top(&t, top, KK_SAFE_MEM_TOP) == 3 && top[0].cat == 1);
++   kk_safe_memtab_note(&t, 3, -(512ll << 20));                               /* free of an unknown one: ignored */
++   kk_safe_memtab_note(&t, 9, -(7ll << 20));
++   CHECK(kk_safe_memtab_top(&t, top, KK_SAFE_MEM_TOP) == 3);
++   kk_safe_memtab_note(&t, 4, 300 << 20);                                    /* reuses the freed row */
++   CHECK(t.used == 4);
++
++   /* fuzz against the brute-force list: random alloc/free, sizes with many repeats */
++   memset(&t, 0, sizeof t);
++   srand(7);
++   for (int round = 0; round < 300000; round++) {
++      if (nref < 150000 && (rand() % 100 < 55 || nref == 0)) {
++         uint64_t size = ((uint64_t)(rand() % 60) + 1) << (rand() % 3 ? 20 : 12);   /* some below 1 MiB; 60 x 13 keys fit the table */
++         uint32_t cat = 1 + rand() % 13;
++         refs[nref++] = (struct ref){size, cat, 1};
++         kk_safe_memtab_note(&t, cat, (int64_t)size);
++      } else {
++         int i = rand() % nref;
++         if (refs[i].live) { refs[i].live = 0; kk_safe_memtab_note(&t, refs[i].cat, -(int64_t)refs[i].size); }
++      }
++      if (round % 20000 == 19999) {
++         /* expected rows = (cat, size) -> count over live refs >= 1 MiB */
++         static struct kk_safe_memrow exp[8192]; int ne = 0;
++         for (int i = 0; i < nref; i++) {
++            if (!refs[i].live || refs[i].size < KK_SAFE_MEM_MIN) continue;
++            int k; for (k = 0; k < ne; k++) if (exp[k].size == refs[i].size && exp[k].cat == refs[i].cat) break;
++            if (k == ne) exp[ne++] = (struct kk_safe_memrow){refs[i].size, refs[i].cat, 0};
++            exp[k].count++;
++         }
++         qsort(exp, ne, sizeof exp[0], cmp_row);
++         unsigned got = kk_safe_memtab_top(&t, top, KK_SAFE_MEM_TOP);
++         CHECK(t.untracked == 0);
++         CHECK(got == (unsigned)(ne < KK_SAFE_MEM_TOP ? ne : KK_SAFE_MEM_TOP));
++         for (unsigned i = 0; i < got; i++)
++            CHECK(top[i].size == exp[i].size && top[i].cat == exp[i].cat && top[i].count == exp[i].count);
++      }
++   }
++   /* table full: counted, never corrupts */
++   memset(&t, 0, sizeof t);
++   for (uint64_t i = 0; i < KK_SAFE_MEM_ROWS + 50; i++) kk_safe_memtab_note(&t, 1, (int64_t)((i + 1) << 20));
++   CHECK(t.used == KK_SAFE_MEM_ROWS && t.untracked == 50);
++   CHECK(kk_safe_memtab_top(&t, top, KK_SAFE_MEM_TOP) == KK_SAFE_MEM_TOP && top[0].size == (uint64_t)KK_SAFE_MEM_ROWS << 20);
++   kk_safe_memtab_note(&t, 1, -(int64_t)((uint64_t)(KK_SAFE_MEM_ROWS + 10) << 20));   /* free of an untracked one */
++   CHECK(kk_safe_memtab_top(&t, top, 1) == 1 && top[0].size == (uint64_t)KK_SAFE_MEM_ROWS << 20);
++
++   /* waiter-release ring */
++   static struct kk_safe_signals r;
++   int ev[KK_SAFE_SIGNALS + 8];
++   CHECK(kk_safe_signals_push(&r, &ev[0], 5) == NULL);
++   CHECK(kk_safe_signals_push(&r, &ev[0], 9) == &ev[0]);     /* same event: its extra reference comes back */
++   CHECK(r.s[0].value == 9);
++   CHECK(kk_safe_signals_push(&r, &ev[0], 3) == &ev[0]);     /* never lowered */
++   CHECK(r.s[0].value == 9);
++   for (int i = 1; i < KK_SAFE_SIGNALS; i++) CHECK(kk_safe_signals_push(&r, &ev[i], i) == NULL);
++   CHECK(kk_safe_signals_push(&r, &ev[KK_SAFE_SIGNALS], 77) == &ev[0]);   /* oldest displaced */
++   CHECK(kk_safe_signals_push(&r, &ev[KK_SAFE_SIGNALS + 1], 78) == &ev[1]);
++   int present = 0; for (int i = 0; i < KK_SAFE_SIGNALS; i++) present += r.s[i].event != NULL;
++   CHECK(present == KK_SAFE_SIGNALS);
++   CHECK(kk_safe_signals_push(&r, &ev[5], 1000) == &ev[5] && r.s[5].value == 1000);
++   /* watchdog scan vs commits registered while it runs (the false 'GPU WATCHDOG' of patch 0020: `now` is taken
++    * before the scan, a newer start_ns made the unsigned difference wrap) */
++   {
++      static struct kk_safe_slot ring[KK_SAFE_RING];
++      uint64_t s = 1000000000ull, lim = 4 * s, now = 100 * s;
++      ring[3] = (struct kk_safe_slot){.seq = 7, .start_ns = now + 1, .pending = 1};          /* registered 1 ns after `now` */
++      CHECK(kk_safe_find_overdue(ring, now, lim) == -1);
++      ring[4] = (struct kk_safe_slot){.seq = 8, .start_ns = now + 50 * s, .pending = 1};     /* far in the future */
++      ring[5] = (struct kk_safe_slot){.seq = 9, .start_ns = now, .pending = 1};              /* exactly now */
++      CHECK(kk_safe_find_overdue(ring, now, lim) == -1);
++      CHECK(!kk_safe_slot_overdue(&ring[3], now, lim) && !kk_safe_slot_overdue(&ring[4], now, lim) && !kk_safe_slot_overdue(&ring[5], now, lim));
++      ring[6] = (struct kk_safe_slot){.seq = 5, .start_ns = now - lim, .pending = 1};        /* exactly the limit: not yet */
++      CHECK(kk_safe_find_overdue(ring, now, lim) == -1);
++      ring[6].start_ns = now - lim - 1;
++      CHECK(kk_safe_find_overdue(ring, now, lim) == 6);                                       /* really overdue is still found */
++      ring[6].pending = 0;
++      CHECK(kk_safe_find_overdue(ring, now, lim) == -1);
++      ring[7] = (struct kk_safe_slot){.seq = 0, .start_ns = 1, .pending = 1};                /* never used */
++      CHECK(kk_safe_find_overdue(ring, now, lim) == -1);
++      /* fuzz: random slots around `now`; reference with signed 128-bit arithmetic */
++      srand(11);
++      for (int round = 0; round < 2000; round++) {
++         int want = -1;
++         for (unsigned i = 0; i < KK_SAFE_RING; i++) {
++            int64_t d = (int64_t)(rand() % 12000) - 6000;                                     /* ms relative to now */
++            ring[i] = (struct kk_safe_slot){.seq = rand() % 5 ? (uint64_t)(rand() % 100000) + 1 : 0, .start_ns = (uint64_t)((__int128)now + (__int128)d * 1000000), .pending = rand() % 2};
++            __int128 age = (__int128)now - (__int128)ring[i].start_ns;
++            if (ring[i].seq && ring[i].pending && age > (__int128)lim && (want < 0 || ring[i].seq < ring[want].seq)) want = (int)i;
++         }
++         int got = kk_safe_find_overdue(ring, now, lim);
++         CHECK(got == want || (got >= 0 && want >= 0 && ring[got].seq == ring[want].seq));
++      }
++   }
++   /* environment numbers: only a plain finite number inside the range is taken; everything else
++    * leaves the caller's default alone (a typo must not switch a guard off) */
++   {
++      double v = -7;
++      CHECK(kk_safe_parse_num("4", 0, 86400, &v) && v == 4);
++      CHECK(kk_safe_parse_num("0", 0, 86400, &v) && v == 0);       /* an explicit 0 = off */
++      CHECK(kk_safe_parse_num("2.5", 0, 86400, &v) && v == 2.5);
++      CHECK(kk_safe_parse_num("1e3", 0, 86400, &v) && v == 1000);
++      CHECK(kk_safe_parse_num("4294967295", 0, 4294967295.0, &v) && (uint32_t)v == 0xffffffffu);
++      v = -7;
++      static const char *bad[] = {"", "abc", "off", "false", "4s", "4 ", " ", "nan", "inf", "-inf", "-1", "86401",
++                                  "1e30", "0x", "--4", "4,5"};
++      for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++)
++         CHECK(!kk_safe_parse_num(bad[i], 0, 86400, &v) && v == -7);
++      CHECK(!kk_safe_parse_num(NULL, 0, 1, &v) && v == -7);
++      CHECK(!kk_safe_parse_num("4294967296", 0, 4294967295.0, &v)); /* never reaches a uint32 cast */
++      CHECK(!kk_safe_parse_num("0", 1, 256, &v));                   /* KK_OOM_MAX: at least 1 */
++      srand(3);
++      for (int i = 0; i < 20000; i++) { /* random text: accepted only when strtod takes all of it and it is in range */
++         char t[12];
++         int len = rand() % 11;
++         for (int k = 0; k < len; k++)
++            t[k] = "0123456789.eE+-x naif"[rand() % 21];
++         t[len] = 0;
++         double got = -7;
++         bool ok = kk_safe_parse_num(t, 0, 1000, &got);
++         char *end;
++         double ref = strtod(t, &end);
++         bool want = len > 0 && end != t && *end == 0 && ref >= 0 && ref <= 1000;
++         CHECK(ok == want && (ok ? got == ref : got == -7));
++      }
++   }
++   /* device-bound state: one owner at a time, released only by its owner */
++   {
++      const void *owner = NULL;
++      int a = 0, b = 0;
++      CHECK(!kk_safe_owner_release(&owner, &a) && owner == NULL);
++      CHECK(!kk_safe_owner_release(&owner, NULL));
++      CHECK(kk_safe_owner_claim(&owner, &a) && owner == &a);
++      CHECK(kk_safe_owner_claim(&owner, &a));
++      CHECK(!kk_safe_owner_claim(&owner, &b) && owner == &a); /* a second live device gets nothing */
++      CHECK(!kk_safe_owner_release(&owner, &b) && owner == &a);
++      CHECK(kk_safe_owner_release(&owner, &a) && owner == NULL);
++      CHECK(kk_safe_owner_claim(&owner, &b) && owner == &b);  /* the next device starts with its own */
++   }
++   printf("kk_safety_core2_test: %d checks OK\n", n);
++   return 0;
++}
+diff --git a/src/kosmickrisp/vulkan/tests/kk_safety_test.c b/src/kosmickrisp/vulkan/tests/kk_safety_test.c
+new file mode 100644
+index 0000000..9be411e
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/tests/kk_safety_test.c
+@@ -0,0 +1,63 @@
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include "../kk_safety_core.h"
++static int n;
++#define CHECK(c) do { n++; if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); exit(1);} } while (0)
++int main(void)
++{
++   /* clamp math */
++   uint32_t L = 1u << 22;
++   CHECK(!kk_safe_groups_exceed(1, 1, 1, L));
++   CHECK(!kk_safe_groups_exceed(2048, 2048, 1, L));      /* exactly 2^22 */
++   CHECK(kk_safe_groups_exceed(2048, 2048, 2, L));
++   CHECK(kk_safe_groups_exceed(4194305, 1, 1, L));
++   CHECK(kk_safe_groups_exceed(0xffffffffu, 0xffffffffu, 0xffffffffu, L)); /* overflow-safe */
++   CHECK(kk_safe_groups_exceed(0xffffffffu, 0xffffffffu, 1, L));
++   CHECK(!kk_safe_groups_exceed(0xffffffffu, 0xffffffffu, 0, L));          /* empty */
++   CHECK(!kk_safe_groups_exceed(0xffffffffu, 0, 5, L));
++   CHECK(!kk_safe_groups_exceed(0xffffffffu, 0xffffffffu, 0xffffffffu, 0)); /* off */
++   CHECK(!kk_safe_groups_exceed(4194304, 1, 1, L));
++   CHECK(kk_safe_groups_exceed(1, 1, 4194305, L));
++   srand(1);
++   for (int i = 0; i < 200000; i++) { /* fuzz vs __int128 */
++      uint32_t a = rand() % 5 ? (uint32_t)rand() % 5000 : (uint32_t)rand() * 7u, b = rand() % 5 ? (uint32_t)rand() % 5000 : (uint32_t)rand(), c = (uint32_t)rand() % 3000;
++      unsigned __int128 p = (unsigned __int128)a * b * c;
++      CHECK(kk_safe_groups_exceed(a, b, c, L) == (p > L));
++   }
++   /* failure window */
++   struct kk_safe_window w = {0};
++   uint64_t s = 1000000000ull;
++   for (int i = 0; i < 31; i++) CHECK(!kk_safe_window_note(&w, s + i * 1000000ull, 32, 60 * s));
++   CHECK(kk_safe_window_note(&w, s + 31 * 1000000ull, 32, 60 * s));  /* 32nd inside 60 s */
++   memset(&w, 0, sizeof w);
++   for (int i = 0; i < 100; i++) CHECK(!kk_safe_window_note(&w, s + i * 2 * s, 32, 60 * s)); /* 1 per 2 s = 30 per 60 s */
++   memset(&w, 0, sizeof w);
++   for (int i = 0; i < 100; i++) { bool f = kk_safe_window_note(&w, s + i * (60 * s / 31 + 1), 32, 60 * s); CHECK(!f); } /* just under */
++   memset(&w, 0, sizeof w);
++   bool fired = false;
++   for (int i = 0; i < 100; i++) fired |= kk_safe_window_note(&w, s + i * (60 * s / 31 - 1000), 32, 60 * s);
++   CHECK(fired);
++   memset(&w, 0, sizeof w);
++   for (int i = 0; i < 1000; i++) CHECK(!kk_safe_window_note(&w, s + i * 10 * s, 32, 60 * s)); /* ring wrap, sparse */
++   /* overdue scan (watchdog timer logic) */
++   static struct kk_safe_slot ring[KK_SAFE_RING];
++   uint64_t lim = 4 * s;
++   CHECK(kk_safe_find_overdue(ring, 100 * s, lim) == -1);
++   ring[5] = (struct kk_safe_slot){.seq = 10, .start_ns = 10 * s, .pending = 1};
++   ring[9] = (struct kk_safe_slot){.seq = 8, .start_ns = 9 * s, .pending = 1};
++   ring[7] = (struct kk_safe_slot){.seq = 12, .start_ns = 11 * s, .pending = 0};
++   CHECK(kk_safe_find_overdue(ring, 12 * s, lim) == -1);   /* 2-3 s old */
++   CHECK(kk_safe_find_overdue(ring, 13 * s + 1, lim) == 9);/* seq 8 (4.0 s+) first */
++   CHECK(kk_safe_find_overdue(ring, 14 * s + 1, lim) == 9);
++   ring[9].pending = 0;
++   CHECK(kk_safe_find_overdue(ring, 14 * s + 1, lim) == 5);
++   ring[5].pending = 0;
++   CHECK(kk_safe_find_overdue(ring, 1000 * s, lim) == -1); /* completed never fire */
++   /* guard */
++   CHECK(!kk_safe_over_limit(100, 0));
++   CHECK(kk_safe_over_limit(101, 100) && !kk_safe_over_limit(100, 100));
++   CHECK(kk_safe_default_limit(10000) == 9000);
++   printf("kk_safety_test: %d checks OK\n", n);
++   return 0;
++}

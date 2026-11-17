@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 14:49:31 +0000
+Subject: [PATCH] kosmickrisp: unwritten-load marking: build the key set after
+ the array stopped moving
+
+msl_nir_mark_unwritten_loads added pointers into a growing array to a set and
+looked them up again while the array could still be reallocated (a read of
+freed memory beyond 64 stored-to bases, KK_MSL_OPT bit 512). The set is now
+built once from the final array, and a failed allocation marks nothing.
+
+Test: kk_unwritten_loads_test (1 to 5000 bases); kk_loopcap_nir_test is
+registered with meson as well.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/meson.build          | 13 +++
+ .../compiler/msl_nir_lower_common.c           | 19 +++--
+ .../compiler/tests/unwritten_loads_test.c     | 80 +++++++++++++++++++
+ 3 files changed, 104 insertions(+), 8 deletions(-)
+ create mode 100644 src/kosmickrisp/compiler/tests/unwritten_loads_test.c
+
+diff --git a/src/kosmickrisp/compiler/meson.build b/src/kosmickrisp/compiler/meson.build
+index 9641373..8568b1b 100644
+--- a/src/kosmickrisp/compiler/meson.build
++++ b/src/kosmickrisp/compiler/meson.build
+@@ -47,3 +47,16 @@ kk_loopcap_nir_test = executable(
+   dependencies : [idep_nir, idep_mesautil, idep_vulkan_util, idep_msl_to_nir],
+   build_by_default : false,
+ )
++
++# nps5: GPU-free unit tests (meson test --suite kosmickrisp)
++kk_unwritten_loads_test = executable(
++  'kk_unwritten_loads_test',
++  files('tests/unwritten_loads_test.c'),
++  include_directories : [inc_include, inc_src],
++  dependencies : [idep_nir, idep_mesautil, idep_vulkan_util, idep_msl_to_nir],
++  build_by_default : false,
++)
++if with_tests
++  test('kk_loopcap_nir_test', kk_loopcap_nir_test, suite : ['kosmickrisp'])
++  test('kk_unwritten_loads_test', kk_unwritten_loads_test, suite : ['kosmickrisp'])
++endif
+diff --git a/src/kosmickrisp/compiler/msl_nir_lower_common.c b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+index 6c6aafc..f5e3102 100644
+--- a/src/kosmickrisp/compiler/msl_nir_lower_common.c
++++ b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+@@ -1398,20 +1398,23 @@ msl_nir_mark_unwritten_loads(nir_shader *nir)
+             }
+             for (unsigned i = 0; i < bases.count; i++) {
+                if (num_keys == cap_keys) {
+-                  cap_keys = cap_keys ? cap_keys * 2 : 64;
+-                  keys = realloc(keys, cap_keys * sizeof(*keys));
++                  unsigned new_cap = cap_keys ? cap_keys * 2 : 64;
++                  uint64_t *grown = realloc(keys, new_cap * sizeof(*keys));
++                  if (!grown) {
++                     known = false; /* nothing is marked */
++                     break;
++                  }
++                  keys = grown;
++                  cap_keys = new_cap;
+                }
+-               keys[num_keys] = bases.key[i];
+-               _mesa_set_add(written, &keys[num_keys]);
+-               num_keys++;
++               keys[num_keys++] = bases.key[i];
+             }
+          }
+       }
+    }
+ 
+-   /* The set stores pointers into `keys`, which realloc may have moved:
+-    * rebuild it. */
+-   _mesa_set_clear(written, NULL);
++   /* The set stores pointers into `keys`, so it is built only once the array
++    * no longer moves. */
+    for (unsigned i = 0; i < num_keys; i++)
+       _mesa_set_add(written, &keys[i]);
+ 
+diff --git a/src/kosmickrisp/compiler/tests/unwritten_loads_test.c b/src/kosmickrisp/compiler/tests/unwritten_loads_test.c
+new file mode 100644
+index 0000000..b3edf2d
+--- /dev/null
++++ b/src/kosmickrisp/compiler/tests/unwritten_loads_test.c
+@@ -0,0 +1,80 @@
++/*
++ * nps5: GPU-free unit test of msl_nir_mark_unwritten_loads (KK_MSL_OPT bit
++ * 512) with more stored-to address bases than the pass's first key array
++ * holds: every load from a base that is stored to stays writeable, a load
++ * from a base nothing stores to is marked. Run it under ASan to check the
++ * key set against the growing array.
++ *
++ * SPDX-License-Identifier: MIT
++ */
++#include "nir.h"
++#include "nir_builder.h"
++#include "kosmickrisp/compiler/nir_to_msl.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++
++static int checks, failed;
++#define CHECK(c)                                                             \
++   do {                                                                      \
++      checks++;                                                              \
++      if (!(c)) {                                                            \
++         failed++;                                                           \
++         printf("FAIL line %d: %s\n", __LINE__, #c);                         \
++      }                                                                      \
++   } while (0)
++
++static const nir_shader_compiler_options options = {0};
++
++static void
++run(unsigned stores)
++{
++   nir_builder b = nir_builder_init_simple_shader(MESA_SHADER_COMPUTE, &options,
++                                                  "unwritten_loads_test");
++   b.shader->info.workgroup_size[0] = 1;
++   b.shader->info.workgroup_size[1] = 1;
++   b.shader->info.workgroup_size[2] = 1;
++
++   nir_intrinsic_instr **written = calloc(stores, sizeof(*written));
++   nir_def *acc = nir_imm_int(&b, 0);
++   for (unsigned i = 0; i < stores; i++) {
++      nir_def *ptr = nir_load_buffer_ptr_kk(&b, 1, 64, .binding = i);
++      nir_def *v = nir_load_global(&b, 1, 32, ptr, .align_mul = 4);
++      written[i] = nir_def_as_intrinsic(v);
++      acc = nir_iadd(&b, acc, v);
++      nir_store_global(&b, acc, nir_iadd_imm(&b, ptr, 16), .align_mul = 4,
++                       .write_mask = 1);
++   }
++   /* Two bases nothing stores to. */
++   nir_def *ro0 = nir_load_buffer_ptr_kk(&b, 1, 64, .binding = stores + 5);
++   nir_def *ro1 = nir_load_buffer_ptr_kk(&b, 1, 64, .binding = stores + 9);
++   nir_def *r0 = nir_load_global(&b, 1, 32, ro0, .align_mul = 4);
++   nir_def *r1 = nir_load_global(&b, 1, 32, nir_iadd_imm(&b, ro1, 64), .align_mul = 4);
++   nir_store_global(&b, nir_iadd(&b, r0, r1),
++                    nir_load_buffer_ptr_kk(&b, 1, 64, .binding = 0),
++                    .align_mul = 4, .write_mask = 1);
++
++   bool progress = msl_nir_mark_unwritten_loads(b.shader);
++   CHECK(progress);
++   for (unsigned i = 0; i < stores; i++)
++      CHECK(!(nir_intrinsic_access(written[i]) & ACCESS_NON_WRITEABLE));
++   CHECK(nir_intrinsic_access(nir_def_as_intrinsic(r0)) & ACCESS_NON_WRITEABLE);
++   CHECK(nir_intrinsic_access(nir_def_as_intrinsic(r1)) & ACCESS_NON_WRITEABLE);
++
++   free(written);
++   ralloc_free(b.shader);
++}
++
++int
++main(void)
++{
++   glsl_type_singleton_init_or_ref();
++   /* 1 = no growth; 64/65 = around the first array size; more = several
++    * reallocations. */
++   static const unsigned counts[] = {1, 63, 64, 65, 129, 1000, 5000};
++   for (unsigned i = 0; i < sizeof(counts) / sizeof(counts[0]); i++)
++      run(counts[i]);
++   glsl_type_singleton_decref();
++   printf("unwritten_loads_test: %d checks, %d failed\n", checks, failed);
++   return failed ? 1 : 0;
++}

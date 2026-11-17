@@ -1,0 +1,528 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 15:09:13 +0000
+Subject: [PATCH] kosmickrisp: gpusafe: guard buffers per device
+
+The clamp counter and the loop-state chunks belong to the device whose
+residency set holds them (kk_device::safe_pool, created on first use, freed
+at device destroy). Two live devices each have their own, so a second device
+is neither refused loop states nor left without the clamp; the watchdog sums
+the counters of all pools. KK_OOM_MAX and KK_OOM_WINDOW_S accept 0 again
+(0 = the window's size / no window), as before the strict parsing.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.m         |   5 +-
+ src/kosmickrisp/vulkan/kk_device.h            |   3 +
+ src/kosmickrisp/vulkan/kk_safety.c            | 241 ++++++++++--------
+ src/kosmickrisp/vulkan/kk_safety.h            |   8 +-
+ src/kosmickrisp/vulkan/kk_safety_core.h       |  20 --
+ .../vulkan/tests/kk_safety_core2_test.c       |  15 +-
+ 6 files changed, 141 insertions(+), 151 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 9ce0322..01d7ae5 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -225,8 +225,9 @@ kk_flush_segment(const char *why, bool wait)
+          NSError *error = nil;
+          double t0 = kk_now_ms();
+          NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:tmp]];
+-         /* The data reaches the disk before the name does: a segment under its final name is
+-          * never empty or cut short after a crash or power loss. */
++         /* The data is handed to the drive before the name exists: a segment under its final
++          * name is not empty or cut short after the process or the system crashes. (No
++          * F_FULLFSYNC: it would stall the compile lock for a guarantee against power loss only.) */
+          bool written = [kk_serializer serializeAsArchiveAndFlushToURL:url error:&error];
+          if (written) {
+             int fd = open(tmp, O_RDONLY);
+diff --git a/src/kosmickrisp/vulkan/kk_device.h b/src/kosmickrisp/vulkan/kk_device.h
+index 5c964f9..b3fbcc2 100644
+--- a/src/kosmickrisp/vulkan/kk_device.h
++++ b/src/kosmickrisp/vulkan/kk_device.h
+@@ -94,6 +94,9 @@ struct kk_device {
+     * recording as required by Metal. */
+    struct kk_residency_set residency_set;
+ 
++   /* nps5 gpusafe: this device's guard buffers (kk_safety.c, under its lock) */
++   struct kk_safe_pool *safe_pool;
++
+    struct kk_precompiled_cache precompiled_cache;
+ 
+    bool has_queue;
+diff --git a/src/kosmickrisp/vulkan/kk_safety.c b/src/kosmickrisp/vulkan/kk_safety.c
+index 0b5955d..dc49268 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.c
++++ b/src/kosmickrisp/vulkan/kk_safety.c
+@@ -54,23 +54,26 @@ static unsigned g_oom_max = 32;
+ static uint64_t g_oom_window_ns = 60ull * 1000000000ull;
+ static pthread_mutex_t g_oom_lock = PTHREAD_MUTEX_INITIALIZER;
+ static struct kk_safe_window g_oom;
+-static struct kk_bo *g_counter_bo;      /* under g_counter_lock */
+-static const void *g_counter_dev;       /* device whose residency set holds it */
+-static pthread_mutex_t g_counter_lock = PTHREAD_MUTEX_INITIALIZER;
+ static _Atomic uint64_t g_last_wired_check;
+-static bool g_clamp_logged;             /* indirect path: watchdog thread and device destroy, under g_counter_lock */
+-static _Atomic int g_clamp_direct_logged, g_clamp_other_dev_logged;
++static bool g_clamp_logged;             /* indirect path: watchdog thread only */
++static _Atomic int g_clamp_direct_logged;
+ 
+ /* loopcap */
+ #define KK_LOOP_CHUNK_SLOTS 4096u
+ #define KK_LOOP_MAX_CHUNKS  64u
+-static struct kk_bo *g_loop_chunk[KK_LOOP_MAX_CHUNKS];
+-static unsigned g_loop_chunks;
+-static uint32_t *g_loop_free;
+-static unsigned g_loop_nfree;
+-static const void *g_loop_dev; /* device whose residency set holds the chunks; under g_loop_lock */
+-static bool g_loop_orphaned;   /* states were still in use at device destroy: the pool is closed */
+-static pthread_mutex_t g_loop_lock = PTHREAD_MUTEX_INITIALIZER;
++/* Guard buffers of one device: they live in that device's residency set, so every device has its
++ * own (dev->safe_pool, created on first use, released at device destroy). All pools are on one
++ * list for the watchdog thread. Everything here is under g_pool_lock. */
++struct kk_safe_pool {
++   struct kk_safe_pool *next;
++   struct kk_bo *counter;                     /* dispatch clamp: suppressed dispatches */
++   struct kk_bo *chunk[KK_LOOP_MAX_CHUNKS];   /* loop states */
++   unsigned chunks;
++   uint32_t *free;
++   unsigned nfree;
++};
++static struct kk_safe_pool *g_pools;
++static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+ static struct kk_safe_keyset g_loop_reported;
+ static _Atomic uint64_t g_loop_hits, g_loop_aborts;
+ static bool g_loop_nostate_logged;
+@@ -218,7 +221,8 @@ dump_memory(const char *why)
+ {
+    if (!oom_dump_on())
+       return;
+-   /* Called from a completion handler of this device's queue, which device destroy waits for. */
++   /* The device that committed last. A completion handler that runs while that device is being
++    * destroyed is not waited for by the destroy. */
+    struct kk_device *dev = atomic_load(&g_dev);
+    uint64_t cur = dev ? mtl_device_current_allocated_size(dev->mtl_handle) : 0;
+    uint64_t rec = dev ? mtl_device_recommended_max_working_set_size(dev->mtl_handle) : 0;
+@@ -254,49 +258,60 @@ dump_memory(const char *why)
+ }
+ 
+ /* ---- loopcap: state pool ---- */
++static struct kk_safe_pool *
++pool_get_locked(struct kk_device *dev)
++{
++   if (!dev->safe_pool) {
++      struct kk_safe_pool *p = calloc(1, sizeof(*p));
++      if (!p)
++         return NULL;
++      p->next = g_pools;
++      g_pools = p;
++      dev->safe_pool = p;
++   }
++   return dev->safe_pool;
++}
++
+ static void *
+-loop_slot_cpu(uint32_t slot)
++loop_slot_cpu(const struct kk_safe_pool *p, uint32_t slot)
+ {
+-   return (uint8_t *)g_loop_chunk[slot / KK_LOOP_CHUNK_SLOTS]->cpu +
++   return (uint8_t *)p->chunk[slot / KK_LOOP_CHUNK_SLOTS]->cpu +
+           (size_t)(slot % KK_LOOP_CHUNK_SLOTS) * KK_LOOP_STATE_BYTES;
+ }
+ 
+ static uint64_t
+-loop_slot_gpu(uint32_t slot)
++loop_slot_gpu(const struct kk_safe_pool *p, uint32_t slot)
+ {
+-   return g_loop_chunk[slot / KK_LOOP_CHUNK_SLOTS]->gpu +
++   return p->chunk[slot / KK_LOOP_CHUNK_SLOTS]->gpu +
+           (uint64_t)(slot % KK_LOOP_CHUNK_SLOTS) * KK_LOOP_STATE_BYTES;
+ }
+ 
++/* A free loop state of the device's pool (grown by one chunk when empty). */
+ static bool
+-loop_slot_alloc(struct kk_device *dev, uint32_t *slot)
++loop_slot_alloc(struct kk_device *dev, struct kk_safe_pool **pool, uint32_t *slot)
+ {
+    bool ok = false;
+-   pthread_mutex_lock(&g_loop_lock);
+-   /* The chunks live in one device's residency set: another device gets no state (its guarded
+-    * dispatches are skipped and logged) rather than an address that is not resident for it. */
+-   if (g_loop_orphaned || !kk_safe_owner_claim(&g_loop_dev, dev)) {
+-      pthread_mutex_unlock(&g_loop_lock);
+-      return false;
+-   }
+-   if (!g_loop_nfree && g_loop_chunks < KK_LOOP_MAX_CHUNKS) {
+-      if (!g_loop_free)
+-         g_loop_free = malloc(sizeof(uint32_t) * KK_LOOP_CHUNK_SLOTS * KK_LOOP_MAX_CHUNKS);
++   pthread_mutex_lock(&g_pool_lock);
++   struct kk_safe_pool *p = pool_get_locked(dev);
++   if (p && !p->nfree && p->chunks < KK_LOOP_MAX_CHUNKS) {
++      if (!p->free)
++         p->free = malloc(sizeof(uint32_t) * KK_LOOP_CHUNK_SLOTS * KK_LOOP_MAX_CHUNKS);
+       struct kk_bo *bo = NULL;
+-      if (g_loop_free &&
++      if (p->free &&
+           kk_alloc_bo(dev, &dev->vk.base, (uint64_t)KK_LOOP_CHUNK_SLOTS * KK_LOOP_STATE_BYTES, 16, &bo,
+                       KK_MEM_CMD_POOL) == VK_SUCCESS) {
+-         uint32_t base = g_loop_chunks * KK_LOOP_CHUNK_SLOTS;
+-         g_loop_chunk[g_loop_chunks++] = bo;
++         uint32_t base = p->chunks * KK_LOOP_CHUNK_SLOTS;
++         p->chunk[p->chunks++] = bo;
+          for (uint32_t i = KK_LOOP_CHUNK_SLOTS; i-- > 0;)
+-            g_loop_free[g_loop_nfree++] = base + i;
++            p->free[p->nfree++] = base + i;
+       }
+    }
+-   if (g_loop_nfree) {
+-      *slot = g_loop_free[--g_loop_nfree];
++   if (p && p->nfree) {
++      *slot = p->free[--p->nfree];
++      *pool = p;
+       ok = true;
+    }
+-   pthread_mutex_unlock(&g_loop_lock);
++   pthread_mutex_unlock(&g_pool_lock);
+    return ok;
+ }
+ 
+@@ -305,12 +320,13 @@ loop_slots_free(const struct kk_safe_loop_cmd *lc)
+ {
+    if (!lc->count && !lc->has_abort)
+       return;
+-   pthread_mutex_lock(&g_loop_lock);
++   struct kk_safe_pool *p = lc->pool;
++   pthread_mutex_lock(&g_pool_lock);
+    for (uint32_t i = 0; i < lc->count; i++)
+-      g_loop_free[g_loop_nfree++] = lc->recs[i].slot;
++      p->free[p->nfree++] = lc->recs[i].slot;
+    if (lc->has_abort)
+-      g_loop_free[g_loop_nfree++] = lc->abort_slot;
+-   pthread_mutex_unlock(&g_loop_lock);
++      p->free[p->nfree++] = lc->abort_slot;
++   pthread_mutex_unlock(&g_pool_lock);
+ }
+ 
+ uint64_t
+@@ -322,15 +338,15 @@ kk_safe_loop_state(struct kk_device *dev, struct kk_safe_loop_cmd *lc, uint64_t
+    for (uint32_t i = 0; i < lc->count; i++) {
+       if (lc->recs[i].key == key) {
+          lc->last_key = key;
+-         lc->last_gpu = loop_slot_gpu(lc->recs[i].slot);
++         lc->last_gpu = loop_slot_gpu(lc->pool, lc->recs[i].slot);
+          return lc->last_gpu;
+       }
+    }
+    uint32_t slot;
+    if (!lc->has_abort) {
+-      if (!loop_slot_alloc(dev, &slot))
++      if (!loop_slot_alloc(dev, &lc->pool, &slot))
+          goto fail;
+-      memset(loop_slot_cpu(slot), 0, KK_LOOP_STATE_BYTES); /* abort word = 0 */
++      memset(loop_slot_cpu(lc->pool, slot), 0, KK_LOOP_STATE_BYTES); /* abort word = 0 */
+       lc->abort_slot = slot;
+       lc->has_abort = true;
+    }
+@@ -342,10 +358,10 @@ kk_safe_loop_state(struct kk_device *dev, struct kk_safe_loop_cmd *lc, uint64_t
+       lc->recs = r;
+       lc->capacity = cap;
+    }
+-   if (!loop_slot_alloc(dev, &slot))
++   if (!loop_slot_alloc(dev, &lc->pool, &slot))
+       goto fail;
+-   uint8_t *state = loop_slot_cpu(slot);
+-   uint64_t abort_gpu = loop_slot_gpu(lc->abort_slot);
++   uint8_t *state = loop_slot_cpu(lc->pool, slot);
++   uint64_t abort_gpu = loop_slot_gpu(lc->pool, lc->abort_slot);
+    uint32_t hit = UINT32_MAX, pad = 0;
+    memcpy(state, &abort_gpu, sizeof(abort_gpu));
+    memcpy(state + KK_LOOP_STATE_HIT, &hit, sizeof(hit));
+@@ -353,7 +369,7 @@ kk_safe_loop_state(struct kk_device *dev, struct kk_safe_loop_cmd *lc, uint64_t
+    lc->recs[lc->count++] = (struct kk_safe_loop_rec){
+       .key = key, .slot = slot, .sites = sites, .msl_len = msl_len, .barrier_sites = barrier_sites};
+    lc->last_key = key;
+-   lc->last_gpu = loop_slot_gpu(slot);
++   lc->last_gpu = loop_slot_gpu(lc->pool, slot);
+    return lc->last_gpu;
+ 
+ fail:
+@@ -384,19 +400,19 @@ loop_report(struct kk_safe_token *tk)
+       return;
+    uint32_t aborted = 0;
+    if (lc->has_abort)
+-      memcpy(&aborted, loop_slot_cpu(lc->abort_slot), sizeof(aborted));
++      memcpy(&aborted, loop_slot_cpu(lc->pool, lc->abort_slot), sizeof(aborted));
+    if (aborted) {
+       atomic_fetch_add(&g_loop_aborts, 1);
+       for (uint32_t i = 0; i < lc->count; i++) {
+          const struct kk_safe_loop_rec *r = &lc->recs[i];
+          uint32_t site;
+-         memcpy(&site, (uint8_t *)loop_slot_cpu(r->slot) + KK_LOOP_STATE_HIT, sizeof(site));
++         memcpy(&site, (uint8_t *)loop_slot_cpu(lc->pool, r->slot) + KK_LOOP_STATE_HIT, sizeof(site));
+          if (site == UINT32_MAX)
+             continue;
+          atomic_fetch_add(&g_loop_hits, 1);
+-         pthread_mutex_lock(&g_loop_lock);
++         pthread_mutex_lock(&g_pool_lock);
+          bool first = kk_safe_keyset_add(&g_loop_reported, r->key);
+-         pthread_mutex_unlock(&g_loop_lock);
++         pthread_mutex_unlock(&g_pool_lock);
+          if (first)
+             fprintf(stderr,
+                     "[kk-safe] [RED] loop cap hit: submission %llu, kernel %016llx, loop site %u of %u (%u with a barrier; "
+@@ -444,17 +460,19 @@ watchdog_main(void *arg)
+    for (;;) {
+       struct timespec ts = {0, 100 * 1000 * 1000};
+       nanosleep(&ts, NULL);
+-      {
+-         /* under the lock: device destroy frees the counter */
+-         pthread_mutex_lock(&g_counter_lock);
+-         uint32_t suppressed = g_counter_bo && !g_clamp_logged ? *(volatile uint32_t *)g_counter_bo->cpu : 0;
+-         if (suppressed)
++      if (!g_clamp_logged) {
++         /* under the lock: device destroy frees a pool's counter */
++         uint32_t suppressed = 0;
++         pthread_mutex_lock(&g_pool_lock);
++         for (struct kk_safe_pool *p = g_pools; p; p = p->next)
++            suppressed += p->counter ? *(volatile uint32_t *)p->counter->cpu : 0;
++         pthread_mutex_unlock(&g_pool_lock);
++         if (suppressed) {
+             g_clamp_logged = true;
+-         pthread_mutex_unlock(&g_counter_lock);
+-         if (suppressed)
+             fprintf(stderr,
+                     "[kk-safe] dispatch clamp: an indirect dispatch above %u threadgroups was suppressed (logged once; %u so far)\n",
+                     g_clamp, suppressed);
++         }
+       }
+       if (!g_wd_on)
+          continue;
+@@ -494,8 +512,9 @@ init_once(void)
+    g_wd_on = g_wd_s > 0.0;
+    g_clamp = (uint32_t)env_d("KK_DISPATCH_CLAMP", NULL, 4194304.0, 0.0, 4294967295.0);
+    g_error_exit = env_d("KK_QUEUE_ERROR_EXIT", NULL, 1, 0, 1) != 0;
+-   g_oom_max = (unsigned)env_d("KK_OOM_MAX", NULL, 32, 1, KK_SAFE_OOM_MAX);
+-   g_oom_window_ns = (uint64_t)(env_d("KK_OOM_WINDOW_S", NULL, 60, 0.001, 86400.0) * 1e9);
++   /* 0 or more than the window holds = the window's size, as kk_safe_window_note reads it */
++   g_oom_max = (unsigned)env_d("KK_OOM_MAX", NULL, 32, 0, 1e9);
++   g_oom_window_ns = (uint64_t)(env_d("KK_OOM_WINDOW_S", NULL, 60, 0, 86400.0) * 1e9);
+    g_wired_on = env_d("KK_WIRED_GUARD", NULL, 1, 0, 1) != 0;
+    g_test_lost = (uint64_t)env_d("KK_TEST_GPU_LOST", NULL, 0, 0, 1e15);
+    g_test_oom = (uint64_t)env_d("KK_TEST_OOM", NULL, 0, 0, 1e15);
+@@ -543,24 +562,19 @@ kk_safe_direct_dispatch_blocked(uint32_t x, uint32_t y, uint32_t z)
+ uint64_t
+ kk_safe_clamp_counter_addr(struct kk_device *dev)
+ {
+-   pthread_mutex_lock(&g_counter_lock);
+    uint64_t a = 0;
+-   /* The counter lives in one device's residency set: only that device may write to it. */
+-   if (kk_safe_owner_claim(&g_counter_dev, dev)) {
+-      if (!g_counter_bo) {
+-         struct kk_bo *bo = NULL;
+-         if (kk_alloc_bo(dev, &dev->vk.base, 16, 16, &bo, KK_MEM_CMD_POOL) == VK_SUCCESS) {
+-            memset(bo->cpu, 0, 16);
+-            g_counter_bo = bo;
+-         }
++   pthread_mutex_lock(&g_pool_lock);
++   struct kk_safe_pool *p = pool_get_locked(dev);
++   if (p && !p->counter) {
++      struct kk_bo *bo = NULL;
++      if (kk_alloc_bo(dev, &dev->vk.base, 16, 16, &bo, KK_MEM_CMD_POOL) == VK_SUCCESS) {
++         memset(bo->cpu, 0, 16);
++         p->counter = bo;
+       }
+-      a = g_counter_bo ? g_counter_bo->gpu : 0;
+-      if (!a)
+-         kk_safe_owner_release(&g_counter_dev, dev);
+-   } else if (!atomic_exchange(&g_clamp_other_dev_logged, 1)) {
+-      fprintf(stderr, "[kk-safe] dispatch clamp: a second device is live; its indirect dispatches are not clamped (logged once)\n");
+    }
+-   pthread_mutex_unlock(&g_counter_lock);
++   if (p && p->counter)
++      a = p->counter->gpu;
++   pthread_mutex_unlock(&g_pool_lock);
+    return a;
+ }
+ 
+@@ -570,47 +584,50 @@ kk_safe_device_destroy(struct kk_device *dev)
+    struct kk_device *expect = dev;
+    atomic_compare_exchange_strong(&g_dev, &expect, NULL);
+ 
+-   pthread_mutex_lock(&g_counter_lock);
+-   struct kk_bo *counter = NULL;
+-   if (kk_safe_owner_release(&g_counter_dev, dev)) {
+-      counter = g_counter_bo;
+-      g_counter_bo = NULL;
+-      g_clamp_logged = false;
+-   }
+-   pthread_mutex_unlock(&g_counter_lock);
+-   if (counter)
+-      kk_destroy_bo(dev, counter);
+-
+-   /* Loop states: every command buffer of the device is gone and its queue is finished, so all
+-    * states are free once the last completion handler returned. Wait briefly for those; if a state
+-    * is still out, keep the buffers (a handler may still read them) and close the pool. */
+-   struct kk_bo *chunks[KK_LOOP_MAX_CHUNKS];
+-   for (unsigned tries = 0; tries < 200; tries++) {
+-      pthread_mutex_lock(&g_loop_lock);
+-      if (g_loop_dev != dev || g_loop_orphaned) {
+-         pthread_mutex_unlock(&g_loop_lock);
+-         return;
++   /* Every command buffer of the device is gone, so its loop states are free once the last
++    * completion handler returned: wait briefly for those. A pool with a state still out is kept
++    * (the handler reads it) and only forgotten by the device. */
++   struct kk_safe_pool *p = NULL;
++   bool idle = false;
++   for (unsigned tries = 0; tries < 200 && !idle; tries++) {
++      pthread_mutex_lock(&g_pool_lock);
++      p = dev->safe_pool;
++      idle = !p || p->nfree == p->chunks * KK_LOOP_CHUNK_SLOTS;
++      if (idle && p) {
++         for (struct kk_safe_pool **q = &g_pools; *q; q = &(*q)->next) {
++            if (*q == p) {
++               *q = p->next;
++               break;
++            }
++         }
++         dev->safe_pool = NULL;
+       }
+-      if (g_loop_nfree == g_loop_chunks * KK_LOOP_CHUNK_SLOTS) {
+-         unsigned n = g_loop_chunks;
+-         memcpy(chunks, g_loop_chunk, n * sizeof(chunks[0]));
+-         g_loop_chunks = 0;
+-         g_loop_nfree = 0;
+-         kk_safe_owner_release(&g_loop_dev, dev);
+-         pthread_mutex_unlock(&g_loop_lock);
+-         for (unsigned i = 0; i < n; i++)
+-            kk_destroy_bo(dev, chunks[i]);
+-         return;
++      pthread_mutex_unlock(&g_pool_lock);
++      if (!idle) {
++         struct timespec ts = {0, 10 * 1000 * 1000};
++         nanosleep(&ts, NULL);
+       }
+-      pthread_mutex_unlock(&g_loop_lock);
+-      struct timespec ts = {0, 10 * 1000 * 1000};
+-      nanosleep(&ts, NULL);
+    }
+-   pthread_mutex_lock(&g_loop_lock);
+-   g_loop_orphaned = true;
+-   pthread_mutex_unlock(&g_loop_lock);
+-   fprintf(stderr, "[kk-safe] [RED] loop cap: loop states still in use at device destroy; the pool is closed, "
+-                   "guarded compute dispatches of later devices are skipped\n");
++   if (!p)
++      return;
++   if (idle) {
++      if (p->counter)
++         kk_destroy_bo(dev, p->counter);
++      for (unsigned i = 0; i < p->chunks; i++)
++         kk_destroy_bo(dev, p->chunk[i]);
++      free(p->free);
++      free(p);
++      return;
++   }
++   struct kk_bo *counter;
++   pthread_mutex_lock(&g_pool_lock);
++   counter = p->counter;
++   p->counter = NULL; /* nobody but the watchdog reads it, under this lock */
++   dev->safe_pool = NULL;
++   pthread_mutex_unlock(&g_pool_lock);
++   if (counter)
++      kk_destroy_bo(dev, counter);
++   fprintf(stderr, "[kk-safe] loop cap: loop states still in use at device destroy; their buffers are kept\n");
+ }
+ 
+ bool
+diff --git a/src/kosmickrisp/vulkan/kk_safety.h b/src/kosmickrisp/vulkan/kk_safety.h
+index 57748e8..eda3a75 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.h
++++ b/src/kosmickrisp/vulkan/kk_safety.h
+@@ -15,12 +15,13 @@ struct mtl_feedback_data;
+ uint32_t kk_safe_dispatch_limit(void);
+ /* Direct dispatch over the limit: logs once, true = skip it. */
+ bool kk_safe_direct_dispatch_blocked(uint32_t x, uint32_t y, uint32_t z);
+-/* GPU address of the device-wide 16-byte clamp counter (created lazily; 0 on failure). */
++/* GPU address of the device's 16-byte clamp counter (created lazily; 0 on failure). */
+ uint64_t kk_safe_clamp_counter_addr(struct kk_device *dev);
+ 
++/* Guard buffers of one device (clamp counter, loop states): kk_device::safe_pool. */
++struct kk_safe_pool;
+ /* Device destroy (after the queue finished, before the residency set is released): forgets the
+- * device and frees the guard buffers that live in its residency set, so the next device starts
+- * with its own. */
++ * device and frees its guard buffers. */
+ void kk_safe_device_destroy(struct kk_device *dev);
+ 
+ /* True once the watchdog or an error guard stopped the process: no new submissions. */
+@@ -45,6 +46,7 @@ struct kk_safe_loop_cmd {
+    bool has_abort;
+    uint64_t last_key, last_gpu; /* the state of the kernel used last */
+    uint64_t bound_gpu;          /* address at KK_LOOP_STATE_SLOT of the argument table */
++   struct kk_safe_pool *pool;   /* the device's pool the states came from */
+ };
+ /* GPU address of the loop state of kernel `key` in this command buffer (created on first use).
+  * 0 = no state could be allocated: the dispatch must be skipped. Recording thread only. */
+diff --git a/src/kosmickrisp/vulkan/kk_safety_core.h b/src/kosmickrisp/vulkan/kk_safety_core.h
+index 5132078..b4f345f 100644
+--- a/src/kosmickrisp/vulkan/kk_safety_core.h
++++ b/src/kosmickrisp/vulkan/kk_safety_core.h
+@@ -28,26 +28,6 @@ kk_safe_parse_num(const char *text, double lo, double hi, double *out)
+    return true;
+ }
+ 
+-/* ---- device-bound state (clamp counter, loop-state pool): the buffers live in one device's
+- * residency set, so only that device may use them. claim: true when `dev` owns the state now
+- * (first claim, or it already did); false while another device owns it. release: true when `dev`
+- * was the owner (the caller then frees the buffers before the device goes away). */
+-static inline bool
+-kk_safe_owner_claim(const void **owner, const void *dev)
+-{
+-   if (*owner == NULL)
+-      *owner = dev;
+-   return *owner == dev;
+-}
+-static inline bool
+-kk_safe_owner_release(const void **owner, const void *dev)
+-{
+-   if (*owner != dev || dev == NULL)
+-      return false;
+-   *owner = NULL;
+-   return true;
+-}
+-
+ /* ---- dispatch clamp: true when x*y*z threadgroups exceed limit (limit 0 = clamp off). No overflow. */
+ static inline bool
+ kk_safe_groups_exceed(uint32_t x, uint32_t y, uint32_t z, uint32_t limit)
+diff --git a/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c b/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c
+index 1a503bf..0055c73 100644
+--- a/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c
++++ b/src/kosmickrisp/vulkan/tests/kk_safety_core2_test.c
+@@ -159,7 +159,7 @@ int main(void)
+          CHECK(!kk_safe_parse_num(bad[i], 0, 86400, &v) && v == -7);
+       CHECK(!kk_safe_parse_num(NULL, 0, 1, &v) && v == -7);
+       CHECK(!kk_safe_parse_num("4294967296", 0, 4294967295.0, &v)); /* never reaches a uint32 cast */
+-      CHECK(!kk_safe_parse_num("0", 1, 256, &v));                   /* KK_OOM_MAX: at least 1 */
++      CHECK(!kk_safe_parse_num("0.5", 1, 256, &v));                 /* below a range that starts at 1 */
+       srand(3);
+       for (int i = 0; i < 20000; i++) { /* random text: accepted only when strtod takes all of it and it is in range */
+          char t[12];
+@@ -175,19 +175,6 @@ int main(void)
+          CHECK(ok == want && (ok ? got == ref : got == -7));
+       }
+    }
+-   /* device-bound state: one owner at a time, released only by its owner */
+-   {
+-      const void *owner = NULL;
+-      int a = 0, b = 0;
+-      CHECK(!kk_safe_owner_release(&owner, &a) && owner == NULL);
+-      CHECK(!kk_safe_owner_release(&owner, NULL));
+-      CHECK(kk_safe_owner_claim(&owner, &a) && owner == &a);
+-      CHECK(kk_safe_owner_claim(&owner, &a));
+-      CHECK(!kk_safe_owner_claim(&owner, &b) && owner == &a); /* a second live device gets nothing */
+-      CHECK(!kk_safe_owner_release(&owner, &b) && owner == &a);
+-      CHECK(kk_safe_owner_release(&owner, &a) && owner == NULL);
+-      CHECK(kk_safe_owner_claim(&owner, &b) && owner == &b);  /* the next device starts with its own */
+-   }
+    printf("kk_safety_core2_test: %d checks OK\n", n);
+    return 0;
+ }

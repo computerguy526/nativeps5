@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 14:49:31 +0000
+Subject: [PATCH] kosmickrisp: pipeline archive: segment data reaches the disk
+ before its name, no cut-off directory
+
+A segment is fsynced before the rename that publishes it. A
+KK_PIPELINE_ARCHIVE_DIR that does not fit the path buffer is refused instead
+of being cut to another directory. New archive directories are private (0700).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.m | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 8c8cb69..9ce0322 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -225,7 +225,16 @@ kk_flush_segment(const char *why, bool wait)
+          NSError *error = nil;
+          double t0 = kk_now_ms();
+          NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:tmp]];
+-         if ([kk_serializer serializeAsArchiveAndFlushToURL:url error:&error] && rename(tmp, path) == 0) {
++         /* The data reaches the disk before the name does: a segment under its final name is
++          * never empty or cut short after a crash or power loss. */
++         bool written = [kk_serializer serializeAsArchiveAndFlushToURL:url error:&error];
++         if (written) {
++            int fd = open(tmp, O_RDONLY);
++            written = fd >= 0 && fsync(fd) == 0;
++            if (fd >= 0)
++               close(fd);
++         }
++         if (written && rename(tmp, path) == 0) {
+             struct stat st;
+             uint64_t size = stat(path, &st) == 0 ? (uint64_t)st.st_size : 0;
+             kk_st_segments++;
+@@ -389,12 +398,17 @@ kk_archive_init(void)
+       /* CaptureBinaries only: combined with CaptureDescriptors the archive
+        * flush returns NO. */
+       sd.configuration = MTL4PipelineDataSetSerializerConfigurationCaptureBinaries;
++      /* A directory name that does not fit is refused: a cut-off name would be another directory. */
++      if (dir && strlen(dir) + 1 + 16 + 1 > sizeof(kk_seg_dir)) {
++         fprintf(stderr, "[kk-archive] KK_PIPELINE_ARCHIVE_DIR is too long (%zu bytes); no persistent archive\n", strlen(dir));
++         dir = NULL;
++      }
+       if (dir && dir[0]) {
+          char hex[17], text[256];
+          kk_archive_stamp(dev, hex, text, sizeof(text));
+-         mkdir(dir, 0755);
++         mkdir(dir, 0700);
+          snprintf(kk_seg_dir, sizeof(kk_seg_dir), "%s/%s", dir, hex);
+-         mkdir(kk_seg_dir, 0755);
++         mkdir(kk_seg_dir, 0700);
+          char stamp_path[1024];
+          snprintf(stamp_path, sizeof(stamp_path), "%s/STAMP.txt", kk_seg_dir);
+          FILE *f = fopen(stamp_path, "wx");
