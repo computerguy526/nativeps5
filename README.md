@@ -13,7 +13,7 @@ This project is not affiliated with or endorsed by Sony Interactive Entertainmen
 ## What is here
 
 This repository is the entry point: build instructions, contribution rules, the safety and check scripts, the game
-profiles, the KosmicKrisp patch series and offline shader tools. The code lives in two component repositories, each
+profiles, the KosmicKrisp patch series and offline shader tools. The code lives in three component repositories, each
 a fork that keeps its upstream's licence ([NOTICE](NOTICE), [components.lock](components.lock)):
 
 | Component | What it does | Upstream | Licence |

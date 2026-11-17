@@ -4,18 +4,20 @@
 Metal compiler finally emits for a shader, plus one grep-able `STATS` line per function
 (instruction count, registers, spills, device load/store widths, texture ops, loops/branches).
 
+Data paths written `work/...` are local folders under the repository root, excluded by `.gitignore` (`/work/`).
+
 OFFLINE ONLY. It compiles pipelines into an `MTLBinaryArchive` (or runs `xcrun metal` +
 `xcrun metal-tt`) and reads the result. Nothing is drawn or dispatched; no GPU counters.
 
 ## Usage
 
-    work/agxdis/agxdis.sh shader.metal                 # this Mac's GPU (M4 Pro = applegpu_g16s)
-    work/agxdis/agxdis.sh shader.metal --stats-only    # only the STATS lines
-    work/agxdis/agxdis.sh shader.metal --arch applegpu_g13g   # other GPU, fully offline (metal-tt)
-    work/agxdis/agxdis.sh lib.metallib -f main_entrypoint
-    work/agxdis/agxdis.sh archive.bin                  # MTLBinaryArchive / metal-tt output
-    work/agxdis/agxdis.sh code.raw --raw --isa g15     # raw bytes of one function
-    work/agxdis/tests/run_tests.sh                     # 237 checks, ~40 s
+    tools/agxdis/agxdis.sh shader.metal                 # this Mac's GPU (M4 Pro = applegpu_g16s)
+    tools/agxdis/agxdis.sh shader.metal --stats-only    # only the STATS lines
+    tools/agxdis/agxdis.sh shader.metal --arch applegpu_g13g   # other GPU, fully offline (metal-tt)
+    tools/agxdis/agxdis.sh lib.metallib -f main_entrypoint
+    tools/agxdis/agxdis.sh archive.bin                  # MTLBinaryArchive / metal-tt output
+    tools/agxdis/agxdis.sh code.raw --raw --isa g15     # raw bytes of one function
+    tools/agxdis/tests/run_tests.sh                     # 237 checks, ~40 s
 
 Options: `-f NAME` (entry point, repeatable), `--arch applegpu_gNNx`, `--format FMT` (pixel
 format assumed for float4 colour outputs), `--prolog` (also the uniform prolog function),

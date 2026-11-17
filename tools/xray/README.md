@@ -1,10 +1,10 @@
 # xray: SHADER X-RAY (item 33). One shader, every layer, offline
 
-Local-only data (game-derived dumps/outputs are NOT for git). No game run, no GPU counters: only pipeline creation on KosmicKrisp, `xcrun metal`, and (layer 6) agxdis' offline compile.
+Local-only data (game-derived dumps/outputs are NOT for git): every `work/...` data path below is a folder under the repository root that `.gitignore` excludes (`/work/`); the tool reads dumps from there and writes its output there. No game run, no GPU counters: only pipeline creation on KosmicKrisp, `xcrun metal`, and (layer 6) agxdis' offline compile.
 
-    work/xray/xray.sh <input> [--opt N] [--kk DIR] [--out DIR] [--no-air]
-    work/xray/batch.sh <list-file> [same options]          # CSV on stdout + <out>/batch.csv; exit 1 if any row failed
-    work/xray/tests/run_tests.sh [--quick]                   # 192 checks, ~35 s, exit 0 only if all pass
+    tools/xray/xray.sh <input> [--opt N] [--kk DIR] [--out DIR] [--no-air]
+    tools/xray/batch.sh <list-file> [same options]          # CSV on stdout + <out>/batch.csv; exit 1 if any row failed
+    tools/xray/tests/run_tests.sh [--quick]                   # 192 checks, ~35 s, exit 0 only if all pass
 
 `<input>` is one of: a 16-hex MSL hash (work/mslover/dump_h|dump/<hash>.metal; `<hash>.v95` variants work), a `.spv` file, a `.metal` file, or a shaderlab id (`s6120.a0_0`).
 Output: `out/<id>/` (id = MSL hash for MSL inputs; `<spv b3>_o<KK_MSL_OPT>` for SPIR-V inputs) with
@@ -13,10 +13,10 @@ Output: `out/<id>/` (id = MSL hash for MSL inputs; `<spv b3>_o<KK_MSL_OPT>` for 
 |---|---|---|
 | 1_isa.txt | 1 PS5 ISA | Kyty RDNA2 disassembly if `work/xray/isa/*<id or msl hash or spv name>*.rdna2.txt` exists (env XRAY_ISA_DIR), else N/A + how to produce it (ASTROHYBRID_SHADER_DUMP=<guest hash>, KYTY_PROGRAM_CACHE=0). Nothing links a mslover MSL hash to a guest hash today, so this layer is manual. |
 | 2_spirv.txt | 2 SPIR-V | spirv-dis. SPIR-V inputs always; MSL inputs only if `xray.sh --build-index` links the MSL to a shaderlab spv (byte-identical KK MSL; only 22 of 486 mslover dumps match: different KK build) |
-| 3_nir.txt | 3 KK NIR | NIR at 0_preprocess_in, 1_opt_in, 2a_after_vec (KK_MSL_OPT bit 32768), 2_opt_out, 3_to_msl. Needs the KK_NIR_DUMP_DIR hook in work/s3/kk-xray (COPY of kk-vec, build `work/s3/kk-xray/kb.sh`, patch is in nir_to_msl.c `kk_xray_dump`; kk-opt2 untouched). SPIR-V inputs only. |
+| 3_nir.txt | 3 KK NIR | NIR at 0_preprocess_in, 1_opt_in, 2a_after_vec (KK_MSL_OPT bit 32768), 2_opt_out, 3_to_msl. Needs a KosmicKrisp build with the KK_NIR_DUMP_DIR hook (`kk_xray_dump` in nir_to_msl.c; not part of the patch series), installed at work/s3/kk-xray or given with XRAY_KK / --kk. SPIR-V inputs only. |
 | 4_msl.metal, 4_msl_stats.txt | 4 MSL | KK's MSL; global loads by width (scalar vs vector), coherent, loops, atomics, tex, simd |
 | 5_air.ll, 5_air_stats.txt | 5 AIR | `xcrun metal -S -emit-llvm -O1 ...` (shaderlab flags): device loads by width incl. the opaque `air.load.device_coherent.*` calls, loops, calls, atomics |
-| 6_agx/ | 6 AGX | work/agxdis/agxdis.sh `<4_msl.metal> --json 6_agx/agx_stats.json` (stdout -> agx.txt). Absent hook -> README.txt (N/A). Env XRAY_AGXDIS overrides the path. Gives instr, gpr, spills, device-load widths for this GPU (M4 Pro = applegpu_g16s). Known: agxdis cannot do a fragment-only MSL (needs a vertex function) -> L6=FAIL(rc=5) for FS inputs. |
+| 6_agx/ | 6 AGX | tools/agxdis/agxdis.sh `<4_msl.metal> --json 6_agx/agx_stats.json` (stdout -> agx.txt). Absent hook -> README.txt (N/A). Env XRAY_AGXDIS overrides the path. Gives instr, gpr, spills, device-load widths for this GPU (M4 Pro = applegpu_g16s). Known: agxdis cannot do a fragment-only MSL (needs a vertex function) -> L6=FAIL(rc=5) for FS inputs. |
 | 7_cost.txt | 7 cost | commit-ms (whole commit, not the shader alone) from work/mslover/msl_*.commits.log, ko_hashes.txt row, msl-override.md lines |
 | summary.txt | | ONE line key=value (L1..L7 = ok/na/FAIL, msl_*, air_*, agx_*) |
 

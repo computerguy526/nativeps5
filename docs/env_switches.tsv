@@ -38,7 +38,6 @@ APS5_CAPTURE_TRACE_PREFIXES	anyps5		core/libs/prx/libSceAgcDriver/Execution/incl
 APS5_CHANGED_COPY_ALWAYS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_CHECK_IMPORT_PROTECTION	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_CHECK_INDIRECT_ARGS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Draw.cpp
-APS5_CLEAN_COLLECT	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 APS5_COARSE_TIMED_WAITS	anyps5		core/libs/prx/libkernel/Time/TimedWait.cpp
 APS5_COHERENT_ATOMIC_LOADS	anyps5		core/libs/prx/libSceAgcDriver/tests/execution/CoherentAtomicLoads.cpp
 APS5_COMMENT	anyps5		tools/tests/test_env_reference.py
@@ -54,7 +53,6 @@ APS5_COPY_VERIFY	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevic
 APS5_COPY_WAIT_SOURCE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_COUNT	anyps5		tools/tests/test_env_reference.py
 APS5_COUNT_ALL_COMPLETION_LABELS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
-APS5_COVERS_MEMO	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 APS5_CPU_COPIES	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_CPU_DCC_KEYS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DccMetadata.cpp
 APS5_CPU_FLIP_IN_ORDER	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Queues/Submission.cpp
@@ -144,7 +142,6 @@ APS5_FRAME_REPLAY_ATTEMPT	anyps5		core/libs/prx/libSceAgcDriver/tests/FrameRepla
 APS5_FULL_BARRIERS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_GAME_MODE	anyps5		core/libs/prx/libkernel/System/src/HostPerformanceProcess.cpp
 APS5_GATHER_CONST	anyps5		core/shader/recompiler/SpirvBackend/src/SpirvImageEmitter.cpp
-APS5_GDS_IMPORT	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Pm4.cpp
 APS5_GNM_SUBMIT_WAIT_IDLE	anyps5		core/libs/prx/libSceGnmDriver/Export.cpp
 APS5_GONE	anyps5		tools/tests/test_check_conventions_env_reference.py
 APS5_GPUCACHE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
@@ -166,6 +163,7 @@ APS5_HOOK_FLUSH_CPU_BLOCKS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Re
 APS5_HOOK_FULL_SYNC	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_HOOK_LOCKED_WAIT	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_HOST_IMPORT_MIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
+APS5_HOST_IMPORT_MIB	nativeps5		games/game.py
 APS5_IGNORED	anyps5		tools/tests/test_env_reference.py
 APS5_IGNORE_DEPTH_TEST	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/State.cpp
 APS5_IMAGE_POOL_MIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/BufferPool.cpp
@@ -182,7 +180,6 @@ APS5_INT	anyps5		tools/tests/test_env_reference.py
 APS5_JOB_AFFINITY	anyps5		core/libs/prx/libkernel/Pthread/src/Thread.cpp
 APS5_JOB_AFFINITY_MASK	anyps5		core/libs/prx/libkernel/Pthread/src/Thread.cpp
 APS5_KEEP_TEMPLATE_RECORDS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
-APS5_KEPT_ADAPT	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_KEPT_DESCRIPTOR_SETS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
 APS5_KEYFLIP_DROP	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
 APS5_KEYS_FILL_CLEAR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
@@ -191,12 +188,10 @@ APS5_KK_COLLECT_MSL	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 APS5_KK_METALLIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 APS5_KK_PIPELINE_ARCHIVE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/PipelineCache.cpp
 APS5_LABEL_FLUSH_US	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/DeferredLabels.cpp
-APS5_LABEL_FLUSH_US_B	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/DeferredLabels.cpp
 APS5_LABEL_GATE_ALL	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_LABEL_LOCK_EACH	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/DeferredLabels.cpp
 APS5_LABEL_OWN_LOCK	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Packets/PacketFlush.cpp
 APS5_LABEL_REAP_ALL_QUEUES	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
-APS5_LABEL_RUNS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/DrawPipeline.cpp
 APS5_LABEL_RUNS_INLINE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_LABEL_STORE_ALWAYS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_LABEL_SUBMIT_NOW	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
@@ -204,8 +199,6 @@ APS5_LABEL_TRUST_LATE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorde
 APS5_LABEL_TRY_EACH_PACKET	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/DeferredLabels.cpp
 APS5_LAND_WAITS_ALL_QUEUES	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/WaitMemory.cpp
 APS5_LAST_STRING	anyps5		tools/tests/test_env_reference.py
-APS5_LATEREAD_LOG	anyps5		core/libs/prx/libSceAgcDriver/Execution/include/LateRead.hpp
-APS5_LATE_STORES	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Packets/PacketMemory.cpp
 APS5_LAZY_SHADER_PREPARE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Shaders/ShaderRegistry.cpp
 APS5_LDS_SLACK	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderInputState.cpp
 APS5_LOAD_EXEC_STANDARD_ERROR	anyps5		core/libs/tests/GuestSystemServiceLoadExecStandardError.cpp
@@ -223,12 +216,12 @@ APS5_MEM_PROBE_DEEP	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/MemoryPro
 APS5_MESH_CENSUS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/Draw.cpp
 APS5_MIMALLOC	anyps5		core/libs/prx/libkernel/System/src/MimallocRestart.cpp
 APS5_MIMALLOC_RESTARTED	anyps5		core/libs/prx/libkernel/System/src/MimallocRestart.cpp
-APS5_MIN_LOD_SPEC	anyps5		core/shader/recompiler/Optimization/src/BindingAllocator.cpp
 APS5_MIRROR_REFRESH_THREADS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_MULTI	anyps5		tools/tests/test_env_reference.py
 APS5_MULTILINE	anyps5		tools/tests/test_env_reference.py
 APS5_NESTED_COUNT	anyps5		tools/tests/test_env_reference.py
 APS5_NET_DISCONNECTED	anyps5		core/libs/prx/libSceHttp2/Export.cpp
+APS5_NEW	nativeps5		tests/test_evidence_ab_report.py
 APS5_NEW_READ	anyps5		tools/tests/test_check_conventions_env_reference.py
 APS5_NEXT_STRING	anyps5		tools/tests/test_env_reference.py
 APS5_NOTE	anyps5		core/libs/prx/libSceAgcDriver/tests/HostReport.cpp
@@ -470,7 +463,6 @@ APS5_PAD_SPEAKER_FALLBACK_DB	anyps5		core/libs/prx/libSceAudioOut/src/AudioOut2P
 APS5_PAD_THIN_BACKLOG	anyps5		core/libs/prx/libScePad/src/PadState.cpp
 APS5_PAD_TIMELINE	anyps5		core/libs/prx/libScePad/include/InputCommandFile.hpp
 APS5_PAD_TRIGGER_STATE	anyps5		core/libs/prx/libScePad/src/PadState.cpp
-APS5_PASS_CENSUS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
 APS5_PIN_WAIT_MS	anyps5		core/libs/prx/libSceAgcDriver/tests/Graphics.cpp
 APS5_PIPELINED_DRAWS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/DrawPipeline.cpp
 APS5_PIPELINE_CREATE_DELAY_MS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/PipelineCreateStats.cpp
@@ -502,7 +494,6 @@ APS5_POLL_TRY_EACH	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Sy
 APS5_POOL_CONSTANT_MIB	anyps5		tools/tests/test_env_reference.py
 APS5_POOL_MIB	anyps5		tools/tests/test_env_reference.py
 APS5_POOL_TOTAL_MIB	anyps5		tools/tests/test_env_reference.py
-APS5_PREBUILD_SYNC	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 APS5_PREBUILD_THREADS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Shaders/ShaderRegistry.cpp
 APS5_PRESENT	anyps5		tools/tests/test_env_reference.py
 APS5_PRESENT_BILINEAR_MINIFY	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/PresentationPass.cpp
@@ -511,20 +502,17 @@ APS5_PRESENT_DEPTH_AB	anyps5		core/libs/prx/libSceVideoOut/src/VideoOutDriver.cp
 APS5_PRESENT_DRAIN	anyps5		core/libs/prx/libSceVideoOut/src/VideoOutDriver.cpp
 APS5_PRESENT_LINK	anyps5		core/libs/prx/libSceVideoOut/src/VideoOutDriver.cpp
 APS5_PRESENT_POLL_FENCE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
-APS5_PRESENT_STATS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_PROBE	anyps5		core/shader/recompiler/Translation/src/DispatchInstructions.cpp
 APS5_PROBE_DISPATCH	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Dispatch/Dispatch.cpp
 APS5_PROFILE_CLEARS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
 APS5_PROFILE_DRAW	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 APS5_PROFILE_GPU	anyps5	GPU timestamp profiling = Metal counter heaps: refused by run-title.sh	core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
-APS5_PROFILE_GPU	nativeps5	GPU timestamp profiling = Metal counter heaps: refused by run-title.sh	scripts/run-title.sh
+APS5_PROFILE_GPU	nativeps5	GPU timestamp profiling = Metal counter heaps: refused by run-title.sh	scripts/nps5lib/run.py
 APS5_PROFILE_GPU_DRAWS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/Draw.cpp
 APS5_PROFILE_INTERVAL_MS	anyps5		core/libs/prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp
 APS5_PROFILE_PASSES	anyps5	per-pass GPU timestamps = Metal counter heaps: refused by run-title.sh; serialises the GPU and has panicked the kernel	core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
-APS5_PROFILE_PASSES	nativeps5	per-pass GPU timestamps = Metal counter heaps: refused by run-title.sh; serialises the GPU and has panicked the kernel	scripts/run-title.sh
+APS5_PROFILE_PASSES	nativeps5	per-pass GPU timestamps = Metal counter heaps: refused by run-title.sh; serialises the GPU and has panicked the kernel	scripts/nps5lib/run.py
 APS5_PROFILE_REPORT_MS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
-APS5_PROGRESS_TITLE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/CompileTitle.cpp
-APS5_PROGRESS_TITLE_LOG	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/CompileTitle.cpp
 APS5_PYTHON	anyps5		tools/tests/test_env_reference.py
 APS5_RAW	anyps5		tools/tests/test_env_reference.py
 APS5_RAYTRACING	anyps5		core/shader/recompiler/Translation/src/DispatchInstructions.cpp
@@ -556,7 +544,6 @@ APS5_SCRATCH_POOL_MIB	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Vulkan
 APS5_SCRATCH_POOL_TOTAL_MIB	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_SCREENSHOT_TRIGGER	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Screenshot.cpp
 APS5_SECOND	anyps5		tools/tests/test_env_reference.py
-APS5_SHADER_MIN_LOD_ZERO	anyps5		core/shader/recompiler/Optimization/src/DescriptorBindingBuilder.cpp
 APS5_SHADOW_VERIFY	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/UnitShadow.cpp
 APS5_SHARED_COLLECT_MEMO	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 APS5_SHARED_MEMORY_COUNTERS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
@@ -593,14 +580,8 @@ APS5_STAT_SAMPLED	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResou
 APS5_STAT_TARGETS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_STILL_STRING	anyps5		tools/tests/test_env_reference.py
 APS5_STORAGE_CACHE_ENTRIES	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
-APS5_STORAGE_WORKING_SET	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
-APS5_STORAGE_WORKING_SET_MIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
-APS5_STORAGE_WORKING_SET_STATS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
-APS5_STORE_ALIAS	anyps5	`1` storage alias mode for render-target pool reuse; off: passed the replay hash while the title's picture was broken	core/libs/prx/libSceAgcDriver/Graphics/src/SurfaceAlias.cpp
 APS5_STORE_AT_FLIP	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_STORE_AT_LABEL	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
-APS5_STORE_KEEP_CAP_MIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/SurfaceAlias.cpp
-APS5_STORE_KEEP_PRESENTS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/SurfaceAlias.cpp
 APS5_STRESS_SEED	anyps5		core/libs/tests/WriteWatchStress.cpp
 APS5_STRICT_DESCRIPTOR_WEBS	anyps5		core/shader/recompiler/Optimization/src/ResourceTracker.cpp
 APS5_STRING	anyps5		tools/tests/test_env_reference.py
@@ -618,7 +599,6 @@ APS5_SYNC_SHADER_PREPARE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Dri
 APS5_SYNC_TEXTURE_UPLOAD	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
 APS5_TABLE_INDEX	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 APS5_TABLE_INDEX_BREAK	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
-APS5_TARGETLESS_EXTENT_FIT	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/State.cpp
 APS5_TARGET_ROW	anyps5		tools/tests/test_check_conventions_env_reference.py
 APS5_TEMPLATE_AUDIT_ALWAYS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
 APS5_TEMPLATE_AUDIT_BUDGET	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
@@ -630,6 +610,7 @@ APS5_TEST_PATH	anyps5		core/shader/recompiler/tests/test_shader_cache_native_pat
 APS5_TEXTURE_CACHE_MIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp
 APS5_TEX_MIP_SKIP	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
 APS5_TEX_MIP_SKIP_LEVELS	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
+APS5_TEX_MIP_SKIP_LEVELS	nativeps5		tests/test_hw.py
 APS5_TEX_MIP_SKIP_MIN	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp
 APS5_THREAD_NICE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/ThreadPriority.cpp
 APS5_THREAD_PRIORITY	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/ThreadPriority.cpp
@@ -658,7 +639,6 @@ APS5_TRACE_DEPTH_STATE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/State.
 APS5_TRACE_DIR	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/TraceFile.cpp
 APS5_TRACE_DISPATCH_CACHE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Dispatch/Dispatch.cpp
 APS5_TRACE_DISPATCH_IO	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
-APS5_TRACE_DRAINED_STORES	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Packets/PacketMemory.cpp
 APS5_TRACE_DRAWS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_TRACE_DRAW_CACHE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/DrawCacheStatistics.cpp
 APS5_TRACE_DRAW_PROGRAMS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/Draw.cpp
@@ -669,7 +649,6 @@ APS5_TRACE_FILL_COVER	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Texture
 APS5_TRACE_FLIP	anyps5		core/libs/prx/libSceAgcDriver/Submit/src/Dcb.cpp
 APS5_TRACE_FLUSH	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 APS5_TRACE_FRAMES	anyps5		core/libs/prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp
-APS5_TRACE_GDS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_TRACE_GPU	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/DisplayBuffer.cpp
 APS5_TRACE_HOST_IMPORT	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_TRACE_IMAGE_TABLE	anyps5		core/libs/prx/libSceAgcDriver/tests/ShaderDiskCache.cpp
@@ -681,7 +660,6 @@ APS5_TRACE_LAT_AXIS	anyps5		core/libs/prx/libScePad/include/LatTrace.hpp
 APS5_TRACE_MEMORY	anyps5		core/libs/prx/libkernel/DirectMemory/DirectMemory.cpp
 APS5_TRACE_MEMORY_BUDGET	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/MemoryAccounting.cpp
 APS5_TRACE_MESH_BASE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Draw.cpp
-APS5_TRACE_POLLED_WAITS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/WaitMemory.cpp
 APS5_TRACE_PREPARATION_WAIT	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Shaders/ShaderRegistry.cpp
 APS5_TRACE_PRESENT	anyps5		core/libs/prx/libSceVideoOut/src/VideoOutDriver.cpp
 APS5_TRACE_QUERY	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
@@ -693,7 +671,6 @@ APS5_TRACE_SHADER_REGS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Drive
 APS5_TRACE_SHADOW	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/UnitShadow.cpp
 APS5_TRACE_SKIPS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Shaders/ShaderDiagnostics.cpp
 APS5_TRACE_SLOWWAIT	anyps5		core/libs/prx/libkernel/Time/Time.cpp
-APS5_TRACE_SPECIALIZE	anyps5		core/shader/recompiler/Recompiler.cpp
 APS5_TRACE_SSE4A	anyps5		core/libs/prx/libc/src/specifics/windows/CrashReport.cpp
 APS5_TRACE_STAGING	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_TRACE_SUBMIT_SITES	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/Recorder.cpp
@@ -771,6 +748,7 @@ APS5_WRITE_WATCH_VALIDATE	anyps5		core/libs/prx/libc/src/GuestWriteWatch.cpp
 APS5_WRITTEN_SHADOW_MAX_KIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_WRITTEN_SHADOW_MIN_KIB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp
 APS5_X	anyps5		tools/tests/test_title_run.py
+APS5_X	nativeps5		tests/test_evidence_ab_report.py
 ASTROHYBRID_CACHE_TITLE_ID	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 ASTROHYBRID_COMMIT_EPOCH_FASTPATH	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 ASTROHYBRID_DLSS	kyty		src/graphics/host_gpu/renderer/dlss.cpp
@@ -815,6 +793,9 @@ KK_DISPATCH_CLAMP	kosmickrisp	indirect dispatch counts above this many thread gr
 KK_FENCE_POLL	kosmickrisp		vulkan/kk_sync.c
 KK_GPU_BUSY_LOG	kosmickrisp	diagnostic: GPU busy share and time per commit from Metal commit feedback; no counter heaps	vulkan/kk_queue.c
 KK_GPU_WATCHDOG_S	kosmickrisp	seconds a committed command buffer may stay incomplete before submissions stop, a flight summary is printed and the process exits 70; default 4, `0` = off	vulkan/kk_safety.c
+KK_LIBCACHE_DIR	kosmickrisp		bridge/mtl_compiler.m
+KK_LIBCACHE_DIR	nativeps5		scripts/kk-libcache-build.sh
+KK_LIB_DEDUPE	kosmickrisp		bridge/mtl_compiler.m
 KK_LOOP_CAP	kosmickrisp	loop-condition checks per compute kernel invocation before the kernel ends itself; default 262144, `0` = off; part of the pipeline cache key (docs/reference/machine-safety.md)	compiler/nir_to_msl.c
 KK_MATH_MODE	kosmickrisp		bridge/mtl_compiler.m
 KK_MEM_STATS	kosmickrisp		vulkan/kk_bo.c
@@ -824,15 +805,18 @@ KK_METALLIB_DEBUG	kosmickrisp		bridge/mtl_compiler.m
 KK_METALLIB_DIR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_METALLIB_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_METAL_CACHE_ID	kosmickrisp	name of a private OS Metal shader cache for this configuration; use a fresh one per arm of a shader comparison	bridge/mtl_compiler.m
+KK_METAL_CACHE_ID	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_CACHE_BUST	kosmickrisp		bridge/mtl_compiler.m
 KK_MSL_COLLECT_DIR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_MSL_COLLECT_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_MSL_COLLECT_DIR	nativeps5		kosmickrisp/tests/vecload/run.sh
 KK_MSL_COMPRESS	kosmickrisp		vulkan/kk_shader.c
+KK_MSL_COMPRESS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_DUMP_DIR	nativeps5	diagnostic: writes generated MSL per shader hash; output is game data	tools/xray/tests/run_tests.sh
 KK_MSL_OPT	kosmickrisp	bit mask of MSL code-generation changes, part of the pipeline cache key; default 1039 (bits 1,2,4,8,1024: result-preserving). Table in docs/reference/shaders.md	vulkan/kk_physical_device.c
 KK_MSL_OPT	nativeps5	bit mask of MSL code-generation changes, part of the pipeline cache key; default 1039 (bits 1,2,4,8,1024: result-preserving). Table in docs/reference/shaders.md	tools/xray/tests/run_tests.sh
 KK_MSL_STATS	kosmickrisp		vulkan/kk_shader.c
+KK_MSL_STATS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_ZERO_INIT_SSA	kosmickrisp		compiler/nir_to_msl.c
 KK_NARROW_ENCODER_BARRIER	kosmickrisp	`1` narrows the barrier at the end of a render encoder; measured +0.8 % = noise	vulkan/kk_cmd_buffer.c
 KK_NATIVE_WAVE_OPS	kosmickrisp		vulkan/kk_physical_device.c
@@ -844,6 +828,7 @@ KK_PIPELINE_ARCHIVE	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_COMPACT	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_DEBUG	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_DIR	kosmickrisp	folder of the segmented Metal 4 pipeline archive (flushed periodically, at exit and on SIGTERM); game data, keep under NPS5_SCRATCH	bridge/mtl_compiler.m
+KK_PIPELINE_ARCHIVE_DIR	nativeps5		scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_FLUSH_N	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_FLUSH_S	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_READAHEAD	kosmickrisp		bridge/mtl_compiler.m
@@ -1141,7 +1126,7 @@ KYTY_EOP_FLUSH_BATCH	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_EOP_FLUSH_BATCH	nativeps5		titles/kyty-preset.env
 KYTY_EOP_FLUSH_PACKETS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_EOP_TIMESTAMPS	kyty	what the game's end-of-pipe clock writes contain: `record` = CPU record time (made the game's dynamic resolution pick 4K), `cbtime` = completion time of the submission, no GPU queries (canonical; title 42.7 -> 21.1 ms), `gpu` = Vulkan timestamp queries = Metal counter heaps, BANNED on macOS (docs/reference/frame-rate.md)	src/graphics/host_gpu/renderer/eopTimestamps.cpp
-KYTY_EOP_TIMESTAMPS	nativeps5	what the game's end-of-pipe clock writes contain: `record` = CPU record time (made the game's dynamic resolution pick 4K), `cbtime` = completion time of the submission, no GPU queries (canonical; title 42.7 -> 21.1 ms), `gpu` = Vulkan timestamp queries = Metal counter heaps, BANNED on macOS (docs/reference/frame-rate.md)	titles/kyty-preset.env
+KYTY_EOP_TIMESTAMPS	nativeps5	what the game's end-of-pipe clock writes contain: `record` = CPU record time (made the game's dynamic resolution pick 4K), `cbtime` = completion time of the submission, no GPU queries (canonical; title 42.7 -> 21.1 ms), `gpu` = Vulkan timestamp queries = Metal counter heaps, BANNED on macOS (docs/reference/frame-rate.md)	scripts/nps5lib/run.py
 KYTY_EQUEUE_COALESCE	kyty		src/kernel/eventQueue.cpp
 KYTY_EXEC_SELECTS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FALSE_SHARING_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1288,6 +1273,7 @@ KYTY_LDS_DEVICE_BUFFER	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LDS_DEVICE_BUFFER_MB	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_LDS_LIMIT_OVERRIDE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LDS_WAITCNT_BARRIER	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_LIB	nativeps5		scripts/nps5lib/run.py
 KYTY_LIVE_FILE	kyty		src/common/hangWatchdog.cpp
 KYTY_LIVE_SEQ	kyty		src/common/liveSwitch.cpp
 KYTY_LIVE_TEST_COUNT	kyty		tests/LiveSwitchTests.cpp
@@ -1296,6 +1282,14 @@ KYTY_LIVE_TEST_ENV	kyty		tests/LiveSwitchTests.cpp
 KYTY_LIVE_TEST_LAZY	kyty		tests/LiveSwitchTests.cpp
 KYTY_LIVE_TEST_OFF	kyty		tests/LiveSwitchTests.cpp
 KYTY_LIVE_TEST_ON	kyty		tests/LiveSwitchTests.cpp
+KYTY_LOADCARD	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_ANY	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_BLACK	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_GAP_S	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_HZ	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_LOG	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_MIDGAME	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_MS	kyty		src/graphics/loadCard.h
 KYTY_LOADING_LOG	kyty		src/common/profiler.cpp
 KYTY_LOD_REPORT_COMPLETION_WRITE	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
 KYTY_LOD_REPORT_PUBLISH	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
@@ -1340,6 +1334,7 @@ KYTY_OCCLUSION_BATCH	nativeps5		titles/kyty-preset.env
 KYTY_OCCLUSION_GATE	kyty		src/graphics/host_gpu/renderer/occlusion.cpp
 KYTY_OCCLUSION_LOG	kyty		src/graphics/host_gpu/renderer/occlusion.cpp
 KYTY_OCCLUSION_PROXY_MODE	kyty		src/graphics/host_gpu/renderer/occlusion.cpp
+KYTY_OCCLUSION_QUERY_DRAW_SKIP	kyty		src/graphics/host_gpu/renderer/occlusionDrawSkip.h
 KYTY_OCCLUSION_RESET_BATCH	kyty		src/graphics/host_gpu/renderer/occlusion.cpp
 KYTY_OCCLUSION_RESET_BATCH	nativeps5		titles/kyty-preset.env
 KYTY_OCCLUSION_SLOTS	kyty		src/graphics/host_gpu/renderer/occlusion.cpp
@@ -1359,6 +1354,7 @@ KYTY_PENDING_REFRESH_US	nativeps5		titles/kyty-preset.env
 KYTY_PGO_DUMP_SECONDS	kyty		src/main.cpp
 KYTY_PGO_FILE	kyty		src/main.cpp
 KYTY_PIPELINE_CACHE_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_CACHE_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_CACHE_SAVE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_MIN_NEW	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1374,33 +1370,37 @@ KYTY_PIPELINE_FAST_FIRST_PROBE	kyty		src/graphics/host_gpu/renderer/pipeline/pip
 KYTY_PIPELINE_FAST_FIRST_RETIRE_S	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_FAST_FIRST_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_JOURNAL	kyty		src/common/u59Preset.cpp
-KYTY_PIPELINE_JOURNAL	nativeps5		titles/kyty-preset.env
+KYTY_PIPELINE_JOURNAL	nativeps5		tests/test_game.py
 KYTY_PIPELINE_JOURNAL_FORCE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_JOURNAL_LEVEL	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_JOURNAL_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_JOURNAL_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_JOURNAL_REPLAY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_JOURNAL_RETARGET	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_JOURNAL_RETARGET	nativeps5		titles/kyty-preset.env
 KYTY_PIPELINE_JOURNAL_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_JOURNAL_THREADS	nativeps5		tests/test_hw.py
 KYTY_PIPELINE_JOURNAL_VERIFY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_JOURNAL_WAIT	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_KEY_NORMALIZE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_KNOWN	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_KNOWN	nativeps5		titles/kyty-preset.env
 KYTY_PIPELINE_KNOWN_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_KNOWN_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIBRARY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineLibrary.cpp
 KYTY_PIPELINE_LIBRARY_OPTIMIZE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIBRARY_PROBE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineLibrary.cpp
 KYTY_PIPELINE_LIBRARY_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIST	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-KYTY_PIPELINE_LIST	nativeps5		scripts/prepare-pipelines.sh
+KYTY_PIPELINE_LIST	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_APP_VER	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-KYTY_PIPELINE_LIST_APP_VER	nativeps5		scripts/prepare-pipelines.sh
+KYTY_PIPELINE_LIST_APP_VER	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_CACHE_LIMIT_MB	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_LIST_CACHE_LIMIT_MB	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_EXE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-KYTY_PIPELINE_LIST_EXE	nativeps5		scripts/prepare-pipelines.sh
+KYTY_PIPELINE_LIST_EXE	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_PREPARE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-KYTY_PIPELINE_LIST_PREPARE	nativeps5		scripts/prepare-pipelines.sh
+KYTY_PIPELINE_LIST_PREPARE	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_MEMO	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_PREFETCH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_PREFETCH	nativeps5		titles/kyty-preset.env
@@ -1415,8 +1415,10 @@ KYTY_PIPELINE_SKIP	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.c
 KYTY_PIPELINE_SKIP	nativeps5		titles/kyty-preset.env
 KYTY_PIPELINE_SKIP_RECURRENT	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_PIPELINE_SKIP_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_SKIP_THREADS	nativeps5		tests/test_hw.py
 KYTY_PIPELINE_SKIP_WAIT_US	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_STATS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_STATS	nativeps5		scripts/nps5lib/cache.py
 KYTY_PRECISE_COND_WAITS	kyty		src/kernel/pthread.cpp
 KYTY_PRECISE_WRITE_RANGES	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_PREDICATION_NO_DRAIN	kyty		src/graphics/guest_gpu/graphicsRun.cpp
@@ -1441,6 +1443,7 @@ KYTY_PROFILE_LOADING	nativeps5		titles/kyty-preset.env
 KYTY_PROGRAM_CACHE	kyty		src/common/u59Preset.cpp
 KYTY_PROGRAM_CACHE	nativeps5		titles/kyty-preset.env
 KYTY_PROGRAM_CACHE_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PROGRAM_CACHE_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_PROGRAM_CACHE_SAVE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PROGRAM_CACHE_VERIFY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PROGRAM_LOOKUP_MEMO	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1451,6 +1454,7 @@ KYTY_PROGRESS_OVERLAY_IN_DUMPS	kyty		src/graphics/progressOverlay.h
 KYTY_PROGRESS_OVERLAY_LOG	kyty		src/graphics/progressOverlay.h
 KYTY_PROGRESS_TITLE	kyty		src/graphics/compileProgress.h
 KYTY_PROGRESS_TITLE_LOG	kyty		src/graphics/compileProgress.h
+KYTY_PROGRESS_TITLE_LOG	nativeps5		scripts/nps5lib/cache.py
 KYTY_PS_APPEND_LIVE_ELECTION	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_PS_HELPER_ATOMICS_SKIP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_PS_LIVE_EXEC	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1482,6 +1486,7 @@ KYTY_READ_FAULT_DIAG_LINES	kyty		src/graphics/host_gpu/renderer/cache/bufferCach
 KYTY_READ_FAULT_PUBLISHED	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READ_FAULT_PUBLISHED_BURST	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READ_FAULT_PUBLISHED_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_READ_FAULT_PUBLISHED_FRAME_BURST	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READ_FAULT_PUBLISHED_STRADDLE	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_REALTIME_CLOCK	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_REBIND_AFTER_JOIN	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1531,6 +1536,7 @@ KYTY_SHADER_PRECOMPILE	kyty	`1` builds known shader permutations before the firs
 KYTY_SHADER_PRECOMPILE	nativeps5	`1` builds known shader permutations before the first frame	titles/kyty-preset.env
 KYTY_SHADER_PRECOMPILE_MAX	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SHADER_PRECOMPILE_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SHADER_PRECOMPILE_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_SHADER_PRECOMPILE_REPLAY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SHADER_PRECOMPILE_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SHADER_PRECOMPILE_WAIT	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1539,6 +1545,7 @@ KYTY_SHADER_WRITE_RETICK	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.
 KYTY_SHADER_WRITE_RETICK	nativeps5		titles/kyty-preset.env
 KYTY_SHORT_F32_HELPERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_SHORT_SLEEP_BLOCK	kyty		src/common/threads.cpp
+KYTY_SHUTDOWN_WAIT_MS	kyty		src/hybrid/kytyGpuBridge.cpp
 KYTY_SIDE_QUEUE	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_SIM_FAULT_US	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_SIM_PROTECT_PAGE_NS	kyty		src/graphics/host_gpu/faultCost.cpp
@@ -1550,6 +1557,7 @@ KYTY_SINGLE_F2I_SATURATION	kyty		src/graphics/shader/recompiler/CodegenOptions.c
 KYTY_SKIP_EMPTY_INDIRECT	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_SKIP_INACTIVE_PS	kyty		src/graphics/host_gpu/renderer/debug.cpp
 KYTY_SKIP_INVALID	kyty		src/common/skipInvalid.h
+KYTY_SMOKE_BAD_SCRIPT	anyps5		core/libs/nps5/tests/kyty_host_smoke.c
 KYTY_SPEC_CHURN_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SPEC_UNMAPPED_NULL	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_SPIN_GATE	kyty		src/common/spinGate.cpp
@@ -1590,11 +1598,13 @@ KYTY_SUBMISSION_MODE	kyty		src/common/profiler.cpp
 KYTY_SUBMISSION_MODE	nativeps5		titles/kyty-preset.env
 KYTY_SUBMIT_MIN_INTERVAL_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SUBMIT_WAIT_BEFORE_SIGNAL	kyty		src/graphics/host_gpu/queueSubmission.cpp
+KYTY_SWAPCHAIN_MAX_MB	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_SYNC_COMMAND_SPIN_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SYNC_EPOCH	kyty		src/graphics/host_gpu/syncEpoch.h
 KYTY_TARGET_DESC_MEMO	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_TEST_COMPARE_LINEAR_USES	kyty		tests/shaderCfgTests.cpp
 KYTY_TEST_COMPARE_LINEAR_USES_DUMP	kyty		tests/shaderCfgTests.cpp
+KYTY_TEST_RESIZE	kyty		src/graphics/presentation/window/window.cpp
 KYTY_TEST_SKIP_SPIRV_TEXT	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_VULKAN_VALIDATION	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_VULKAN_VALIDATION_IGNORE	kyty		tests/ShaderRecompilerComputeTests.cpp
@@ -1618,12 +1628,14 @@ KYTY_TEXTURE_PARTIAL_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/textureCa
 KYTY_TEXTURE_RESIDENT_IDLE_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEXTURE_RESIDENT_MIPS	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEXTURE_RESIDENT_TRIM	kyty	`1` creates the native image of a partly resident texture from its resident mip levels only (level-load peak -2.9..-3.2 GiB; canonical on)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_TEXTURE_RESIDENT_TRIM	nativeps5		tests/test_hw.py
 KYTY_TEXTURE_RESIDENT_TRIM_TEST_GROW	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEXTURE_SPARSE_RESIDENCY	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_TEXTURE_SPARSE_RESIDENCY	nativeps5		titles/kyty-preset.env
 KYTY_TEXTURE_STAGING_MB	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEXTURE_STAGING_REBAR	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEX_MIP_SKIP	kyty	`1|2|3` floors the first mip level of large sampled 2D textures; needs KYTY_TEXTURE_RESIDENT_TRIM=1; built, not measured in a title	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_TEX_MIP_SKIP	nativeps5		tests/test_hw.py
 KYTY_TEX_MIP_SKIP_MIN	kyty	smallest longest side (texels) a texture needs for KYTY_TEX_MIP_SKIP; default 1024	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TILER_CLEAR_SCRATCH	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
 KYTY_TILER_IMAGE_DIRECT	kyty		src/graphics/host_gpu/renderer/image/image.cpp
@@ -1668,6 +1680,7 @@ KYTY_VERTEX_FAILURE_DUMP	kyty		src/graphics/shader/shader.cpp
 KYTY_VMA_BUDGET_CACHE_MS	kyty		src/graphics/host_gpu/vma.cpp
 KYTY_VOLATILE_LOADS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_VRAM_BUDGET_MB	kyty	GPU memory budget of the back end; canonical 6144 on a 24 GB Mac	src/graphics/host_gpu/vma.cpp
+KYTY_VRAM_BUDGET_MB	nativeps5		tests/test_hw.py
 KYTY_VRAM_GC_BUDGET	kyty		src/graphics/host_gpu/vramBudget.cpp
 KYTY_VRAM_GC_BUDGET	nativeps5		titles/kyty-preset.env
 KYTY_VRAM_IDLE_BUFFER_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1688,6 +1701,8 @@ KYTY_WAVE32_CLUSTERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_WAVE64_WARPS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_WAVE64_WARPS_LOG	kyty		src/graphics/shader/recompiler/backend/spirv/SpirvEmitter.cpp
 KYTY_WIDE_FILL_CLEAR	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_WINDOW_FULLSCREEN	kyty		src/hybrid/kytyGpuBridge.cpp
+KYTY_WINDOW_STEPPED	kyty		src/hybrid/kytyGpuBridge.cpp
 KYTY_WRITE_DATA_GPU	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_WRITE_FAULT_WINDOW_KB	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_WRITE_RANGE_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1708,52 +1723,75 @@ NPS5_ADDR_IDENTITY	ps5recomp		pkg/guestmem/guestmem_test.go
 NPS5_AGC_WRITE_WATCH	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
 NPS5_AGC_WRITE_WATCH	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_ALLOW_GPU_PROFILE	anyps5	`1` lets run-title.sh accept GPU timestamp profiling switches for at most 40 s; kernel-panic history, do not use (docs/reference/machine-safety.md)	core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
-NPS5_ALLOW_GPU_PROFILE	nativeps5	`1` lets run-title.sh accept GPU timestamp profiling switches for at most 40 s; kernel-panic history, do not use (docs/reference/machine-safety.md)	scripts/run-title.sh
+NPS5_ALLOW_GPU_PROFILE	nativeps5	`1` lets run-title.sh accept GPU timestamp profiling switches for at most 40 s; kernel-panic history, do not use (docs/reference/machine-safety.md)	scripts/nps5lib/run.py
 NPS5_ANYPS5_BUILD	nativeps5		scripts/build.sh
-NPS5_ANYPS5_BUILD	ps5recomp		pkg/cli/gpu.go
+NPS5_ANYPS5_BUILD	ps5recomp		cmd/gpuscan/main.go
 NPS5_ANYPS5_DIR	nativeps5		nps5.conf.example
 NPS5_ANYPS5_HLE_H	ps5recomp		pkg/thunkgen/gen/main.go
 NPS5_ANYPS5_OWN_CLOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_ANYPS5_TRACE	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_APP0_DIR	nativeps5	the title's dump folder (read-only), mounted as /app0	scripts/run-title.sh
+NPS5_APP0_DIR	nativeps5	the title's dump folder (read-only), mounted as /app0	scripts/nps5lib/run.py
 NPS5_APP0_DIR	ps5recomp	the title's dump folder (read-only), mounted as /app0	pkg/cli/cli.go
 NPS5_ASM	ps5recomp		pkg/cli/asmpipe.go
+NPS5_ASTRO_FAST_LIGHTING	ps5recomp		pkg/cli/settingsdialog_test.go
+NPS5_ASTRO_REALTIME	nativeps5		tests/compare_env.sh
 NPS5_ASTRO_REALTIME	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_AUDIO_CAPTURE	ps5recomp		pkg/runtime/modules/libSceAudioOut/nps5_audio_capture.c
-NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	scripts/run-title.sh
+NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	tests/compare_env.sh
 NPS5_AUDIO_NULL	ps5recomp	`1` silent audio device; the default in run-title.sh	pkg/runtime/modules/libSceAudioOut/ps4_audioout.c
 NPS5_AVPLAYER_LOG	ps5recomp	`1` logs each video stream and its first three frames (sizes, pitch, crops, guest address)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_PITCH_ALIGN	ps5recomp	`=<n>` row pitch alignment of video frames from the AvPlayer HLE; default 256 for PS5 images (64 smeared 880-wide clips, docs/reference/rendering.md)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
-NPS5_BREW_PREFIX	nativeps5		scripts/nps5-env.sh
+NPS5_BREW_PREFIX	nativeps5		scripts/build.sh
 NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
+NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_CALL_IC	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_CHECKED_PTR	ps5recomp		pkg/cli/cli.go
 NPS5_CONF	nativeps5		scripts/nps5-env.sh
 NPS5_CRASH_MEM	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_DIAG_FULL_PATHS	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_DIAG_THREAD_ALTSTACK	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_DIFF_CONTROL	anyps5		core/libs/prx/libSceAgcDriver/tests/execution/F32ExtendedFlushDifferential.cpp
 NPS5_DIFF_REPORT_ONLY	anyps5		core/libs/prx/libSceAgcDriver/tests/execution/F32ExtendedFlushDifferential.cpp
 NPS5_DUMPS_DIR	nativeps5	folder that holds your own game dumps, outside every checkout, read-only	nps5.conf.example
 NPS5_DUMP_MAP	ps5recomp		pkg/runtime/core/recomp_runtime.c
 NPS5_DUMP_PCMAP	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_EH_TRACE	ps5recomp		pkg/runtime/core/nps5_eh.c
+NPS5_EXTRA_ENV	nativeps5		tests/compare_env.sh
 NPS5_FLUSH_STATS	anyps5		core/shader/recompiler/Translation/src/TranslationContext/OperandAccess.cpp
 NPS5_FORK_BASE	nativeps5		scripts/fetch-components.sh
+NPS5_FRAMERATE_BLOCK	nativeps5		games/game.py
 NPS5_FRAMERATE_BLOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MAX	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MIN	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_GPU	nativeps5	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	scripts/run-title.sh
+NPS5_FUNC_HOLD_LOAD	nativeps5		scripts/nps5-env.sh
+NPS5_GAMES_DIR	nativeps5		games/game.py
+NPS5_GAMES_FIRST	nativeps5		games/game.py
+NPS5_GPU	nativeps5	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	scripts/nps5lib/run.py
 NPS5_GPU	ps5recomp	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_GPU_BUDGET_MIB	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 NPS5_GPU_CACHE_DIR	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_GUARD_DIR	nativeps5		scripts/nps5lib/bench.py
+NPS5_GUARD_FAST_MB	nativeps5		host/machine_guard.sh
+NPS5_GUARD_HOLD_LOAD	nativeps5		host/machine_guard.sh
+NPS5_GUARD_HOLD_SWAP_MB	nativeps5		host/machine_guard.sh
+NPS5_GUARD_RUN_CAP_MB	nativeps5		host/machine_guard.sh
+NPS5_GUARD_SWAP_MB	nativeps5		host/machine_guard.sh
 NPS5_GUEST_QOS	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_HOME	ps5recomp		pkg/pack/library.go
+NPS5_HW	nativeps5		nps5.conf.example
+NPS5_HW_CACHE_KEY	nativeps5		scripts/nps5-env.sh
+NPS5_HW_CLASS	nativeps5		scripts/nps5-env.sh
 NPS5_HW_F32_FLUSH_EXT	anyps5		core/shader/recompiler/Float32FlushExt.hpp
 NPS5_HW_F32_FLUSH_GRAPHICS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 NPS5_IC_FLUSH_STRESS	ps5recomp		pkg/runtime/core/nps5_shadow.c
+NPS5_IGNORE_START_HOLD	nativeps5		scripts/nps5lib/run.py
 NPS5_INPUT_JSON	anyps5		core/libs/prx/libSceVideoOut/src/InputMapping.cpp
 NPS5_JOBS	ps5recomp		pkg/cli/cli.go
+NPS5_KK_DIR	nativeps5		scripts/nps5lib/cache.py
 NPS5_KK_ICD	nativeps5		scripts/nps5-env.sh
 NPS5_KK_INSTALL	nativeps5		scripts/nps5-env.sh
+NPS5_KK_INSTALL	ps5recomp		pkg/diag/tools.go
+NPS5_KK_LIBCACHE_BUILD	nativeps5		scripts/nps5lib/cache.py
 NPS5_KK_PREFIX	nativeps5		scripts/nps5-env.sh
 NPS5_KK_PREFIX	ps5recomp		pkg/pack/build.go
 NPS5_KK_WORK	nativeps5		nps5.conf.example
@@ -1776,11 +1814,13 @@ NPS5_LEAN_CHECK	ps5recomp		pkg/runtime/core/nps5_lean.c
 NPS5_LEAN_HOOKS	ps5recomp		pkg/runtime/core/nps5_lean.c
 NPS5_LIBKERNEL_HLE_H	ps5recomp		pkg/thunkgen/thunkgen_test.go
 NPS5_LOG	ps5recomp		pkg/diag/diag_test.go
+NPS5_LONG	nativeps5		tests/test_evidence_ab_report.py
 NPS5_LOWERING_ID	ps5recomp		pkg/emitter/lowering.go
 NPS5_MISS	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_MKDIR	ps5recomp		pkg/pack/assets/launcher.c
 NPS5_NO_BUNDLE	ps5recomp		pkg/cli/diag_hook.go
 NPS5_NO_HLE_COUNT	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_NO_LEVEL_ALIAS	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_NO_LEVEL_LOG	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_NO_PCMAP	ps5recomp		pkg/cli/cli.go
 NPS5_NO_PEEPHOLE	ps5recomp		pkg/cli/tier1_test.go
@@ -1788,10 +1828,14 @@ NPS5_NO_PERF	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_NO_STALL_CREDIT	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_NO_TERM_HANDLER	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_OVERLAY_DIR	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
-NPS5_PAD_LOG	anyps5		core/libs/prx/libSceVideoOut/src/PadInput.cpp
+NPS5_PAD_LOG	anyps5		core/libs/nps5/KytyHost.cpp
 NPS5_PAK_LOCALE_FALLBACK	ps5recomp		pkg/runtime/kernel/vfs/ps4_pak.c
+NPS5_PATCH_BOOT	nativeps5		tests/test_patch_real.py
+NPS5_PATCH_OTHER_NATIVE	nativeps5		tests/test_patch_real.py
+NPS5_PATCH_REAL	nativeps5		tests/test_patch_real.py
+NPS5_PATCH_SCRATCH	nativeps5		tests/test_patch_real.py
 NPS5_PCMAP_STRICT	ps5recomp		pkg/cli/cli.go
-NPS5_PERF	nativeps5		titles/example.env
+NPS5_PERF	nativeps5		tests/compare_env.sh
 NPS5_PERF	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_PERF_HUD	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_PERF_HZ	ps5recomp		pkg/runtime/core/nps5_perf.c
@@ -1803,16 +1847,22 @@ NPS5_PREBUILD_SECONDS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver
 NPS5_PROFILES	ps5recomp		pkg/pack/profile.go
 NPS5_PUBLIC_DIR	nativeps5		scripts/build.sh
 NPS5_RECOMP_DIR	nativeps5		nps5.conf.example
+NPS5_REGRESS_SKIP	nativeps5		scripts/nps5lib/regress.py
 NPS5_REPO	ps5recomp		pkg/pack/build.go
 NPS5_ROOT	nativeps5		nps5.conf.example
+NPS5_ROOT	ps5recomp		pkg/diag/tools.go
 NPS5_RUNS_DIR	anyps5		core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
-NPS5_RUNS_DIR	nativeps5		scripts/run-title.sh
+NPS5_RUNS_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_RUNS_DIR	ps5recomp		pkg/diag/bundle.go
-NPS5_RUN_REASON	nativeps5	free text; required by scripts/run-title.sh for a run longer than 90 s (cap 180 s)	scripts/prepare-pipelines.sh
+NPS5_RUNS_ROOT	nativeps5		scripts/nps5lib/ab.py
+NPS5_RUN_CLASS	nativeps5		scripts/nps5lib/run.py
+NPS5_RUN_REASON	nativeps5	free text; required by scripts/run-title.sh for a run longer than 90 s (cap 180 s)	scripts/run-title.sh
 NPS5_RUN_TAG	anyps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
-NPS5_RUN_TAG	nativeps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	scripts/run-title.sh
+NPS5_RUN_TAG	nativeps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	scripts/nps5lib/run.py
 NPS5_SAVEDATA_DIR	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SAVEDATA_TRACE	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
+NPS5_SCENE_OPEN_KEY	nativeps5		games/game.py
+NPS5_SCENE_OPEN_KEY	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_SCRATCH	nativeps5	folder outside every checkout for everything derived from a title: translated code, caches, runs, frame dumps	nps5.conf.example
 NPS5_SELF_MEM_LIMIT_MB	anyps5	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
 NPS5_SELF_MEM_LIMIT_MB	kyty	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	src/hybrid/kytyGpuBridge.cpp
@@ -1820,7 +1870,13 @@ NPS5_SELF_MEM_LIMIT_MB	nativeps5	process footprint limit in MiB; above it the pr
 NPS5_SETTINGS_DIALOG	ps5recomp		pkg/cli/settingsdialog_test.go
 NPS5_SHADOW_ENTRIES	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_SHADOW_STATS	ps5recomp		pkg/runtime/core/nps5_shadow.c
+NPS5_STACK_KK	nativeps5		scripts/nps5lib/cache.py
+NPS5_STACK_KYTY	nativeps5		scripts/nps5lib/cache.py
+NPS5_STACK_RECOMP	nativeps5		scripts/nps5lib/cache.py
 NPS5_SUPPORT_DIR	ps5recomp		pkg/pack/assets/launcher.c
+NPS5_TEST_FAST_LIGHTING	ps5recomp		pkg/emitter/patchpoints_test.go
+NPS5_TEST_HELLO_ELF	ps5recomp		pkg/disasm/hello_elf_ext_test.go
+NPS5_TEST_PS4_LIBC	ps5recomp		pkg/emitter/shim_test.go
 NPS5_TIER1_CACHE	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_CACHE_MB	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_MAX_CONCURRENT	ps5recomp		pkg/runtime/core/nps5_tier1.c
@@ -1829,10 +1885,13 @@ NPS5_TIER1_MAX_FRAGMENTS	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_SERVER	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_TIMEOUT_MS	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TITLE	ps5recomp		pkg/runtime/core/nps5_diag.c
-NPS5_TITLE_ID	anyps5	title ID of the run, for logs and cache names	core/libs/prx/libSceAgcDriver/Execution/src/CompileTitle.cpp
-NPS5_TITLE_ID	nativeps5	title ID of the run, for logs and cache names	scripts/run-title.sh
+NPS5_TITLE_ID	anyps5	title ID of the run, for logs and cache names	core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
+NPS5_TITLE_ID	nativeps5	title ID of the run, for logs and cache names	games/game.py
 NPS5_TITLE_ID	ps5recomp	title ID of the run, for logs and cache names	pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_TITLE_PRIO	nativeps5		scripts/nps5lib/run.py
+NPS5_TITLE_RESOLUTION	nativeps5		games/game.py
 NPS5_TITLE_RESOLUTION	ps5recomp		pkg/runtime/core/nps5_uecvar.c
+NPS5_TITLE_RUN	nativeps5		scripts/nps5lib/run.py
 NPS5_TRACE_CONDWAIT	ps5recomp		pkg/runtime/kernel/sync/ps4_sync.c
 NPS5_TRACE_HLE	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_TSO_RELAX_FUNCS	ps5recomp		pkg/cli/tier1_test.go
@@ -1844,13 +1903,21 @@ NPS5_UECVAR_SET	ps5recomp	Unreal Engine titles: `name=value[,..]` console variab
 NPS5_UECVAR_SET_FOR	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_UEMALLOC_POISON	ps5recomp		pkg/runtime/modules/libSceUeMalloc/nps5_uemalloc.c
 NPS5_UEMALLOC_STATS	ps5recomp		pkg/runtime/modules/libSceUeMalloc/nps5_uemalloc.c
+NPS5_USERDATA_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_USERDATA_DIR	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_DIRCACHE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_LOADPROFILE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_RAW_WRITE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_READLOG	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_VFS_TRACE_INI	ps5recomp		pkg/runtime/kernel/syscalls/ps4_syscalls.c
 NPS5_VPAD_ASYNC	anyps5		core/libs/prx/libSceVideoOut/src/PadInput.cpp
-NPS5_VPAD_SCRIPT	anyps5		core/libs/prx/libSceVideoOut/src/PadInput.cpp
+NPS5_VPAD_SCRIPT	anyps5		core/libs/nps5/KytyHost.cpp
+NPS5_VPAD_SCRIPT	nativeps5		scripts/nps5lib/run.py
 NPS5_VPAD_TYPE	anyps5		core/libs/prx/libSceVideoOut/src/PadInput.cpp
+NPS5_VPAD_TYPE	nativeps5		scripts/nps5lib/run.py
 NPS5_VULKAN_LIB	nativeps5		scripts/nps5-env.sh
 NPS5_VULKAN_LIB	ps5recomp		pkg/pack/build.go
+NPS5_WATCH	nativeps5		scripts/nps5lib/run.py
 NPS5_WINDOW_PERCENT	anyps5		core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp
 NPS5_WINDOW_PERCENT	kyty		src/graphics/presentation/window/window.cpp
 NPS5_WINDOW_SCREEN	anyps5	where the game window opens; `builtin:tl` = small, top-left of the built-in display	core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp
@@ -1859,18 +1926,18 @@ NPS5_WINDOW_SLOT_DIR	anyps5		core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp
 NPS5_WINDOW_SLOT_DIR	kyty		src/graphics/presentation/window/window.cpp
 NPS5_WINDOW_STACK	anyps5		core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp
 NPS5_WINDOW_STACK	kyty		src/graphics/presentation/window/window.cpp
-NPS5_WINDOW_TITLE_NAME	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/CompileTitle.cpp
+NPS5_WINDOW_TITLE_NAME	anyps5		core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
 NPS5_WINDOW_TOP	anyps5		core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp
 NPS5_WINDOW_TOP	kyty		src/graphics/presentation/window/window.cpp
-NPS5_WORKDIR	nativeps5		scripts/run-title.sh
+NPS5_WORKDIR	nativeps5		tests/compare_env.sh
 NPS5_YIELD_BACKOFF_AFTER	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_YIELD_BACKOFF_MIN_US	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_YIELD_BACKOFF_US	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_YIELD_SPIN_GAP_US	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_YIELD_STATS	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
-PS4RECOMP_CACHE_DIR	nativeps5		scripts/run-title.sh
+PS4RECOMP_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 PS4RECOMP_CACHE_DIR	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-PS4RECOMP_DATA_DIR	nativeps5		scripts/run-title.sh
+PS4RECOMP_DATA_DIR	nativeps5		scripts/nps5lib/run.py
 PS4RECOMP_DATA_DIR	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 PS4RECOMP_EBOOT	ps5recomp		pkg/elfloader/ehframe_test.go
 PS4RECOMP_SAVE_SILKSONG_TEST_DATA_2026	ps5recomp		tests/savedata_test/main.c
@@ -1883,6 +1950,7 @@ PS4_AUDIO_NULL	ps5recomp		pkg/runtime/modules/libSceAudioOut/ps4_audioout.c
 PS4_AUDIO_PADSPK	ps5recomp		pkg/runtime/modules/libSceAudioOut/ps4_audioout.c
 PS4_BACKGROUND_WINDOW	ps5recomp		pkg/runtime/modules/libScePad/ps4_pad.m
 PS4_COLORSPACE	ps5recomp		pkg/runtime/modules/libSceVideoOut/ps4_metal_screen.m
+PS4_DIRECT_MEM_SIZE	nativeps5		games/game.py
 PS4_DIRECT_MEM_SIZE	ps5recomp		pkg/runtime/kernel/memory/ps4_direct_mem.c
 PS4_DOWNLOAD0_DIR	ps5recomp		pkg/runtime/modules/libSceAppContent/ps4_app_content.c
 PS4_DUMP_SHADERS	ps5recomp		pkg/runtime/modules/libSceGnmDriver/ps4_gnm_metal.mm
@@ -1964,7 +2032,7 @@ PS4_GNM_WAIT_ON_PRESENT	ps5recomp		pkg/runtime/modules/libSceGnmDriver/ps4_gnm_d
 PS4_GNM_WATCH_WRITES	ps5recomp		pkg/runtime/modules/libSceGnmDriver/ps4_gnm_draw.mm
 PS4_GNM_WRITEBACK_ALL	ps5recomp		pkg/runtime/modules/libSceGnmDriver/ps4_gnm_draw.mm
 PS4_GUEST_WORKER_QOS	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
-PS4_LANG	nativeps5		scripts/run-title.sh
+PS4_LANG	nativeps5		tests/compare_env.sh
 PS4_LANG	ps5recomp		pkg/cli/settingsdialog_test.go
 PS4_LOG_TEST_NO_ABORT_HANDLER	ps5recomp		pkg/runtime/core/ps4_log.c
 PS4_MUTEX_EXTRA_US	ps5recomp		pkg/runtime/kernel/sync/ps4_sync.c
@@ -1972,7 +2040,7 @@ PS4_MUTEX_LEGACY	ps5recomp		pkg/runtime/kernel/sync/ps4_sync.c
 PS4_MUTEX_SPIN_US	ps5recomp		pkg/runtime/kernel/sync/ps4_sync.c
 PS4_MUTEX_STATS	ps5recomp		pkg/runtime/kernel/sync/ps4_sync.c
 PS4_NEO_MODE	ps5recomp		pkg/runtime/modules/libkernel/ps4_kernel_sys.c
-PS4_NO_DIALOGS	nativeps5		scripts/run-title.sh
+PS4_NO_DIALOGS	nativeps5		tests/compare_env.sh
 PS4_NO_DIALOGS	ps5recomp		pkg/cli/settingsdialog_test.go
 PS4_NO_LATENCY_ACTIVITY	ps5recomp		pkg/runtime/modules/libSceVideoOut/ps4_metal_screen.m
 PS4_NO_PHYS_ALIAS	ps5recomp		pkg/runtime/kernel/memory/ps4_direct_mem.c
@@ -1984,7 +2052,7 @@ PS4_PAD_CTL	ps5recomp		pkg/runtime/modules/libScePad/ps4_pad.m
 PS4_PAD_SCRIPT	ps5recomp		pkg/runtime/modules/libScePad/ps4_pad.m
 PS4_PRESENT_MODE	ps5recomp		pkg/runtime/modules/libSceVideoOut/ps4_metal_screen.m
 PS4_PRO	ps5recomp		pkg/runtime/modules/libSceSystemService/ps4_settings.m
-PS4_RECOMP_HEADLESS	nativeps5		scripts/run-title.sh
+PS4_RECOMP_HEADLESS	nativeps5		tests/compare_env.sh
 PS4_RECOMP_HEADLESS	ps5recomp		pkg/runtime/modules/libSceErrorDialog/ps4_error_dialog.m
 PS4_RECOMP_MEM	ps5recomp		pkg/runtime/core/recomp_runtime.c
 PS4_RETAIL_EBOOT	ps5recomp		pkg/elfloader/nid_test.go
