@@ -5,6 +5,8 @@ pinned commits are in [components.lock](components.lock).
 
 ## Unreleased
 
+- In-game UI text renders again (menu captions, "PRESS ANY BUTTON", copyright): the libSceFont glyph API the game uses
+  is implemented instead of returning an error.
 - ASTRO BOT `upscaling` setting (`off` default, `metalfx900`, `metalfx720`): renders the scene at 900p/720p and scales
   it with Apple MetalFX (spatial) inside KosmicKrisp (patches 0021-0022). Experimental: both lower sizes show block
   artefacts on moving objects (some game passes keep a 1080p size), so the default stays native 1080p.
