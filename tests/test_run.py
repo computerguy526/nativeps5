@@ -238,6 +238,15 @@ class T(unittest.TestCase):
         self.assertIn("  A_ALL=1\n", s); self.assertIn("command: ", s); self.assertIn("/b/native -guest -x", s)
 
 
+    def test_kyty_until_dumps_frames_for_the_watcher(self):
+        # the Kyty back end prints no [pstat] line: with a target the watcher needs frame dumps in <run>/frames
+        self.titles("APP0=/dump\nBIN=/b/native\nGPU=kyty\n")
+        p = self.plan(["--until", "first-present+10"])
+        self.assertEqual(p.env["KYTY_DUMP_FRAMES"], "150"); self.assertEqual(p.layers["KYTY_DUMP_FRAMES"], "watch")
+        self.assertEqual(p.env["KYTY_DUMP_DIR"], os.path.join(p.run_dir, "frames"))
+        self.assertEqual(self.plan(["--until", "first-present", "--env", "KYTY_DUMP_FRAMES=7"]).env["KYTY_DUMP_FRAMES"], "7")
+        self.assertNotIn("KYTY_DUMP_FRAMES", self.plan([]).env)
+
     def test_bad_until_refused(self):
         self.titles("APP0=/dump\nBIN=/b/native\n")
         self.assertIn("--until", self.refused(["--until", "marker:nope"], 2))

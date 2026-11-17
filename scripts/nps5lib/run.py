@@ -377,6 +377,11 @@ def compose(tid, opts, environ=None, g=None):
         else:
             kl = environ.get("NPS5_KYTY_GPU_LIB") or os.path.join(environ["NPS5_KYTY_DIR"], "build-arm64", "kyty_gpu.dylib")
         plan.put("NPS5_GPU", "kyty", "back end"); plan.put("NPS5_KYTY_GPU_LIB", kl, "back end")
+        if until:
+            # The Kyty back end prints no [pstat] line: the watcher sees its presents and pictures through frame dumps in
+            # <run>/frames (one small BMP every 15th present, at most 150). Any later layer may override these words.
+            plan.put("KYTY_DUMP_FRAMES", "150", "watch"); plan.put("KYTY_DUMP_FRAMES_EVERY", "15", "watch")
+            plan.put("KYTY_DUMP_DIR", os.path.join(run_dir, "frames"), "watch")
     # 2. profile (preset, rows, schema keys, forbidden words)
     try:
         for k, v, layer in g.compose_env(p, gpu, scene, None, cls, g.resolve_hw(None, environ)):   # hardware rows: this Mac or NPS5_HW
