@@ -1,0 +1,27 @@
+# nativeps5 local configuration. Copy to nps5.conf (git ignores it) and edit; scripts/nps5-env.sh reads it.
+# Every value may also come from the environment, which wins.
+
+# Workspace root: where the component repositories and build outputs live (default: the folder that holds this
+# checkout, e.g. nativeps5-ws/ in BUILDING.md).
+#NPS5_ROOT=
+
+# Component checkouts (defaults under NPS5_ROOT, as scripts/fetch-components.sh lays them out)
+#NPS5_RECOMP_DIR=$NPS5_ROOT/ps5recomp
+#NPS5_ANYPS5_DIR=$NPS5_ROOT/anyps5               # optional, not public: only if you have your own AnyPS5 arm64 checkout
+#NPS5_KYTY_DIR=$NPS5_ROOT/kyty
+#NPS5_KK_WORK=$NPS5_ROOT/build/kosmickrisp        # Mesa checkout, build dir and install prefix
+
+# Your own game dumps: OUTSIDE every git checkout, never written to. One folder per title, as dumped
+# (eboot.bin, sce_sys/, sce_module/, ...).
+#NPS5_DUMPS_DIR=
+
+# Scratch for translated code, work dirs, caches, run output, frame dumps (large; outside git checkouts)
+#NPS5_SCRATCH=$NPS5_ROOT/scratch
+
+# Machine limits. Leave unset to derive them from this Mac (scripts/nps5-env.sh):
+#   NPS5_SELF_MEM_LIMIT_MB  = 37/48 of physical RAM (18944 on a 24 GB Mac). Never raise it: it protects the machine.
+#   NPS5_BUILD_JOBS         = 2/5 of the performance cores, 2 to 4 (builds also run at nice 5)
+#   NPS5_GUARD_*            = the machine guard's thresholds (docs/reference/hardware.md has every formula)
+# `python3 scripts/nps5lib/hw.py doctor` prints what this Mac gets. NPS5_HW=<spec> replaces detection (tests, what-if).
+#NPS5_SELF_MEM_LIMIT_MB=
+#NPS5_BUILD_JOBS=

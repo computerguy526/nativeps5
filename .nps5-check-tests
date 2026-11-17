@@ -1,0 +1,15 @@
+scripts/check.sh --selftest
+for f in scripts/*.sh host/*.sh kosmickrisp/build-kosmickrisp.sh tools/*/*.sh; do bash -n "$f" || exit 1; done
+python3 -I -m py_compile scripts/nps5_check.py tools/xray/xray.py tools/agxdis/agxdis.py tools/shaderlab/*.py host/gpucache_prune.py games/game.py tests/test_game.py scripts/nps5lib/hw.py tests/test_hw.py
+python3 -I tests/test_game.py
+python3 -I tests/test_hw.py
+python3 -I tests/test_patch.py
+python3 -I tests/test_patch_props.py
+python3 -I tests/test_patch_real.py   # needs-dump tier: skipped unless NPS5_PATCH_REAL=1 and the boot binaries exist
+python3 -I -m py_compile scripts/nps5lib/stats.py scripts/nps5lib/frames.py scripts/nps5lib/bmp.py scripts/nps5lib/analyze.py scripts/nps5lib/ab.py scripts/nps5lib/pics.py scripts/nps5lib/report.py tests/evfix.py
+python3 -I tests/test_evidence_stats.py
+python3 -I tests/test_evidence_analyze.py
+python3 -I tests/test_evidence_pics.py
+python3 -I tests/test_evidence_ab_report.py
+[ -z "$NPS5_PRIVATE_TESTS" ] || bash "$NPS5_PRIVATE_TESTS"   # the private workspace's script tests (tools-host/tests/run.sh), when it is set
+python3 -I tests/test_watch.py

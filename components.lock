@@ -1,0 +1,8 @@
+# name | licence | upstream | upstream base | repository (NPS5_FORK_BASE is the URL prefix; default below) | branch | commit
+# Public components. scripts/fetch-components.sh clones these two; KosmicKrisp is built from kosmickrisp/ here.
+ps5recomp | GPL-2.0-only | https://github.com/wie-project/PS4Recomp.git | 65ac2fbb3c5bacce9e1cb69dc5acee4a71ea0cff | ${NPS5_FORK_BASE}/nativeps5-recomp | main | 8f43cdbdc4554d92f69dfc04772643c0c5a3cb39
+kyty      | GPL-2.0-only | https://github.com/Jetsku/KytyPS5.git        | 744705ee1df4b0acb1af382ff5c32ca4a20aa5f7 (tag u59-windows-20261024-int21) | ${NPS5_FORK_BASE}/nativeps5-kyty | main | 69e0cab6357c28e31975dc7f5b4b9ea0a51b5e5c
+mesa      | MIT          | https://gitlab.freedesktop.org/mesa/mesa.git | see kosmickrisp/MESA_COMMIT              | (none: kosmickrisp/patches is applied on the pin) | - | tree in kosmickrisp/EXPECTED_TREE
+# Optional and NOT public: the AnyPS5 fork (arm64 host libraries: PS5 system libraries, AGC driver, shader
+# recompiler; upstream https://github.com/boykopovar/AnyPS5, GPL-2.0, base ea0c471cbc). It is never fetched by the
+# scripts. With your own arm64 build of it, set NPS5_ANYPS5_BUILD (BUILDING.md, step 6).

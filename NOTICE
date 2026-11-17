@@ -1,0 +1,53 @@
+nativeps5
+=========
+
+This repository is licensed under the GNU General Public License, version 2 only (LICENSE), except the folder
+kosmickrisp/, which is under the MIT licence (kosmickrisp/LICENSE). The component repositories keep the licence of
+their upstream and carry their own NOTICE files, which list further credits (FEX-Emu, RPCS3, ARMSX2/3, shadPS4 and
+others).
+
+Components (separate repositories; see components.lock)
+-------------------------------------------------------
+PS4Recomp        https://github.com/wie-project/PS4Recomp          GPL-2.0   base of nativeps5-recomp (checked out as ps5recomp/)
+KytyPS5          https://github.com/Jetsku/KytyPS5                 GPL-2.0   base of nativeps5-kyty (checked out as kyty/), tag
+                                                                             u59-windows-20261024-int21; Kyty's original code by
+                                                                             InoriRus is MIT (LICENSES/Kyty-MIT.txt there)
+Mesa             https://gitlab.freedesktop.org/mesa/mesa          MIT       kosmickrisp/patches applies on the commit in
+                                                                             kosmickrisp/MESA_COMMIT; no Mesa source is included here
+AnyPS5           https://github.com/boykopovar/AnyPS5              GPL-2.0   NOT included and not fetched: the runtime can load the
+                                                                             arm64 host libraries of an AnyPS5 build as an optional
+                                                                             external component. Documents and game profiles here
+                                                                             describe that back end and name its settings (APS5_*).
+
+AstroHybrid patch series
+------------------------
+https://github.com/imnotsharingmyname/pcportastrobot, folder Source/kyty-hybrid (36 patches on KytyPS5). The series
+is a derivative of the GPL-2.0 KytyPS5 and is used under GPL-2.0: nativeps5-kyty carries it as 36 commits with
+their author, directly on the upstream tag (the GPU bridge, src/hybrid/, the u59 preset), and
+titles/kyty-preset.env here restates the preset of that tree (tools/u59-preset.json) as environment words. Running
+Kyty's renderer inside a natively translated program is that author's idea; credit for that work belongs to them. Nothing else from that repository (its launcher application, documents,
+release tooling), which carries no licence, is included or was copied; it was read for ideas only.
+
+NXNative
+--------
+https://github.com/seedds/nxnative, MIT License, Copyright (c) 2026 seedds. Read as a reference for running
+console games natively on Apple platforms. Reused with attribution in the component repositories: the ordering of
+MetalFX upscaling relative to encoder barriers and the conventions for passing a game's own upscaler inputs to
+MetalFX, and the cap on shader loop iterations. The contribution rules in CONTRIBUTING.md and AGENTS.md follow the
+shape of NXNative's. The MIT permission notice applies to those portions:
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+    documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+    to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above
+    copyright notice and this permission notice shall be included in all copies or substantial portions of the
+    Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+Tools fetched at build time, not included
+-----------------------------------------
+applegpu         https://github.com/dougallj/applegpu              BSD-3-Clause   tools/agxdis/build.sh clones it
+applegpu (M3)    https://github.com/TellowKrinkle/applegpu         BSD-3-Clause   branch M3; tools/agxdis/build.sh clones it
+agx-re           https://github.com/ADevWithAnIdea/agx-re          GPL-3.0        NOT included, NOT fetched by default and never distributed
+                                                                                  with this project (GPL-3.0 does not combine with
+                                                                                  GPL-2.0-only); optional name/length tables for
+                                                                                  tools/agxdis, opt in with AGXDIS_NO_AGXRE=0

@@ -1,0 +1,2 @@
+# SPIR-V built from the GLSL next to it (scalar4.comp, vec4.comp) with glslangValidator; not from a title.
+tools/xray/tests/fixtures/*.spv
