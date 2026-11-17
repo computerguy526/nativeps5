@@ -1,0 +1,111 @@
+name: Bug report
+description: A title or test crashes, hangs, stops, or renders wrongly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search open and closed issues for the error text first, and comment there if it is already reported.
+        A new title goes into the [Game bring-up](https://github.com/computerguy526/nativeps5/issues/new?template=game_bringup.yml) form, a slow scene into the [Performance](?template=performance.yml) form.
+        Read [CONTRIBUTING.md](https://github.com/computerguy526/nativeps5/blob/main/CONTRIBUTING.md) ("Never game data") before you attach anything. Paste text; do not attach files from a game.
+  - type: input
+    id: summary
+    attributes:
+      label: What happens
+      description: One sentence, with the exact error text if there is one.
+    validations:
+      required: true
+  - type: input
+    id: title
+    attributes:
+      label: Title ID and version
+      description: For example `PPSA21564` and its content version, or the test or homebrew name.
+    validations:
+      required: true
+  - type: input
+    id: scene
+    attributes:
+      label: Where in the title
+      description: Boot, menu, cutscene, level name, or the step that fails.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands and settings, from a clean checkout if you can.
+      placeholder: |
+        1. scripts/nps5 run PPSAxxxxx --scene ...
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often
+      options:
+        - Every time
+        - Most runs
+        - Sometimes
+        - Once
+        - Not tried again
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`scripts/nps5 doctor` output"
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: "`nps5 report <run>` output, or the crash bundle"
+      description: |
+        Paste the report of the failing run (docs/agents/evidence.md), or for a crash the contents of `crash.txt` and `manifest.json` from the crash bundle. Paths in them are already redacted to `~`; check for anything else personal before pasting. Trim long logs to the lines around the failure.
+      render: text
+  - type: input
+    id: machine
+    attributes:
+      label: Mac model, macOS and Xcode
+      placeholder: MacBook Pro M4 Pro 24 GB, macOS 26.1, Xcode 26.1
+    validations:
+      required: true
+  - type: textarea
+    id: commits
+    attributes:
+      label: Component commits
+      description: "`components.lock` of the checkout, or the commits `nps5 doctor` prints (nativeps5, ps5recomp, Kyty / AnyPS5, KosmicKrisp), plus any local changes."
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings and environment switches
+      description: Every `NPS5_*`, `KYTY_*`, `APS5_*` or other switch you set, and `nps5.conf` changes. Say "defaults" if none.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: No game files, shaders, journals, frame dumps, caches or anything extracted from a game attached
+          required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI assistance
+      description: Did an AI agent help write this report? If yes, a person has read it and the evidence.
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true

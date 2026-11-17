@@ -1,0 +1,108 @@
+name: Game bring-up
+description: Report a new title, or progress on one, and offer to help.
+labels: [bring-up]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One issue per title ID: search open and closed issues first, and comment there if one exists.
+        Text only: title IDs, versions, addresses, hashes, counts, timings and log lines. Read [CONTRIBUTING.md](https://github.com/computerguy526/nativeps5/blob/main/CONTRIBUTING.md) ("Never game data") and [games/README.md](https://github.com/computerguy526/nativeps5/blob/main/games/README.md) for what a profile holds.
+        You need your own legally obtained dump. Do not share it, or anything taken from it.
+  - type: input
+    id: title
+    attributes:
+      label: Title, ID and version
+      description: Name, title ID and content version.
+      placeholder: Game name, PPSA00000, 01.000.000
+    validations:
+      required: true
+  - type: input
+    id: region
+    attributes:
+      label: Region
+      placeholder: EU / US / JP / ...
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Back end tried
+      options:
+        - Kyty
+        - AnyPS5
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: works
+    attributes:
+      label: How far it gets
+      options:
+        - label: Translates and builds (`nps5 build`)
+        - label: Boots (first frame is presented)
+        - label: Menus
+        - label: In-game
+        - label: Stable for 10 minutes or more
+  - type: textarea
+    id: status
+    attributes:
+      label: What works and what does not
+      description: Picture, audio, input, loading times, crashes, in order of what blocks you.
+    validations:
+      required: true
+  - type: textarea
+    id: survey
+    attributes:
+      label: Bring-up output
+      description: "Output of `scripts/nps5 doctor`, `nps5 list` and the failing `nps5 build` or `nps5 run <id>` step (and `nps5 report <run>` if a run completed). There is no separate survey command yet; paste what you have."
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log summary
+      description: The first error, the last lines before a stop, counts of unimplemented calls or missing symbols. Trimmed, text only.
+      render: text
+  - type: input
+    id: machine
+    attributes:
+      label: Mac model, macOS and Xcode
+      placeholder: MacBook Pro M4 Pro 24 GB, macOS 26.1, Xcode 26.1
+    validations:
+      required: true
+  - type: textarea
+    id: commits
+    attributes:
+      label: Component commits and settings
+      description: "`components.lock` or the commits `nps5 doctor` prints, and every `NPS5_*`, `KYTY_*`, `APS5_*` switch you set."
+    validations:
+      required: true
+  - type: dropdown
+    id: help
+    attributes:
+      label: Can you help?
+      description: Testing builds, bisecting, reading logs or writing a profile.
+      options:
+        - "I can test builds"
+        - "I can test and bisect"
+        - "I can send a pull request"
+        - "Just reporting"
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: No game files, shaders, journals, frame dumps, caches or anything extracted from a game attached
+          required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI assistance
+      description: Did an AI agent help write this report? If yes, a person has read it and the evidence.
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true

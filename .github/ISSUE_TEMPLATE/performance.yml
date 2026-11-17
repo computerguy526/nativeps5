@@ -1,0 +1,94 @@
+name: Performance
+description: A slow scene, a stutter, or a change in speed between two commits.
+labels: [performance]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Perf runs need a quiet machine (see [AGENTS.md](https://github.com/computerguy526/nativeps5/blob/main/AGENTS.md)); measure with `nps5 run`, `nps5 bench` and `nps5 report` ([docs/agents/evidence.md](https://github.com/computerguy526/nativeps5/blob/main/docs/agents/evidence.md)). Identical runs differ by up to 3 fps, so give several runs.
+        Search [docs/learnings.md](https://github.com/computerguy526/nativeps5/blob/main/docs/learnings.md) and [docs/playbook.md](https://github.com/computerguy526/nativeps5/blob/main/docs/playbook.md) first: the idea may be measured already.
+        Numbers and log lines only. Never attach game files, caches or frame dumps.
+  - type: input
+    id: title
+    attributes:
+      label: Title ID, version and scene
+      placeholder: PPSA21564 01.000, hoover_beach
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Frame time and fps
+      description: "p50 / p95 / fps over the steady window, from `nps5 report <runs>` or `nps5 bench <id> --route NAME`; run length and number of runs."
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Is it a regression
+      options:
+        - "No, it was never faster"
+        - "Yes, it was faster before"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: commits
+    attributes:
+      label: Before and after commits
+      description: For a regression, the good and the bad commit (`components.lock` or `nps5 doctor`) and the numbers of each; `nps5 ab` output if you have it. Otherwise the commits you ran.
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: Fast lighting, upscaling (MetalFX), resolution and every other switch you set. Say "defaults" if none.
+    validations:
+      required: true
+  - type: input
+    id: machine
+    attributes:
+      label: Mac model, macOS and memory
+      placeholder: MacBook Pro M4 Pro 24 GB, macOS 26.1
+    validations:
+      required: true
+  - type: dropdown
+    id: quiet
+    attributes:
+      label: Quiet machine
+      description: Nothing else running that uses CPU or GPU during the run, run class perf.
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: shaders
+    attributes:
+      label: Shader compiles in the run
+      description: Live (on-demand) shader and pipeline compile counts from the run's log or `nps5 report`, and whether the pipeline list and compiled caches were warm (`nps5 cache status <id>`).
+      render: text
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`scripts/nps5 doctor` output"
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: No game files, shaders, journals, frame dumps, caches or anything extracted from a game attached
+          required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI assistance
+      description: Did an AI agent help write this report? If yes, a person has read it and the evidence.
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true
