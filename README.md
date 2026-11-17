@@ -4,7 +4,7 @@ Play your own PlayStation 5 games natively on Apple silicon Macs. The game's x86
 
 It is not an emulator: there is no JIT and no interpreter. Nothing from any game is in this repository or in its component repositories, and the project is not affiliated with Sony Interactive Entertainment or any game publisher. "PlayStation" and "PS5" are trademarks of their owners.
 
-[Games](#games) · [How it fits together](#how-it-fits-together) · [Requirements](#requirements) · [How to play](#how-to-play) · [For developers](#for-developers) · [Credits and licences](#credits-and-licences)
+[Games](#games) · [How it fits together](#how-it-fits-together) · [Requirements](#requirements) · [How to play](#how-to-play) · [For developers](#for-developers) · [Acknowledgements](#acknowledgements) · [License](#license)
 
 ## Games
 
@@ -101,14 +101,20 @@ If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an is
 
 Questions and bugs: open an issue or a discussion on this repository.
 
-## Credits and licences
+## Acknowledgements
 
-This repository is GPL-2.0-only ([LICENSE](LICENSE)), except `kosmickrisp/`, which is MIT like Mesa. The three components are forks that keep the licence of their upstream: PS4Recomp, KytyPS5 and AnyPS5 (all GPL-2.0), each with its own NOTICE.
+This project is built on other people's work ([NOTICE](NOTICE) has the licence texts and the full list; each component repository carries its own):
 
-- [PS4Recomp](https://github.com/wie-project/PS4Recomp): the translator and runtime this project is built on.
-- [KytyPS5](https://github.com/Jetsku/KytyPS5) (Kyty's original code by InoriRus is MIT) and the AstroHybrid `kyty-hybrid` patch series: running Kyty's renderer inside a natively translated program is that author's idea, and credit for that work belongs to them.
-- [AnyPS5](https://github.com/boykopovar/AnyPS5): the PS5 system libraries.
-- [Mesa](https://gitlab.freedesktop.org/mesa/mesa) and its KosmicKrisp driver; the patches here are MIT.
-- [NXNative](https://github.com/seedds/nxnative) (MIT): read as a reference, with a few ideas reused with attribution; this README and the contribution rules follow the shape of its.
+- **[PS4Recomp](https://github.com/wie-project/PS4Recomp)** (GPL-2.0) is the static recompiler this project grew from: the x86-64 to native translator and the runtime that runs the result. `nativeps5-recomp` is a fork of it, and its history is kept.
+- **[KytyPS5](https://github.com/Jetsku/KytyPS5)** (GPL-2.0; Kyty's original code by InoriRus is MIT) provides the PS5 GPU renderer and shader recompiler. `nativeps5-kyty` builds it as `kyty_gpu.dylib` for arm64 macOS.
+- **[AstroHybrid](https://github.com/imnotsharingmyname/pcportastrobot)**, folder `Source/kyty-hybrid`: a series of 36 patches on KytyPS5 (the GPU bridge that lets Kyty's renderer run inside a natively translated program, and the tuning preset). The series is a derivative of GPL-2.0 KytyPS5 and `nativeps5-kyty` carries it with its authorship. Running Kyty's renderer inside a native program is that author's idea. The rest of that repository has no licence, so nothing else was copied; it was read for ideas only.
+- **[AnyPS5](https://github.com/boykopovar/AnyPS5)** (GPL-2.0) provides the PS5 system libraries (libkernel, libc, pad, audio and about 1,300 other exports) and the AGC graphics driver. `nativeps5-anyps5` builds the arm64 macOS host side.
+- **[Mesa](https://gitlab.freedesktop.org/mesa/mesa) and KosmicKrisp** (MIT) are the Vulkan-on-Metal driver every picture goes through. This repository carries a patch series on a pinned Mesa commit (pipeline archive, mesh shaders, shader trims) and no Mesa source.
+- **Libraries the Kyty and AnyPS5 builds pull in as submodules**, each under its own licence: [SDL3](https://github.com/libsdl-org/SDL), [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools), [SPIRV-Headers](https://github.com/KhronosGroup/SPIRV-Headers), [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers), [glslang](https://github.com/KhronosGroup/glslang) (AnyPS5 build), [VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator), [xxHash](https://github.com/Cyan4973/xxHash), [zstd](https://github.com/facebook/zstd), [FreeType](https://github.com/freetype/freetype), [Dear ImGui](https://github.com/ocornut/imgui), [fmt](https://github.com/fmtlib/fmt) and [spdlog](https://github.com/gabime/spdlog), [LibAtrac9](https://github.com/shadps4-emu/ext-LibAtrac9) and others listed in the `.gitmodules` of each repository. The build tools (Go, CMake, Meson, Python with mako, pyyaml and packaging) are used, not distributed.
+- **[NXNative](https://github.com/seedds/nxnative)** (MIT): read as a reference for running console games natively on Apple platforms. A few conventions were reused with attribution (see [NOTICE](NOTICE)); the contribution rules and this README follow the shape of its.
 
-Further credits (FEX-Emu, RPCS3, ARMSX2/3, shadPS4 and others) are in [NOTICE](NOTICE).
+Thanks also to the projects whose research this work leans on and that are credited in [NOTICE](NOTICE): FEX-Emu, RPCS3, ARMSX2/3 and shadPS4.
+
+## License
+
+GPL-2.0-only ([LICENSE](LICENSE)) for this repository and for the forks, which keep the licence of their upstream. The KosmicKrisp patches in `kosmickrisp/` are MIT, as Mesa. Third-party code keeps its own licence.
