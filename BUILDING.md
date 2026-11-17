@@ -125,24 +125,33 @@ game files. Rules:
 ## 7. Translate a title (needs your dump)
 
 ```sh
-../ps5recomp/bin/nps5 build "$NPS5_DUMPS_DIR/<title folder>" -o "$NPS5_SCRATCH/apps" [--profile <name>]
+../ps5recomp/bin/nps5 build "$NPS5_DUMPS_DIR/<title folder>" -o "$NPS5_SCRATCH/apps" -j 4
 ```
 
 `nps5 build` translates `eboot.bin` in-process, compiles the runtime, links the native program and assembles a
 `.app` (`ps5recomp/docs/m3/packaging.md`: stages, profiles, the toolkit variables `NPS5_ANYPS5_BUILD`,
-`NPS5_KK_PREFIX=$NPS5_KK_WORK/install-arm64`, `NPS5_VULKAN_LIB`). Translation of a large title takes tens of minutes
-and several GB of scratch.
+`NPS5_KK_PREFIX=$NPS5_KK_WORK/install-arm64`, `NPS5_VULKAN_LIB`). A build profile in `ps5recomp/profiles/<title id>.json`
+is picked up by title id (`--profile <name>` overrides it). Source `scripts/nps5-env.sh` first so the toolkit
+variables are set. The translated native program is written to `~/Library/Application Support/nativeps5/<title id>/build/native`
+(about 650 MB for a large title); the link step reports a handful of `STUBBED ... unresolved symbol` lines for the GPU
+bridge, which is expected. Translation of a large title takes about 11 minutes and several GB of scratch
+(verified below with ASTRO BOT, 4 jobs).
 
 ## 8. Run (needs your dump and a GPU)
 
 ```sh
-cp titles/example.env titles/<TITLE ID>.env      # set BIN (the translated native program), APP0 (your dump), GPU
+cp titles/example.env titles/<TITLE ID>.env      # set BIN (the translated native program), APP0 (your dump), GPU=kyty
 scripts/nps5 run <TITLE ID> --dry-run            # prints the environment, the binary and the command; runs nothing
-scripts/nps5 run <TITLE ID>                      # logs and run.json in $NPS5_SCRATCH/runs/<TITLE ID>/<tag>
+scripts/nps5 run <TITLE ID> --scene title --until first-present+10 --class func
 ```
 
-`nps5 run` allows one title run at a time, sets a memory self-limit of 37/48 of RAM (18944 MiB on 24 GB), refuses
-GPU counter-heap profiling, caps runs at 90 s unless you give a reason, scrubs the environment and silences audio.
+Logs, frame dumps and `run.json` go to `$NPS5_SCRATCH/runs/<TITLE ID>/<tag>`. `--until first-present+10` stops the
+run ten seconds after the first frame is presented; look for a picture in the frame dumps. A first run has a cold
+shader cache, so give it `--secs 180` and `NPS5_RUN_REASON="<why>"` (runs are capped at 90 s without a reason).
+
+`nps5 run` allows one title run at a time, refuses to start while another GPU-using process is running (exit 75; the
+check also matches other `native_*` processes), sets a memory self-limit of 37/48 of RAM (18944 MiB on 24 GB),
+refuses GPU counter-heap profiling, scrubs the environment and silences audio.
 Read [AGENTS.md](AGENTS.md), "Running safely", before starting GPU work: these rules exist because breaking them
 has rebooted the development machine.
 
@@ -163,28 +172,28 @@ reference until it is adapted to this layout.
 
 ## What was verified
 
-From fresh clones of the three repositories in an empty directory, with a scrubbed environment (`env -i`, PATH =
+From fresh clones of the four repositories in an empty directory, with a scrubbed environment (`env -i`, PATH =
 Homebrew + system, an empty HOME, so cold Go and pip caches), at nice 10 with 4 jobs, while other work ran on the
-machine (2026-11-17, M4 Pro 24 GB, macOS 26):
+machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components at `components.lock` (recomp f1a5d35, Kyty d9cadb65,
+AnyPS5 bff91d13); the repositories were cloned from local copies because the GitHub URLs did not exist yet.
 
 | Step | Result | Time |
 |---|---|---|
-| 0: venv with mako, pyyaml, packaging | ok | under 1 min |
-| 1: clone, `nps5.conf`, hook, `fetch-components.sh` (from local copies of the repositories; the GitHub URLs did not exist yet) | ok | seconds |
-| `scripts/check.sh --tree --tests` in this repository; `--tree` in the two components | clean | 12 s; 2 s |
+| 0: venv with mako, pyyaml, packaging | ok | 11 s |
+| 1: clone, `nps5.conf`, hook, `fetch-components.sh` | ok | 3 s |
+| `scripts/check.sh --tree --tests` in this repository; `--tree` in the three components | clean | clean, 0 failures (the entry repository also runs its tests) |
 | pre-commit hook with a planted ELF named `notes.txt` | commit refused | - |
-| 2: `scripts/build.sh recomp` (Go 1.25 downloaded the 1.27.1 toolchain) | ok | about 4 min, cold cache |
-| 2: `go test ./pkg/diag/ ./pkg/elfloader/ ./pkg/disasm/` | ok (sample-ELF tests skip) | under 1 min |
-| 2: `nps5 doctor` | ok | seconds |
-| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 15 patches, configure, compile (580 steps), install | ok; source tree = `EXPECTED_TREE` | about 4 min |
+| 2: `scripts/build.sh recomp` (Go 1.25 downloaded the 1.27.1 toolchain), `go test ./pkg/diag/ ./pkg/elfloader/ ./pkg/disasm/`, `nps5 doctor` | ok (sample-ELF tests skip) | 40 s (about 4 min on the first pass, with colder caches) |
+| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 15 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 52 s (about 4 min on the first pass) |
 | 3: `vulkaninfo` with the built ICD | NOT RUN (opens a GPU device; the test was CPU only) | - |
-| 4: `scripts/build.sh kyty`: submodules, configure, compile (795 steps), link | ok after one fix (a codegen fingerprint check that only a full CMake build runs) | about 20 min |
+| 5: `scripts/build.sh anyps5`: seven submodules, configure, build of five targets | ok after one fix (the glslang submodule) | 189 s |
+| 4: `scripts/build.sh kyty`: submodules, configure, compile (795 steps), link | ok after one fix (a codegen fingerprint check that only a full CMake build runs) | 34 min (2039 s) while other builds and runs shared the machine |
 | 4: Kyty CPU-only unit tests (`.nps5-check-tests` there) | ok | seconds |
-| 7: `nps5 build <folder>` | stops at "no eboot.bin or eboot.elf": needs your dump | - |
-| 8: `scripts/nps5 run <id> --dry-run` | resolves the environment, binary path and command; names the missing AnyPS5 libraries, dump and binary | seconds |
-| 8: `scripts/nps5 run <id>` | not run to a title: needs your dump and step 6 | - |
+| 7: `nps5 build "<ASTRO BOT dump>"` | ok: translated, 11 expected stub lines, `.app` assembled | 11.5 min (687 s) |
+| 8: `scripts/nps5 run PPSA21564 --dry-run` | resolves the environment, binary path and command | seconds |
+| 8: `scripts/nps5 run PPSA21564 --scene title --until first-present+10 --class func` | NOT RUN: refused with exit 75 (another GPU-using process on the shared machine) | - |
 
-Not verified: step 6 (the AnyPS5 fork is not public), a real translation and a real title run from this layout,
-`host/` and `tools/` scripts in this layout (they still assume the maintainers' private folder names),
+Not verified: a real title boot from this layout (every attempt was refused by the one-GPU-process check, exit 75, because other title runs were queued all session), `host/` and `tools/` scripts in this layout (they still assume the maintainers' private folder names),
 `go test ./pkg/...` in full from the clean clone (it passes in the maintainers' tree in about 6 minutes; one
-timing-sensitive test, `TestHostAccessHooks`, failed once under load and passed three times alone).
+timing-sensitive test, `TestHostAccessHooks`, failed once under load and passed three times alone), a warm-cache
+or longer run (the boot above stops ten seconds after the first present).
