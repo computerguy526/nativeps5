@@ -1,0 +1,461 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 21:19:35 +0000
+Subject: [PATCH 22/22] kosmickrisp: MetalFX bridge: depth-from-colour.w prep
+ kernel (motion RG16F + R32F depth), output-usage fallback, idle
+ scaler/texture release
+
+Temporal with no depth image: a prep compute pass writes the motion vectors as
+RG16F and depth_near / colour.w as reversed device depth. Output images whose
+usage MetalFX refuses go through a bridge texture and a copy. Scalers and bridge
+textures unused for FX_IDLE (600) calls are released after being made
+non-resident (the resident callback gets an unresident pair), so the loading
+screen's dynamic-resolution sizes do not pile up.
+---
+ src/kosmickrisp/bridge/mtl_fx.h       |  13 +-
+ src/kosmickrisp/bridge/mtl_fx.m       | 190 +++++++++++++++++++++-----
+ src/kosmickrisp/bridge/stubs/mtl_fx.c |   3 +-
+ src/kosmickrisp/vulkan/kk_cmd_fx.c    |  13 +-
+ 4 files changed, 183 insertions(+), 36 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_fx.h b/src/kosmickrisp/bridge/mtl_fx.h
+index 97aff11..9d40d7c 100644
+--- a/src/kosmickrisp/bridge/mtl_fx.h
++++ b/src/kosmickrisp/bridge/mtl_fx.h
+@@ -39,15 +39,24 @@ struct mtl_fx_info {
+    bool reset;
+    bool depth_reversed;
+    bool auto_exposure;
++   /* Temporal, no depth image: colour.w is linear view depth; the prep pass
++    * writes depth_near / w (reversed device depth of an infinite far plane)
++    * into an R32F texture of the bridge. */
++   bool depth_from_color_w;
++   float depth_near;
+ };
+ 
+-/* A resource the bridge created; the caller makes it resident. */
++/* A resource the bridge created; the caller makes it resident (and no longer
++ * resident before the bridge releases it: scalers and textures of sizes not
++ * used for FX_IDLE calls, e.g. the dynamic-resolution levels of a loading
++ * screen). */
+ typedef void (*mtl_fx_resident_fn)(void *ctx, void *allocation);
+ 
+ /* Encodes the upscale on a Metal 4 command buffer with no open encoder.
+  * Returns 1 when encoded, 0 when MetalFX cannot do it (nothing encoded). */
+ int mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+                  mtl_compiler *compiler, const struct mtl_fx_info *info,
+-                 mtl_fx_resident_fn resident, void *resident_ctx);
++                 mtl_fx_resident_fn resident, mtl_fx_resident_fn unresident,
++                 void *resident_ctx);
+ 
+ #endif /* MTL_FX_H */
+diff --git a/src/kosmickrisp/bridge/mtl_fx.m b/src/kosmickrisp/bridge/mtl_fx.m
+index fe671df..ea94567 100644
+--- a/src/kosmickrisp/bridge/mtl_fx.m
++++ b/src/kosmickrisp/bridge/mtl_fx.m
+@@ -22,13 +22,18 @@
+ 
+ static os_unfair_lock fx_lock = OS_UNFAIR_LOCK_INIT;
+ 
+-/* Scalers by key. Never released: see mtl_fx.h. */
++/* Scalers by key. A Metal 4 command buffer does not retain what is encoded
++ * into it, so nothing is released while it may be in flight: a scaler or a
++ * texture of the bridge goes FX_IDLE calls (one per frame) after its last use. */
+ #define FX_MAX 8
++#define FX_IDLE 600
+ struct fx_entry {
+    NSUInteger key[11];
+    id scaler; /* MTL4FXTemporalScaler or MTL4FXSpatialScaler; nil = refused */
+    bool fresh;
++   uint64_t last_use;
+ };
++static uint64_t fx_calls;
+ static struct fx_entry fx_entries[FX_MAX];
+ static unsigned fx_count;
+ 
+@@ -37,10 +42,12 @@ static id<MTLBuffer> fx_constants;  /* motion fix constants, a ring */
+ static unsigned fx_constants_next;
+ #define FX_CONST_SLOTS 256
+ static id<MTLComputePipelineState> fx_mv_pipeline;
++static id<MTLComputePipelineState> fx_prep_pipeline;
+ static id<MTL4ArgumentTable> fx_mv_table;
+ static bool fx_mv_failed;
+-static id<MTLTexture> fx_mv_textures[4];
+-static unsigned fx_mv_texture_count;
++static id<MTLTexture> fx_textures[12];
++static uint64_t fx_texture_use[12];
++static unsigned fx_texture_count;
+ 
+ static const char *fx_mv_source =
+    "#include <metal_stdlib>\n"
+@@ -53,6 +60,20 @@ static const char *fx_mv_source =
+    "   if (gid.x >= dst.get_width() || gid.y >= dst.get_height()) return;\n"
+    "   float2 v = src.read(gid).xy - bias.xy;\n"
+    "   dst.write(float4(v, 0.0, 0.0), gid);\n"
++   "}\n"
++   "kernel void fx_prep(texture2d<float, access::read> src [[texture(0)]],\n"
++   "                    texture2d<float, access::write> dst [[texture(1)]],\n"
++   "                    texture2d<float, access::read> color [[texture(2)]],\n"
++   "                    texture2d<float, access::write> depth [[texture(3)]],\n"
++   "                    constant float4 &bias [[buffer(0)]],\n"
++   "                    uint2 gid [[thread_position_in_grid]])\n"
++   "{\n"
++   "   if (gid.x >= dst.get_width() || gid.y >= dst.get_height()) return;\n"
++   "   float2 v = src.read(gid).xy - bias.xy;\n"
++   "   dst.write(float4(v, 0.0, 0.0), gid);\n"
++   "   float w = color.read(gid).w;\n"
++   "   float d = w > 0.0 ? min(bias.z / w, 1.0) : 0.0;\n"
++   "   depth.write(float4(d, 0.0, 0.0, 0.0), gid);\n"
+    "}\n";
+ 
+ /* An encoder that waits for the queue's earlier work and holds the later
+@@ -93,18 +114,22 @@ fx_mv_init(id<MTLDevice> dev, id<MTL4Compiler> comp,
+       fx_mv_pipeline = [comp newComputePipelineStateWithDescriptor:desc
+                                                compilerTaskOptions:nil
+                                                              error:&error];
++      fn.name = @"fx_prep";
++      fx_prep_pipeline = [comp newComputePipelineStateWithDescriptor:desc
++                                                 compilerTaskOptions:nil
++                                                               error:&error];
+       [lib release];
+    }
+-   if (fx_mv_pipeline != nil) {
++   if (fx_mv_pipeline != nil && fx_prep_pipeline != nil) {
+       MTL4ArgumentTableDescriptor *td = [[MTL4ArgumentTableDescriptor new] autorelease];
+-      td.maxTextureBindCount = 2;
++      td.maxTextureBindCount = 4;
+       td.maxBufferBindCount = 1;
+       fx_mv_table = [dev newArgumentTableWithDescriptor:td error:&error];
+       fx_constants = [dev newBufferWithLength:FX_CONST_SLOTS * 16
+                                       options:MTLResourceStorageModeShared];
+    }
+-   if (fx_mv_pipeline == nil || fx_mv_table == nil || fx_constants == nil) {
+-      FX_LOG("motion fix pass unavailable (%s); motion vectors passed as they are",
++   if (fx_mv_pipeline == nil || fx_prep_pipeline == nil || fx_mv_table == nil || fx_constants == nil) {
++      FX_LOG("prep pass unavailable (%s); motion vectors passed as they are",
+              error ? [error.localizedDescription UTF8String] : "?");
+       fx_mv_failed = true;
+       return false;
+@@ -113,32 +138,47 @@ fx_mv_init(id<MTLDevice> dev, id<MTL4Compiler> comp,
+    return true;
+ }
+ 
++/* Textures of the bridge by format, size and usage. Never released. */
+ static id<MTLTexture>
+-fx_mv_texture(id<MTLDevice> dev, NSUInteger w, NSUInteger h,
+-              mtl_fx_resident_fn resident, void *ctx)
++fx_texture(id<MTLDevice> dev, MTLPixelFormat format, NSUInteger w, NSUInteger h,
++           MTLTextureUsage usage, NSString *label,
++           mtl_fx_resident_fn resident, void *ctx)
+ {
+-   for (unsigned i = 0; i < fx_mv_texture_count; i++) {
+-      if (fx_mv_textures[i].width == w && fx_mv_textures[i].height == h)
+-         return fx_mv_textures[i];
++   for (unsigned i = 0; i < fx_texture_count; i++) {
++      if (fx_textures[i].pixelFormat == format && fx_textures[i].width == w &&
++          fx_textures[i].height == h && fx_textures[i].usage == usage) {
++         fx_texture_use[i] = fx_calls;
++         return fx_textures[i];
++      }
+    }
+-   if (fx_mv_texture_count == 4)
++   if (fx_texture_count == 12)
+       return nil;
+    MTLTextureDescriptor *td =
+-      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG16Float
++      [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
+                                                          width:w
+                                                         height:h
+                                                      mipmapped:NO];
+    td.storageMode = MTLStorageModePrivate;
+-   td.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
++   td.usage = usage;
+    id<MTLTexture> tex = [dev newTextureWithDescriptor:td];
+    if (tex == nil)
+       return nil;
+-   tex.label = @"MetalFX motion (jitter removed)";
++   tex.label = label;
+    resident(ctx, tex);
+-   fx_mv_textures[fx_mv_texture_count++] = tex;
++   fx_texture_use[fx_texture_count] = fx_calls;
++   fx_textures[fx_texture_count++] = tex;
+    return tex;
+ }
+ 
++static id<MTLTexture>
++fx_mv_texture(id<MTLDevice> dev, NSUInteger w, NSUInteger h,
++              mtl_fx_resident_fn resident, void *ctx)
++{
++   return fx_texture(dev, MTLPixelFormatRG16Float, w, h,
++                     MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite,
++                     @"MetalFX motion (prepared)", resident, ctx);
++}
++
+ static struct fx_entry *
+ fx_find(const NSUInteger key[11])
+ {
+@@ -152,25 +192,59 @@ fx_find(const NSUInteger key[11])
+    memcpy(e->key, key, sizeof(e->key));
+    e->scaler = nil;
+    e->fresh = true;
++   e->last_use = fx_calls;
+    return e;
+ }
+ 
++/* Releases what no call used for FX_IDLE calls (refused entries too, so a
++ * table full of loading-screen sizes cannot keep a new size out). */
++static void
++fx_sweep(mtl_fx_resident_fn unresident, void *ctx)
++{
++   for (unsigned i = 0; i < fx_count;) {
++      if (fx_calls - fx_entries[i].last_use <= FX_IDLE) {
++         i++;
++         continue;
++      }
++      if (fx_entries[i].scaler != nil) {
++         FX_LOG("releasing the scaler %lux%lu -> %lux%lu (idle)",
++                (unsigned long)fx_entries[i].key[5], (unsigned long)fx_entries[i].key[6],
++                (unsigned long)fx_entries[i].key[7], (unsigned long)fx_entries[i].key[8]);
++         [fx_entries[i].scaler release];
++      }
++      fx_entries[i] = fx_entries[--fx_count];
++   }
++   for (unsigned i = 0; i < fx_texture_count;) {
++      if (fx_calls - fx_texture_use[i] <= FX_IDLE) {
++         i++;
++         continue;
++      }
++      unresident(ctx, fx_textures[i]);
++      [fx_textures[i] release];
++      fx_textures[i] = fx_textures[--fx_texture_count];
++      fx_texture_use[i] = fx_texture_use[fx_texture_count];
++   }
++}
++
+ static bool
+ fx_usage_ok(const char *name, id<MTLTexture> tex, MTLTextureUsage need)
+ {
+    if ((tex.usage & need) == need)
+       return true;
+-   FX_LOG("%s texture usage 0x%lx lacks 0x%lx (format %lu, %lux%lu)", name,
+-          (unsigned long)tex.usage, (unsigned long)need,
+-          (unsigned long)tex.pixelFormat, (unsigned long)tex.width,
+-          (unsigned long)tex.height);
++   static unsigned logged;
++   if (logged++ < 8)
++      FX_LOG("%s texture usage 0x%lx lacks 0x%lx (format %lu, %lux%lu)", name,
++             (unsigned long)tex.usage, (unsigned long)need,
++             (unsigned long)tex.pixelFormat, (unsigned long)tex.width,
++             (unsigned long)tex.height);
+    return false;
+ }
+ 
+ int
+ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+              mtl_compiler *compiler, const struct mtl_fx_info *info,
+-             mtl_fx_resident_fn resident, void *resident_ctx)
++             mtl_fx_resident_fn resident, mtl_fx_resident_fn unresident,
++             void *resident_ctx)
+ {
+    @autoreleasepool {
+       id<MTL4CommandBuffer> cb = (id<MTL4CommandBuffer>)cmd_buf;
+@@ -182,10 +256,14 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+       id<MTLTexture> out = (id<MTLTexture>)info->output;
+       const bool temporal = info->mode == MTL_FX_TEMPORAL;
+ 
+-      if (color == nil || out == nil || (temporal && (depth == nil || motion == nil)))
++      const bool depth_w = temporal && info->depth_from_color_w;
++      if (color == nil || out == nil ||
++          (temporal && ((depth == nil && !depth_w) || motion == nil)))
+          return 0;
+ 
+       os_unfair_lock_lock(&fx_lock);
++      fx_calls++;
++      fx_sweep(unresident, resident_ctx);
+       if (fx_word == nil) {
+          fx_word = [dev newBufferWithLength:16 options:MTLResourceStorageModePrivate];
+          if (fx_word == nil) {
+@@ -197,13 +275,23 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+       }
+ 
+       const bool want_fix =
+-         temporal && (info->mv_bias[0] != 0.0f || info->mv_bias[1] != 0.0f);
++         temporal && (depth_w || info->mv_bias[0] != 0.0f || info->mv_bias[1] != 0.0f);
+       bool fix = want_fix && fx_mv_init(dev, comp, resident, resident_ctx);
+       id<MTLTexture> fixed = nil;
+       if (fix) {
+          fixed = fx_mv_texture(dev, motion.width, motion.height, resident, resident_ctx);
+          fix = fixed != nil;
+       }
++      if (depth_w) {
++         depth = fix ? fx_texture(dev, MTLPixelFormatR32Float, color.width, color.height,
++                                  MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite,
++                                  @"MetalFX depth (near / colour.w)", resident, resident_ctx)
++                     : nil;
++         if (depth == nil) {
++            os_unfair_lock_unlock(&fx_lock);
++            return 0;
++         }
++      }
+       id<MTLTexture> motion_in = fix ? fixed : motion;
+ 
+       const NSUInteger key[11] = {
+@@ -216,6 +304,7 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+          os_unfair_lock_unlock(&fx_lock);
+          return 0;
+       }
++      e->last_use = fx_calls;
+       if (e->fresh && e->scaler == nil) {
+          if (temporal) {
+             if ([MTLFXTemporalScalerDescriptor supportsMetal4FX:dev]) {
+@@ -272,16 +361,29 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+       }
+ 
+       bool usage_ok;
++      MTLTextureUsage out_usage;
+       if (temporal) {
+          id<MTL4FXTemporalScaler> sc = e->scaler;
+          usage_ok = fx_usage_ok("colour", color, sc.colorTextureUsage) &
+                     fx_usage_ok("depth", depth, sc.depthTextureUsage) &
+-                    fx_usage_ok("motion", motion_in, sc.motionTextureUsage) &
+-                    fx_usage_ok("output", out, sc.outputTextureUsage);
++                    fx_usage_ok("motion", motion_in, sc.motionTextureUsage);
++         out_usage = sc.outputTextureUsage;
+       } else {
+          id<MTL4FXSpatialScaler> sc = e->scaler;
+-         usage_ok = fx_usage_ok("colour", color, sc.colorTextureUsage) &
+-                    fx_usage_ok("output", out, sc.outputTextureUsage);
++         usage_ok = fx_usage_ok("colour", color, sc.colorTextureUsage);
++         out_usage = sc.outputTextureUsage;
++      }
++      /* An application target without the usage MetalFX wants of its output:
++       * the scaler writes a texture of the bridge, copied into the target. */
++      id<MTLTexture> target = out;
++      if (usage_ok && (out.usage & out_usage) != out_usage) {
++         out = fx_texture(dev, target.pixelFormat, target.width, target.height,
++                          out_usage | MTLTextureUsageShaderRead,
++                          @"MetalFX output", resident, resident_ctx);
++         if (e->fresh)
++            FX_LOG("output usage 0x%lx lacks 0x%lx: scaling into a bridge texture, then a copy",
++                   (unsigned long)target.usage, (unsigned long)out_usage);
++         usage_ok = out != nil;
+       }
+       if (!usage_ok) {
+          e->scaler = nil; /* refused from now on (kept: the entry is never reused) */
+@@ -295,7 +397,7 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+          float *c = (float *)((char *)fx_constants.contents + slot * 16);
+          c[0] = info->mv_bias[0];
+          c[1] = info->mv_bias[1];
+-         c[2] = 0.0f;
++         c[2] = info->depth_near > 0.0f ? info->depth_near : 0.1f;
+          c[3] = 0.0f;
+          id<MTL4ComputeCommandEncoder> ce = [cb computeCommandEncoder];
+          [ce barrierAfterQueueStages:MTLStageAll
+@@ -303,8 +405,12 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+                    visibilityOptions:MTL4VisibilityOptionResourceAlias];
+          [fx_mv_table setTexture:motion.gpuResourceID atIndex:0];
+          [fx_mv_table setTexture:fixed.gpuResourceID atIndex:1];
++         if (depth_w) {
++            [fx_mv_table setTexture:color.gpuResourceID atIndex:2];
++            [fx_mv_table setTexture:depth.gpuResourceID atIndex:3];
++         }
+          [fx_mv_table setAddress:fx_constants.gpuAddress + slot * 16 atIndex:0];
+-         [ce setComputePipelineState:fx_mv_pipeline];
++         [ce setComputePipelineState:depth_w ? fx_prep_pipeline : fx_mv_pipeline];
+          [ce setArgumentTable:fx_mv_table];
+          [ce dispatchThreads:MTLSizeMake(fixed.width, fixed.height, 1)
+             threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+@@ -329,7 +435,7 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+          sc.jitterOffsetX = info->jitter[0];
+          sc.jitterOffsetY = info->jitter[1];
+          sc.preExposure = 1.0f;
+-         sc.depthReversed = info->depth_reversed;
++         sc.depthReversed = depth_w ? YES : info->depth_reversed;
+          sc.reset = info->reset || e->fresh;
+          [sc encodeToCommandBuffer:cb];
+          sc.colorTexture = nil;
+@@ -347,7 +453,27 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+          sc.outputTexture = nil;
+       }
+       e->fresh = false;
+-      fx_order(cb); /* the next pass after the scaler */
++      if (out != target) {
++         id<MTL4ComputeCommandEncoder> ce = [cb computeCommandEncoder];
++         [ce barrierAfterQueueStages:MTLStageAll
++                        beforeStages:MTLStageBlit
++                   visibilityOptions:MTL4VisibilityOptionResourceAlias];
++         [ce copyFromTexture:out
++                 sourceSlice:0
++                 sourceLevel:0
++                sourceOrigin:MTLOriginMake(0, 0, 0)
++                  sourceSize:MTLSizeMake(out.width, out.height, 1)
++                   toTexture:target
++            destinationSlice:0
++            destinationLevel:0
++           destinationOrigin:MTLOriginMake(0, 0, 0)];
++         [ce barrierAfterStages:MTLStageBlit
++              beforeQueueStages:MTLStageAll
++              visibilityOptions:MTL4VisibilityOptionResourceAlias];
++         [ce endEncoding];
++      } else {
++         fx_order(cb); /* the next pass after the scaler */
++      }
+       os_unfair_lock_unlock(&fx_lock);
+       return 1;
+    }
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_fx.c b/src/kosmickrisp/bridge/stubs/mtl_fx.c
+index 9ba110f..0942524 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_fx.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_fx.c
+@@ -7,7 +7,8 @@
+ int
+ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+              mtl_compiler *compiler, const struct mtl_fx_info *info,
+-             mtl_fx_resident_fn resident, void *resident_ctx)
++             mtl_fx_resident_fn resident, mtl_fx_resident_fn unresident,
++             void *resident_ctx)
+ {
+    return 0;
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_fx.c b/src/kosmickrisp/vulkan/kk_cmd_fx.c
+index cee605c..07121fe 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_fx.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_fx.c
+@@ -26,6 +26,8 @@ struct nps5_kk_metalfx_info {
+    uint32_t reset;
+    uint32_t depth_reversed;
+    uint32_t auto_exposure;
++   uint32_t depth_mode; /* 0 depth image; 1 colour.w = linear view depth */
++   float depth_near;
+    uint32_t reserved;
+ };
+ 
+@@ -35,6 +37,12 @@ kk_fx_resident(void *ctx, void *allocation)
+    kk_device_add_buffer_to_residency_set((struct kk_device *)ctx, allocation);
+ }
+ 
++static void
++kk_fx_unresident(void *ctx, void *allocation)
++{
++   kk_device_remove_buffer_from_residency_set((struct kk_device *)ctx, allocation);
++}
++
+ __attribute__((visibility("default"))) int
+ nps5_kk_cmd_metalfx(VkCommandBuffer vk_cmd,
+                     const struct nps5_kk_metalfx_info *info);
+@@ -70,11 +78,14 @@ nps5_kk_cmd_metalfx(VkCommandBuffer vk_cmd,
+       .reset = info->reset != 0,
+       .depth_reversed = info->depth_reversed != 0,
+       .auto_exposure = info->auto_exposure != 0,
++      .depth_from_color_w = info->depth_mode == 1,
++      .depth_near = info->depth_near,
+    };
+ 
+    /* The scaler opens encoders of its own: none of ours may be open (this
+     * also ends a render pass kept open for continuation). */
+    cs_end(cmd);
+    return mtl_fx_scale(cmd->metal.cmd_buf, dev->mtl_handle,
+-                       dev->mtl_compiler_handle, &fx, kk_fx_resident, dev);
++                       dev->mtl_compiler_handle, &fx, kk_fx_resident,
++                       kk_fx_unresident, dev);
+ }
