@@ -1107,8 +1107,11 @@ KYTY_DRAW_SEQUENCE_FAST	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.c
 KYTY_DRAW_SEQUENCE_VERIFY	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_DRAW_WRITE_SINK	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DUMP_DIR	kyty	folder for frame and target dumps; must be under NPS5_SCRATCH	src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_DIR	nativeps5		scripts/nps5lib/run.py
 KYTY_DUMP_FRAMES	kyty	number of presented frames to dump as pictures (with _EVERY and _FROM); the only allowed source of pictures; output is game data	src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_FRAMES	nativeps5		scripts/nps5lib/run.py
 KYTY_DUMP_FRAMES_EVERY	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_FRAMES_EVERY	nativeps5		scripts/nps5lib/run.py
 KYTY_DUMP_FRAMES_FROM	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_GUEST_BLOCK	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_GUEST_RANGE	kyty		src/graphics/presentation/window/swapchain.cpp
@@ -1348,6 +1351,7 @@ KYTY_PACE_LOG	kyty		src/common/paceLog.cpp
 KYTY_PAD_RELAY_US	kyty	pad relay interval, default 4000; 1000 made a scripted stick input ineffective	src/hybrid/kytyGpuBridge.cpp
 KYTY_PAD_STATE_COALESCE	kyty		src/libs/controller.cpp
 KYTY_PAD_STATE_COALESCE	nativeps5		titles/kyty-preset.env
+KYTY_PASS_SUBMIT_DEFER	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_PENDING_OPS_NOWAIT	kyty		src/graphics/host_gpu/renderer/commandScheduler.cpp
 KYTY_PENDING_REFRESH_US	kyty		src/graphics/host_gpu/renderer/commandScheduler.cpp
 KYTY_PENDING_REFRESH_US	nativeps5		titles/kyty-preset.env
@@ -1602,6 +1606,7 @@ KYTY_SWAPCHAIN_MAX_MB	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_SYNC_COMMAND_SPIN_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SYNC_EPOCH	kyty		src/graphics/host_gpu/syncEpoch.h
 KYTY_TARGET_DESC_MEMO	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
+KYTY_TEST_CLOSE_S	kyty		src/graphics/presentation/window/window.cpp
 KYTY_TEST_COMPARE_LINEAR_USES	kyty		tests/shaderCfgTests.cpp
 KYTY_TEST_COMPARE_LINEAR_USES_DUMP	kyty		tests/shaderCfgTests.cpp
 KYTY_TEST_RESIZE	kyty		src/graphics/presentation/window/window.cpp
@@ -1761,8 +1766,15 @@ NPS5_FLUSH_STATS	anyps5		core/shader/recompiler/Translation/src/TranslationConte
 NPS5_FORK_BASE	nativeps5		scripts/fetch-components.sh
 NPS5_FRAMERATE_BLOCK	nativeps5		games/game.py
 NPS5_FRAMERATE_BLOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_EMA	ps5recomp	weight of a new frame in the frame-rate average (default 0.02)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_HYST_MS	ps5recomp	the frame-rate block is rewritten only after the average stayed apart this long (default 1000 ms)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_HYST_PCT	ps5recomp	the frame-rate block is rewritten only when the average differs by this percentage (default 5)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_LEGACY	ps5recomp	1 = old frame-rate block behaviour (no freeze during video/loading, short average)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MAX	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MIN	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_NO_FREEZE_AV	ps5recomp	1 = do not freeze the frame-rate block while a video plays	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_NO_FREEZE_LOAD	ps5recomp	1 = do not freeze the frame-rate block while a level loads	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_WARM	ps5recomp	frames of fast averaging after the block is verified (default 60)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FUNC_HOLD_LOAD	nativeps5		scripts/nps5-env.sh
 NPS5_GAMES_DIR	nativeps5		games/game.py
 NPS5_GAMES_FIRST	nativeps5		games/game.py

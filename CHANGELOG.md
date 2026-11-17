@@ -23,6 +23,15 @@ commits, then the changes below as separate commits.
 ### Runtime and translator (`nativeps5-recomp`)
 - Lifter: 32-bit SHLD/SHRD by a CL count of 0 zero-extends the destination (PS4Recomp 27e12b0).
 - VFS: optional per-directory listing cache for case-insensitive lookups (`NPS5_VFS_DIRCACHE=1`, default off).
+- Crash reports always finish: a second thread that fails while a crash is being reported (typically an abort
+  during library teardown) waits for the report instead of ending the process as a "recursive crash"; the run
+  bundle's summary and manifest are written before teardown starts and a failure during teardown afterwards is
+  a plain exit 1; the alternate signal stacks are guard-paged mappings (256 KiB per thread, 512 KiB main) so a
+  crash on top of a running fault handler no longer overflows them; the pc map dump has its own time bound.
+- Frame-rate block (`NPS5_FRAMERATE_BLOCK`): frozen while a video plays and while a level loads, longer average
+  and a 5 % / 1 s hysteresis (`NPS5_FRAMERATE_LEGACY=1` = the old behaviour).
+- The check list also runs the host access hook test (a file read into guest memory is repeated when a watched
+  page was closed again before the kernel copied; without it ASTRO BOT's first hub crashed while loading).
 - Review fixes (APR command buffers, raw host writes refused, crash reports without home paths, patch points bound
   to the build they name, seam fences) and the pak scan without a stat per file, already in the base commits.
 
