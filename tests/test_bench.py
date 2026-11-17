@@ -118,6 +118,13 @@ class T(unittest.TestCase):
         for bad in (["X", "--route", "r", "--runs", "0"], ["X", "--route", "r", "--runs", "-2"], ["X", "--quiet-wait", "-1"], ["X", "--min-effect", "nan"]):
             with self.assertRaises(bench.BenchError, msg=str(bad)): bench.parse(bad)
 
+    def test_min_effect_is_ms_only(self):
+        runs = lambda p50, fps: [dict(p50=p50 + d, p95=p50 + d, p99=p50, fps=fps + d, n=100) for d in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)]
+        res = bench.summarize_arms([("A", runs(20.0, 50.0)), ("B", runs(17.0, 58.0))], min_effect=5.0)
+        v = {p["metric"]: p["verdict"] for p in res["pairs"]}
+        self.assertEqual(v["p50"], "no-difference")           # 3 ms is under the 5 ms threshold
+        self.assertNotEqual(v["fps"], "no-difference")        # +8 fps was hidden by comparing it with 5 "ms"
+
     def test_dry_run_plans_abba(self):
         rc, out, _ = self.main(["PPSA00001", "--route", "wm", "--arm", "a:X=1", "--arm", "b:X=2", "--dry-run"])
         self.assertEqual(rc, 0)

@@ -196,5 +196,32 @@ class Cli(unittest.TestCase):
             self.assertIn("GPU busy 8.0 ms/frame = 40 %", out)
 
 
+class Hardening(unittest.TestCase):
+    def run_cli(self, args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = an.main(args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_malformed_window_is_a_usage_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "x.frames.log")
+            evfix.write(p, evfix.frames_log([(400, 20.0)])[0])
+            for w in ("last:abc", "t:5", "t:a-b", "last:", "last:nan", "bogus"):
+                rc, _, err = self.run_cli(["frames", p, "--window", w])
+                self.assertEqual(rc, 2, w)
+                self.assertIn("--window", err)
+            self.assertEqual(self.run_cli(["frames", p, "--window", "last:5"])[0], 0)
+
+    def test_commit_stats_all_frames_ending_together(self):
+        log = "".join("%.6f %.6f PRESENT\n" % (100.0 + i * 0.001, 101.0) for i in range(5))       # every commit ends at 101.0
+        s = an.commit_stats(an.load_commits(log), last=10.0, skip_end=0.0)
+        self.assertFalse(s["ok"])
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "c.log")
+            evfix.write(p, log)
+            self.assertEqual(self.run_cli(["commits", p, "--last", "10", "--skip-end", "0"])[0], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

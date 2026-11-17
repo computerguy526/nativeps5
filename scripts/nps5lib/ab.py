@@ -8,12 +8,14 @@ First form: runs every arm through `nps5 run` in the given order (ABBA... cycled
 default 3 reps, order ABBA) and analyses the results. Second form: analyses runs that already exist (a tag under
 <runs root>/<id>/, or a run directory path). Per run: p50 and p95 frame time over the steady window (loading phase
 excluded). Per arm: between-run mean and spread. B against A: difference of per-run p50 with a bootstrap CI and a
-verdict better / worse / no-difference. One run per arm never gets a verdict ("insufficient").
+verdict better / worse / no-difference. One run per arm never gets a verdict ("insufficient"). --min-effect is in ms and
+applies to the p50 / p95 comparisons only (fps is compared with no minimum).
 Runs root: $NPS5_RUNS_ROOT, else $NPS5_SCRATCH/runs. Exit codes: 0 analysed, 1 not enough usable data,
 2 usage, otherwise the failing `nps5 run` exit code."""
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -60,6 +62,16 @@ def parse_arm(s: str) -> tuple[str, str]:
     return label, rest
 
 
+def check_window(window: str) -> None:
+    """ValueError unless the window is steady, last:S or t:A-B with finite numbers (a usage error, not a bad run)."""
+    try:
+        nums = [] if window == "steady" else [float(window[5:])] if window.startswith("last:") else [float(x) for x in window[2:].partition("-")[::2]] if window.startswith("t:") else None
+    except ValueError:
+        nums = None
+    if nums is None or not all(math.isfinite(x) for x in nums):
+        raise ValueError(f"bad --window {window!r} (steady, last:SECONDS or t:FROM-TO)")
+
+
 def run_metrics(run_dir: str, window: str = "steady") -> dict:
     """p50 / p95 / fps of one run over the window; raises FramesError when the run has no usable data."""
     f = fr.load_run_frames(run_dir)
@@ -79,19 +91,20 @@ def run_metrics(run_dir: str, window: str = "steady") -> dict:
 
 def analyse(arms: list[tuple[str, list[str]]], title: str, environ: dict, window: str = "steady", min_effect: float = 0.0) -> dict:
     """arms = [(label, [tag or dir, ...]), ...] (two arms). -> per-arm runs and the B-vs-A comparisons."""
+    check_window(window)
     res = dict(window=window, arms=[], compare={})
     for label, tags in arms:
         runs, skipped = [], []
         for t in tags:
             try:
                 runs.append(run_metrics(resolve_run(title, t, environ), window))
-            except (fr.FramesError, OSError) as e:
+            except (ValueError, OSError) as e:                  # FramesError is a ValueError; one broken run is skipped, not fatal
                 skipped.append(dict(run=t, reason=str(e)))
         res["arms"].append(dict(label=label, runs=runs, skipped=skipped))
     if len(res["arms"]) == 2:
         a, b = res["arms"]
         for key, lower in (("p50", True), ("p95", True), ("fps", False)):
-            res["compare"][key] = st.compare([r[key] for r in a["runs"]], [r[key] for r in b["runs"]], lower_is_better=lower, min_effect=min_effect)
+            res["compare"][key] = st.compare([r[key] for r in a["runs"]], [r[key] for r in b["runs"]], lower_is_better=lower, min_effect=0.0 if key == "fps" else min_effect)
     return res
 
 
@@ -189,6 +202,9 @@ def main(argv: list[str], environ: Optional[dict] = None) -> int:
         print(f"nps5 ab: {e}", file=sys.stderr)
         return 2
     print(json.dumps(res) if o.get("json") else format_text(res))
+    if not any(c["verdict"] != "insufficient" for c in res["compare"].values()):
+        print("nps5 ab: no metric got a verdict (need at least 2 usable runs per arm)", file=sys.stderr)
+        return 1
     return 0 if all(a["runs"] for a in res["arms"]) else 1
 
 

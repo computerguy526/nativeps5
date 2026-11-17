@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import math
 import os
 import re
 import sys
@@ -35,13 +36,16 @@ class Frames:
         return len(self.ms)
 
 
+_UINT = re.compile(r"[0-9]{1,18}")
+
+
 def parse_frames_log(text: str) -> Frames:
     """Parse "<time_us>,<frame_us>" lines. Torn or foreign lines (a run killed mid-write, headers) are skipped."""
     t: list[float] = []
     ms: list[float] = []
     for line in text.splitlines():
         parts = line.strip().split(",")
-        if len(parts) < 2 or not (parts[0].strip().isdigit() and parts[1].strip().isdigit()):
+        if len(parts) < 2 or not all(_UINT.fullmatch(p.strip()) for p in parts[:2]):     # ASCII only: '\u00b2'.isdigit() is True and int() then raises
             continue
         t.append(int(parts[0]) / 1e6)
         ms.append(int(parts[1]) / 1000.0)
@@ -73,9 +77,11 @@ def parse_perf_csv(text: str, total_s: Optional[float] = None) -> Frames:
     wall = []
     for r in rows:
         try:
-            wall.append(float(r["wall_ms"]))
+            v = float(r["wall_ms"])
         except (KeyError, TypeError, ValueError):
             continue
+        if math.isfinite(v) and v > 0:                  # torn / foreign rows (nan, inf, zero, negative) are skipped like torn lines
+            wall.append(v)
     if not wall:
         raise FramesError("no wall_ms rows in the perf csv")
     return Frames(flip_times(wall, total_s), wall, "perf_frames.csv")
@@ -92,8 +98,10 @@ def run_total_seconds(run_dir: str) -> Optional[float]:
     if os.path.isfile(p):
         try:
             with open(p) as f:
-                w = json.load(f).get("timings", {}).get("wall_s")
-            if isinstance(w, (int, float)):
+                rj = json.load(f)
+            t = rj.get("timings") if isinstance(rj, dict) else None
+            w = t.get("wall_s") if isinstance(t, dict) else None
+            if isinstance(w, (int, float)) and not isinstance(w, bool) and math.isfinite(w):
                 return float(w)
         except (ValueError, OSError):
             pass
@@ -101,8 +109,11 @@ def run_total_seconds(run_dir: str) -> Optional[float]:
         s = os.path.join(d, "summary.txt")
         if os.path.isfile(s):
             m = re.search(r"^wall_time_s:\s*([0-9.]+)", _read(s), re.M)
-            if m:
-                return float(m.group(1))
+            try:
+                if m:
+                    return float(m.group(1))
+            except ValueError:                          # "1.2.3": unknown, not a crash
+                pass
     return None
 
 

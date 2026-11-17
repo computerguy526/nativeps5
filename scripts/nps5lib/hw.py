@@ -87,8 +87,14 @@ def parse_spec(spec):
         if not eq or not v:
             raise ValueError("bad hardware word %r (class like m1-16g, or chip= ram= pcores= ecores= gpufam= os= osbuild= model= fan= power=)" % w)
         if k == "chip": h["chip_key"] = v.lower().replace(" ", "")
-        elif k == "ram": h["ram_mb"] = int(v) * 1024
-        elif k in ("pcores", "ecores"): h[k] = int(v)
+        elif k == "ram":
+            h["ram_mb"] = int(v) * 1024
+            if h["ram_mb"] <= 0: raise ValueError("ram must be a positive number of GB, got %r" % v)
+        elif k in ("pcores", "ecores"):
+            h[k] = int(v)
+            if h[k] < 0: raise ValueError("%s must not be negative, got %r" % (k, v))
+        elif k == "fan" and v not in ("yes", "no"): raise ValueError("fan must be yes or no, got %r" % v)
+        elif k == "power" and v not in ("ac", "battery"): raise ValueError("power must be ac or battery, got %r" % v)
         elif k in ("gpufam", "os", "osbuild", "model", "power", "fan"): h[k] = v
         elif k == "name": h["machine_name"] = v.replace("_", " ")
         else: raise ValueError("unknown hardware word %r" % k)
@@ -251,12 +257,20 @@ def doctor(h, out=None):
 
 def main(argv, environ=None):
     env = dict(os.environ if environ is None else environ)
-    if argv[:1] == ["--hw"]:
-        if len(argv) < 2: print("hw.py: --hw needs a spec", file=sys.stderr); return 2
-        env["NPS5_HW"] = argv[1]; argv = argv[2:]
-    cmd = argv[0] if argv else "doctor"
-    if cmd in ("-h", "--help"):
-        print(__doc__); return 0
+    cmd, i = None, 0                                     # --hw SPEC is accepted anywhere; unknown options and extra arguments are usage errors
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            print(__doc__); return 0
+        if a == "--hw":
+            if i + 1 >= len(argv): print("hw.py: --hw needs a spec", file=sys.stderr); return 2
+            env["NPS5_HW"] = argv[i + 1]; i += 2; continue
+        if a.startswith("-"): print("hw.py: unknown option %s" % a, file=sys.stderr); return 2
+        if cmd is not None: print("hw.py: unexpected argument %s" % a, file=sys.stderr); return 2
+        cmd = a; i += 1
+    cmd = cmd or "doctor"
+    if cmd not in ("doctor", "class", "cache-key", "env", "json"):
+        print("hw.py: unknown command %s (doctor, class, cache-key, env, json)" % cmd, file=sys.stderr); return 2
     try:
         h = detect(env, full=(cmd in ("doctor", "json")))
     except ValueError as e:

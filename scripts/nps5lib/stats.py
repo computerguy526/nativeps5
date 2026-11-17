@@ -3,6 +3,7 @@ Standard library only. One percentile convention everywhere (nearest rank, upper
 older per-tool scripts used, so numbers stay comparable with earlier notes."""
 from __future__ import annotations
 
+import math
 import random
 from typing import Sequence
 
@@ -55,12 +56,15 @@ def compare(a: Sequence[float], b: Sequence[float], lower_is_better: bool = True
             min_effect: float = 0.0, iters: int = 4000) -> dict:
     """Noise-aware verdict on per-run values of two arms (b against a).
     verdict: "better" / "worse" (for b), "no-difference", or "insufficient" (fewer than min_runs runs in an arm: no
-    winner is ever called from one run per arm). A difference counts only if the bootstrap CI excludes 0, the
+    winner is ever called from one run per arm; also any nan/inf value). A difference counts only if the bootstrap CI excludes 0, the
     magnitude exceeds min_effect and, with fewer than 5 runs per arm (where a bootstrap is too optimistic), it also
     exceeds the larger between-run spread of the two arms."""
     out = dict(runs_a=len(a), runs_b=len(b), mean_a=mean(a) if a else None, mean_b=mean(b) if b else None,
                spread_a=spread(a), spread_b=spread(b), diff=None, ci_lo=None, ci_hi=None, verdict="insufficient",
                reason=None)
+    if not all(math.isfinite(v) for v in list(a) + list(b)):          # a NaN would sort anywhere and fake a verdict
+        out.update(mean_a=None, mean_b=None, spread_a=0.0, spread_b=0.0, reason="non-finite value (nan/inf) in a sample: no verdict")
+        return out
     if len(a) < min_runs or len(b) < min_runs:
         out["reason"] = f"need at least {min_runs} runs per arm (have {len(a)} and {len(b)}): no winner from a single run"
         return out

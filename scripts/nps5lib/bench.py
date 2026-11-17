@@ -176,7 +176,7 @@ def summarize_arms(per_arm, min_effect=0.0):
     for b in arms[1:]:
         for key, lower in (("p50", True), ("p95", True), ("fps", False)):
             pairs.append(dict(a=arms[0]["label"], b=b["label"], metric=key,
-                              **st.compare([r[key] for r in arms[0]["runs"]], [r[key] for r in b["runs"]], lower_is_better=lower, min_effect=min_effect)))
+                              **st.compare([r[key] for r in arms[0]["runs"]], [r[key] for r in b["runs"]], lower_is_better=lower, min_effect=min_effect if lower else 0.0)))      # --min-effect is in ms: not a threshold for fps
     return dict(arms=arms, pairs=pairs)
 
 

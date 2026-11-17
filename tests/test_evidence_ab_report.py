@@ -104,7 +104,7 @@ class FromRuns(unittest.TestCase):
         self.mk("a0", 20.0, 1)
         self.mk("b0", 10.0, 2)                                    # twice as fast, still no verdict from one run
         rc, out, _ = call(ab, ["T", "--from-runs", "--arm", "A:a0", "--arm", "B:b0"], self.env)
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)                                   # nothing got a verdict: not enough usable data
         self.assertIn("insufficient", out)
         self.assertNotIn("BETTER", out)
         self.assertNotIn("WORSE", out)
@@ -122,7 +122,7 @@ class FromRuns(unittest.TestCase):
     def test_run_dir_path_accepted(self):
         d1, d2 = self.mk("a0", 20.0, 1), self.mk("b0", 20.0, 2)
         rc, out, _ = call(ab, ["T", "--from-runs", "--arm", f"A:{d1}", "--arm", f"B:{d2}"], {})
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)                                   # found and analysed, but one run per arm has no verdict
         self.assertIn("arm A: 1 run", out)
 
 
@@ -188,9 +188,160 @@ class Report(unittest.TestCase):
         self.assertEqual(call(report, ["T/a0", "--xray", "x"], self.env)[0], 2)
 
     def test_scrub(self):
-        self.assertEqual(report.scrub("see " + HOME + "/y.log and ~/z, ok"), "see <path> and <path>, ok")
+        self.assertEqual(report.scrub("see " + HOME + "/y.log, ok"), "see <path>")
+        self.assertEqual(report.scrub("see ~/z and /tmp is full"), "see <path>")             # a path runs to the end of the line (it may hold spaces)
         self.assertEqual(report.scrub("ratio a/b 3/4 stays"), "ratio a/b 3/4 stays")
         self.assertLessEqual(len(report.scrub("x" * 500)), 220)
+
+
+class AbHardening(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self.td.name, "runs")
+        self.env = {"NPS5_RUNS_ROOT": self.root}
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def mk(self, tag, base, seed, **kw):
+        return evfix.make_run(self.root, "T", tag, steady(base, seed, **kw))
+
+    def test_one_run_per_arm_exits_1(self):
+        self.mk("a0", 20.0, 1)
+        self.mk("b0", 10.0, 2)
+        rc, out, _ = call(ab, ["T", "--from-runs", "--arm", "A:a0", "--arm", "B:b0"], self.env)
+        self.assertEqual(rc, 1)
+        self.assertIn("insufficient", out)
+
+    def test_min_effect_is_ms_only(self):
+        for i in range(3):
+            self.mk(f"a{i}", 20.0, i)
+            self.mk(f"b{i}", 19.0, 10 + i)             # -1 ms, +2.6 fps
+        args = ["T", "--from-runs", "--arm", "A:a0,a1,a2", "--arm", "B:b0,b1,b2", "--json"]
+        res = json.loads(call(ab, args + ["--min-effect", "2"], self.env)[1])
+        self.assertEqual(res["compare"]["p50"]["verdict"], "no-difference")
+        self.assertEqual(res["compare"]["fps"]["verdict"], "better")      # 2 ms must not be read as 2 fps
+        self.assertEqual(json.loads(call(ab, args, self.env)[1])["compare"]["p50"]["verdict"], "better")
+
+    def test_broken_run_json_skips_that_run_only(self):
+        for i in range(3):
+            self.mk(f"a{i}", 20.0, i)
+            self.mk(f"b{i}", 16.0, 10 + i)
+        evfix.write(os.path.join(self.root, "T", "a0", "run.json"), "[1]")
+        evfix.write(os.path.join(self.root, "T", "a1", "summary.txt"), "wall_time_s: 1.2.3\n")
+        os.remove(os.path.join(self.root, "T", "a1", "run.json"))
+        rc, out, _ = call(ab, ["T", "--from-runs", "--arm", "A:a0,a1,a2", "--arm", "B:b0,b1,b2"], self.env)
+        self.assertEqual(rc, 0)
+        self.assertIn("arm A: 3 run", out)                       # unknown wall time just means no total: the runs still count
+
+    def test_bad_window_is_usage(self):
+        self.mk("a0", 20.0, 1)
+        self.assertEqual(call(ab, ["T", "--from-runs", "--arm", "A:a0", "--arm", "B:a0", "--window", "last:x"], self.env)[0], 2)
+
+
+class ReportHardening(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self.td.name, "runs")
+        self.env = {"NPS5_RUNS_ROOT": self.root}
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_arm_without_frame_data_is_dropped_not_a_crash(self):
+        d = evfix.make_run(self.root, "T", "x", steady(20.0, 1), arm="nodata")
+        os.remove(os.path.join(d, "frames", "perf_frames.csv"))
+        evfix.make_run(self.root, "T", "a", steady(20.0, 2))
+        rc, out, err = call(report, ["T/a", "T/x"], self.env)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("| nodata | 1 |", out)                   # the arm has no row in the frame-time table
+        self.assertIn("no frame data", out)
+        os.remove(os.path.join(self.root, "T", "a", "frames", "perf_frames.csv"))
+        rc, out, err = call(report, ["T/a", "T/x"], self.env)
+        self.assertEqual(rc, 1)
+        self.assertIn("no usable runs", err)
+
+    def test_non_object_run_json_is_tolerated(self):
+        evfix.make_run(self.root, "T", "a", steady(20.0, 2))
+        evfix.write(os.path.join(self.root, "T", "a", "run.json"), "[1]")
+        rc, out, _ = call(report, ["T/a"], self.env)
+        self.assertEqual(rc, 0)
+
+    def test_scrub_paths_with_spaces_and_roots(self):
+        for p in (HOME + "/My Games/secret dir/x.bin", "/Vol" + "umes/Disk 1/a b/c", "/pri" + "vate/var/folders/zz/T/a b", "/t" + "mp/x y/z", "/o" + "pt/foo bar/baz",
+                  "/Appli" + "cations/Some App.app/x y", "/ho" + "me/u/a b", "C:" + "\\Us" + "ers\\bob\\My Docs\\f.txt"):
+            s = report.scrub("opened " + p)
+            self.assertEqual(s, "opened <path>", p)
+        self.assertEqual(report.scrub("open '" + HOME + "/a b/c d' failed"), "open '<path>' failed")
+        self.assertEqual(report.scrub('x "' + HOME + '/a b" y'), 'x "<path>" y')
+        self.assertEqual(report.scrub("| " + HOME + "/a b | next |"), "| <path> | next |")
+
+    def test_only_log_lines_are_truncated(self):
+        self.assertLessEqual(len(report.scrub("x" * 500)), 220)
+        row = "| " + " | ".join("c%d" % i + "y" * 30 for i in range(10)) + " |"
+        self.assertGreater(len(row), 220)
+        self.assertEqual(report.scrub_all(row), row)
+        envA = {"NPS5_LONG": "a" * 300}
+        evfix.make_run(self.root, "T", "a", steady(20.0, 1), env={})
+        evfix.make_run(self.root, "T", "b", steady(20.0, 2), env=envA)
+        rc, out, _ = call(report, ["T/a", "T/b"], self.env)
+        self.assertIn("a" * 300, out)                                   # the env-diff row is intact
+
+    def test_guard_lines_stay_inside_the_run_dir(self):
+        outside = os.path.join(self.td.name, "outside.txt")
+        evfix.write(outside, "watchdog: SECRETLINE\n")
+        d = evfix.make_run(self.root, "T", "a", steady(20.0, 1), logs={"run.err": "watchdog: ok line\n", "extra.log": "timeout: from extra\n"})
+        with open(os.path.join(d, "run.json")) as f:
+            rj = json.load(f)
+        rj["logs"] = {"x": outside, "y": os.path.join(d, "extra.log"), "z": os.path.join(d, "..", "..", "outside.txt"), "again": os.path.join(d, "run.err")}
+        os.symlink(outside, os.path.join(d, "link.log"))
+        rj["logs"]["l"] = os.path.join(d, "link.log")
+        evfix.write(os.path.join(d, "run.json"), json.dumps(rj))
+        gl = report.guard_lines(report.load_run(d, self.env))
+        self.assertEqual(sorted(gl), ["timeout: from extra", "watchdog: ok line"])      # once each; nothing from outside
+
+    def test_guard_lines_dedupe_by_real_path_not_basename(self):
+        d = evfix.make_run(self.root, "T", "a", steady(20.0, 1), logs={"run.err": "watchdog one\n"})
+        os.makedirs(os.path.join(d, "sub"))
+        evfix.write(os.path.join(d, "sub", "run.err"), "watchdog two\n")
+        with open(os.path.join(d, "run.json")) as f:
+            rj = json.load(f)
+        rj["logs"]["sub"] = os.path.join(d, "sub", "run.err")
+        evfix.write(os.path.join(d, "run.json"), json.dumps(rj))
+        self.assertEqual(sorted(report.guard_lines(report.load_run(d, self.env))), ["watchdog one", "watchdog two"])
+
+    def test_report_write_is_atomic_and_refuses_symlinks(self):
+        evfix.make_run(self.root, "T", "a", steady(20.0, 1))
+        out = os.path.join(self.td.name, "out")
+        os.makedirs(out)
+        target = os.path.join(self.td.name, "precious.txt")
+        evfix.write(target, "keep")
+        os.symlink(target, os.path.join(out, "report.md"))
+        rc, _, err = call(report, ["T/a", "--out", out], self.env)
+        self.assertEqual(rc, 1)
+        self.assertIn("symlink", err)
+        with open(target) as f:
+            self.assertEqual(f.read(), "keep")
+        os.remove(os.path.join(out, "report.md"))
+        real = os.replace
+        def boom(src, dst):
+            raise OSError("killed")
+        os.replace = boom
+        try:
+            rc, _, _ = call(report, ["T/a", "--out", out], self.env)
+        finally:
+            os.replace = real
+        self.assertEqual(rc, 1)
+        self.assertEqual(os.listdir(out), [])                            # neither a truncated report nor a temp file
+        self.assertEqual(call(report, ["T/a", "--out", out], self.env)[0], 0)
+        self.assertEqual(os.listdir(out), ["report.md"])
+
+    def test_report_says_when_dumps_differ_only_between_sample_points(self):
+        for tag, arm, v in (("a", None, 10), ("b", "x", 10)):
+            evfix.make_run(self.root, "T", tag, steady(20.0, 3 if arm else 4), arm=arm, bmps={"frame_1.bmp": bmp.make_bmp(1000, 1000, lambda x, y, v=v, t=tag: (200, 0, 0) if (t == "b" and (x, y) == (501, 501)) else (v, v, v))})
+        rc, out, _ = call(report, ["T/a", "T/b"], self.env)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("identical", out.split("## Pictures")[1].split("## Guard")[0])
 
 
 if __name__ == "__main__":

@@ -382,5 +382,34 @@ class CachePerHardware(unittest.TestCase):
         self.assertIsNone(self.keep("g16-25G83")); self.assertEqual(self.stamp(), "g16-25G83")
 
 
+class CliStrict(unittest.TestCase):
+    def run_main(self, argv, env=None):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err): r = hw.main(argv, env or {})
+        return r, out.getvalue(), err.getvalue()
+
+    def test_unknown_command_is_usage_even_with_no_hardware(self):
+        self.assertEqual(self.run_main(["bogus"], {"NPS5_HW": "none"})[0], 2)
+        self.assertEqual(self.run_main(["bogus"], {})[0], 2)
+
+    def test_hw_flag_anywhere(self):
+        r, out, _ = self.run_main(["class", "--hw", "m2pro-32g"])
+        self.assertEqual((r, out.strip()), (0, "m2pro-32g"))
+        r, out, _ = self.run_main(["doctor", "--hw", "m1-16g"])
+        self.assertIn("m1-16g", out)
+        self.assertEqual(self.run_main(["class", "--hw"])[0], 2)
+
+    def test_extra_and_unknown_arguments_are_rejected(self):
+        for argv in (["class", "extra"], ["class", "json"], ["class", "--bogus"], ["--hw", "m1-16g", "class", "x"]):
+            self.assertEqual(self.run_main(argv)[0], 2, argv)
+        self.assertEqual(self.run_main(["class", "-h"])[0], 0)
+
+    def test_spec_values_are_validated(self):
+        for spec in ("chip=m1 ram=0", "chip=m1 ram=-8", "chip=m1 ram=16 fan=maybe", "chip=m1 ram=16 power=solar", "chip=m1 ram=16 pcores=-1"):
+            with self.assertRaises(ValueError, msg=spec): hw.parse_spec(spec)
+            self.assertEqual(self.run_main(["--hw", spec, "class"])[0], 2)
+        h = hw.parse_spec("chip=m1 ram=16 fan=no power=battery"); self.assertEqual((h["fan"], h["power"]), ("no", "battery"))
+
+
 if __name__ == "__main__":
     unittest.main()

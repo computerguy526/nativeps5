@@ -13,6 +13,7 @@ from __future__ import annotations
 import collections
 import gzip
 import json
+import math
 import os
 import re
 import sys
@@ -145,7 +146,7 @@ def commit_stats(commits: list[Commit], last: float = 20.0, skip_end: float = 6.
     """Per-frame GPU accounting over a window (default: the last `last` s before `skip_end` s from the end;
     window=(from, to) are seconds before the last commit). A frame = the commits up to and including a PRESENT commit.
     busy = union of GPU intervals; each commit's exclusive time = the part not covered by commits that started earlier,
-    so exclusive times sum to busy. Returns dict with ok False when fewer than 3 frames fall in the window."""
+    so exclusive times sum to busy. Returns dict with ok False when fewer than 3 frames fall in the window or they all end at one instant."""
     if not commits:
         return dict(ok=False, frames=0)
     tend = max(c[1] for c in commits)
@@ -172,6 +173,8 @@ def commit_stats(commits: list[Commit], last: float = 20.0, skip_end: float = 6.
     busy = [sum(excl[id(c)] for c in f) * 1000 for f in frames]
     span = [sum(c[1] - c[0] for c in f) * 1000 for f in frames]
     wall = (frames[-1][-1][1] - frames[0][-1][1]) * 1000 / (nf - 1)
+    if not wall > 0:                                  # every frame ended at the same instant: no rate to report (and fps would divide by 0)
+        return dict(ok=False, frames=nf, reason=f"{nf} frames in the window all end at the same instant")
     sizes: dict = collections.defaultdict(lambda: [0, 0])
     classes: dict = collections.defaultdict(lambda: [0.0, 0.0, 0])
     npass = ndisp = 0
@@ -324,15 +327,19 @@ def _run(kind: str, rest: list[str]) -> int:
             raise SystemExit("usage: nps5 analyze frames <run dir | file> [--window steady|last:S|t:A-B]")
         f = _frames_from(pos[0])
         w = o.get("window", "steady")
+        bad = SystemExit(f"nps5 analyze: bad --window {w!r} (steady, last:SECONDS or t:FROM-TO)")
+        try:
+            nums = [float(w[5:])] if w.startswith("last:") else [float(x) for x in (w[2:].partition("-")[0], w[2:].partition("-")[2])] if w.startswith("t:") else []
+        except ValueError:
+            raise bad
+        if not all(math.isfinite(x) for x in nums) or (w != "steady" and not nums):
+            raise bad
         if w == "steady":
             win = fr.steady_window(f, o.get("last", 30.0), o.get("skip_tail", 2.0))
         elif w.startswith("last:"):
-            win = fr.last_window(f, float(w[5:]), o.get("skip_tail", 1.0))
-        elif w.startswith("t:"):
-            a, _, b = w[2:].partition("-")
-            win = fr.time_window(f, float(a), float(b))
+            win = fr.last_window(f, nums[0], o.get("skip_tail", 1.0))
         else:
-            raise SystemExit(f"bad --window {w!r}")
+            win = fr.time_window(f, nums[0], nums[1])
         d = dict(window=[win.start_s, win.end_s], covered_s=win.covered_s, short=win.short, loading_frames_cut=win.loading_frames_cut, notes=win.notes, **win.stats)
         if js:
             print(json.dumps(d))
@@ -367,7 +374,7 @@ def _run(kind: str, rest: list[str]) -> int:
             raise SystemExit("usage: nps5 analyze commits <commits log> [--last S] [--skip-end S] [--top N]")
         s = commit_stats(read_commits(pos[0]), o.get("last", 20.0), o.get("skip_end", 6.0), o.get("top", 14))
         if not s["ok"]:
-            print(f"only {s['frames']} frames in window", file=sys.stderr)
+            print(s.get("reason") or f"only {s['frames']} frames in window", file=sys.stderr)
             return 1
         if js:
             print(json.dumps(s))

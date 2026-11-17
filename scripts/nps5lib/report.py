@@ -21,17 +21,24 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ab  # noqa: E402
+import bmp  # noqa: E402
 import pics  # noqa: E402
 import stats as st  # noqa: E402
 
-_PATH = re.compile(r"(?<![\w.<])(?:~|/(?:Users|home|private|var|tmp|Volumes|opt|Library|System|nix|mnt|root))[^\s'\"`),;|]*")
+# A path starts at a known root ("/Users", "C:\\Users", "~/"...). It may contain spaces, so the match runs to the closing quote
+# (when quoted) or else to the end of the line / the next table pipe: over-scrubbing a tail is safe, leaking a directory name is not.
+_ROOTS = r"(?:~(?=[/\\]|$)|[A-Za-z]:[\\/]Users(?=[/\\])|/(?:Users|home|private|var|tmp|Volumes|opt|Applications|Library|System|nix|mnt|root)(?=[/\\\s'\"`),;|]|$))"
+_QPATH = re.compile(r"(?P<q>['\"`])" + _ROOTS + r"(?:[/\\][^\n]*?)?(?P=q)")
+_PATH = re.compile(r"(?<![\w.<])" + _ROOTS + r"(?:[/\\](?:[^\n|]*[^\s|])?)?")
 GUARD = re.compile(r"guard|watchdog|loop[-_ ]?cap|capped|self memory limit|start hold|\[run_sandboxed\]|refus|memory pressure|NPS5_RUN_MAX|aborting|timed out|timeout", re.I)
 
 
-def scrub(s: str) -> str:
-    """Absolute and home paths -> <path>; long lines are cut."""
+def scrub(s: str, cut: bool = True) -> str:
+    """Absolute and home paths -> <path>. cut: also shorten a free-text log line to 220 characters (never for lines the
+    report builds itself: a cut table or env-diff row is a broken row)."""
+    s = _QPATH.sub(lambda m: m.group("q") + "<path>" + m.group("q"), s)
     s = _PATH.sub("<path>", s)
-    return s if len(s) <= 220 else s[:217] + "..."
+    return s if not cut or len(s) <= 220 else s[:217] + "..."
 
 
 def load_run(spec: str, environ: dict) -> dict:
@@ -44,19 +51,27 @@ def load_run(spec: str, environ: dict) -> dict:
     if os.path.isfile(p):
         with open(p) as f:
             rj = json.load(f)
-    arm = rj.get("arm") or {}
-    return dict(dir=d, tag=rj.get("tag") or os.path.basename(os.path.normpath(d)), rj=rj, arm=arm.get("label") or "baseline")
+    if not isinstance(rj, dict):                      # valid JSON that is not an object: no metadata, the run still counts
+        rj = {}
+    for k in ("arm", "machine", "build", "env", "components", "logs", "timings"):
+        if not isinstance(rj.get(k), dict):
+            rj[k] = {}
+    return dict(dir=d, tag=str(rj.get("tag") or os.path.basename(os.path.normpath(d))), rj=rj, arm=str(rj["arm"].get("label") or "baseline"))
 
 
 def guard_lines(run: dict, limit: int = 12) -> list[str]:
+    """Guard / watchdog lines of the run's logs. Only files whose real path is inside the run directory are read (run.json
+    is data, not trusted: a crafted `logs` entry must not pull another file into the report); deduped by real path."""
     seen, out = set(), []
+    root = os.path.realpath(run["dir"])
     logs = run["rj"].get("logs") or {}
     paths = [os.path.join(run["dir"], n) for n in ("run.out", "run.err")] + [p for p in logs.values() if isinstance(p, str)]
     for p in paths:
-        if not os.path.isfile(p) or os.path.basename(p) in seen:
+        rp = os.path.realpath(os.path.join(run["dir"], p))      # a relative entry means relative to the run directory
+        if rp in seen or not rp.startswith(root + os.sep) or not os.path.isfile(rp):
             continue
-        seen.add(os.path.basename(p))
-        with open(p, errors="replace") as f:
+        seen.add(rp)
+        with open(rp, errors="replace") as f:
             for line in f:
                 if GUARD.search(line):
                     s = scrub(line.strip())
@@ -124,7 +139,7 @@ def build(specs: list[str], environ: dict, window: str = "steady", base: Optiona
         d = env_diff(basr["rj"].get("env") or {}, r["rj"].get("env") or {})
         if d:
             any_d = True
-            L.append(f"- `{r['tag']}`: " + "; ".join(f"`{k}` {scrub(str(a)) if a is not None else '(unset)'} -> {scrub(str(b)) if b is not None else '(unset)'}" for k, a, b in d))
+            L.append(f"- `{r['tag']}`: " + "; ".join(f"`{k}` {scrub(str(a), False) if a is not None else '(unset)'} -> {scrub(str(b), False) if b is not None else '(unset)'}" for k, a, b in d))
     if not any_d:
         L.append("None: every run used the same environment.")
     # fps
@@ -132,9 +147,13 @@ def build(specs: list[str], environ: dict, window: str = "steady", base: Optiona
     skipped = []
     for r in runs:
         try:
-            arms.setdefault(r["arm"], []).append(ab.run_metrics(r["dir"], window))
+            m = ab.run_metrics(r["dir"], window)            # computed first: a failing run must not leave an empty arm behind
         except (ValueError, OSError) as e:
             skipped.append(f"`{r['tag']}`: {e}")
+            continue
+        arms.setdefault(r["arm"], []).append(m)
+    if not arms:
+        raise ValueError("no usable runs: " + scrub("; ".join(skipped) or "none given"))
     L += ["", f"## Frame times (window: {window})", ""]
     if arms:
         L += ["| arm | runs | p50 per run (ms) | p50 mean (95% CI) | p95 mean (ms) | fps mean |", "|---|---|---|---|---|---|"]
@@ -163,13 +182,23 @@ def build(specs: list[str], environ: dict, window: str = "steady", base: Optiona
     if pp:
         da, db = pics.list_dumps(pics.dump_dir(pp[0])), pics.list_dumps(pics.dump_dir(pp[1]))
         pairs, oa, ob = pics.pair_dumps(da, db)
-        if pairs:
-            pairs = pairs[:4]
-            for s, c, pa, pb in pairs:
-                r = pics.compare_pair(pa, pb)
-                L.append(f"- {s.replace('#', 'N')} at present {c}: " + ("size mismatch" if r["size_mismatch"] else "identical" if r["identical"] else f"mean abs diff {r['mad']:.3f}, max {r['max']}, {100 * r['frac']:.2f}% of samples differ by more than 2"))
+        good, bad, cache = [], 0, {}
+        for s, c, pa, pb in pairs:
+            if len(good) >= 4:
+                break
+            try:
+                r = pics.compare_pair(pa, pb, cache=cache)
+            except (bmp.BmpError, OSError):                  # a truncated dump is skipped and counted, not fatal
+                bad += 1
+                continue
+            good.append((s, c, pa, pb))
+            L.append(f"- {s.replace('#', 'N')} at present {c}: " + ("size mismatch" if r["size_mismatch"] else "identical" if r["identical"] else "differs, but only between sample points (sampled mean abs diff 0)" if r.get("sample_miss")
+                                                                  else f"mean abs diff {r['mad']:.3f}, max {r['max']}, {100 * r['frac']:.2f}% of samples differ by more than 2"))
+        if bad:
+            L.append(f"- {bad} unreadable dump pair(s) skipped")
+        if good:
             if out_dir:
-                pics.make_sheet(pairs, os.path.join(out_dir, "sheet.png"))
+                pics.make_sheet(good, os.path.join(out_dir, "sheet.png"), cache=cache)
                 L += ["", "![A | B | difference](sheet.png)  (left: first arm, middle: second arm, right: difference heat)"]
             shown = True
     if not shown:
@@ -188,7 +217,7 @@ def build(specs: list[str], environ: dict, window: str = "steady", base: Optiona
 
 
 def scrub_all(text: str) -> str:
-    return "\n".join(scrub(l) if "(sheet.png)" not in l else l for l in text.split("\n"))
+    return "\n".join(scrub(l, False) if "(sheet.png)" not in l else l for l in text.split("\n"))     # no cutting: these are report-built lines
 
 
 def main(argv: list[str], environ: Optional[dict] = None) -> int:
@@ -216,15 +245,20 @@ def main(argv: list[str], environ: Optional[dict] = None) -> int:
         print("usage: nps5 report <run>... [--out DIR]", file=sys.stderr)
         return 2
     try:
+        ab.check_window(o.get("window", "steady"))
+    except ValueError as e:
+        print(f"nps5 report: {e}", file=sys.stderr)
+        return 2
+    try:
         if o.get("out"):
             os.makedirs(o["out"], exist_ok=True)
         text = build(specs, environ, o.get("window", "steady"), o.get("base"), o.get("out"), o.get("pics"), o.get("xray"))
-    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        if o.get("out"):
+            pics.write_atomic(os.path.join(o["out"], "report.md"), text.encode())
+    except (OSError, ValueError) as e:                   # includes FileNotFoundError, JSONDecodeError, a refused symlink
         print(f"nps5 report: {e}", file=sys.stderr)
         return 1
     if o.get("out"):
-        with open(os.path.join(o["out"], "report.md"), "w") as f:
-            f.write(text)
         print(f"nps5 report: wrote {os.path.join(o['out'], 'report.md')}")
     else:
         sys.stdout.write(text)

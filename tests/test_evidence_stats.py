@@ -179,5 +179,32 @@ class SceneWindows(unittest.TestCase):
             fr.scene_window(f, {}, "bogus", tot)
 
 
+class NonFinite(unittest.TestCase):
+    def test_compare_refuses_nan_and_inf(self):
+        for a, b in (([10, 10.1, float("nan")], [5, 5.1, 5.2]), ([10, 10.1, 10.2], [5, float("inf"), 5.2]), ([10, 10.1, 10.2], [5, -float("inf"), 5.2])):
+            c = st.compare(a, b)
+            self.assertEqual(c["verdict"], "insufficient")
+            self.assertIn("finite", c["reason"])
+
+    def test_perf_csv_skips_torn_and_foreign_rows(self):
+        text = "frame,wall_ms\n0,16.0\n1,nan\n2,inf\n3,-4\n4,0\n5,17.0\n"
+        self.assertEqual(fr.parse_perf_csv(text).ms, [16.0, 17.0])
+
+    def test_frames_log_rejects_unicode_digits(self):
+        t = "1000000,16000\n\u00b2,5\n7,\u0663\n2000000,16000\n" + "1" * 5000 + ",1\n"
+        self.assertEqual(fr.parse_frames_log(t).ms, [16.0, 16.0])
+
+    def test_non_dict_run_json_and_bad_wall_time_are_unknown(self):
+        with tempfile.TemporaryDirectory() as td:
+            for body in ("[1]", '"x"', '{"timings": [1]}', '{"timings": {"wall_s": "9"}}'):
+                evfix.write(os.path.join(td, "run.json"), body)
+                self.assertIsNone(fr.run_total_seconds(td))
+            os.remove(os.path.join(td, "run.json"))
+            evfix.write(os.path.join(td, "summary.txt"), "wall_time_s: 1.2.3\n")
+            self.assertIsNone(fr.run_total_seconds(td))
+            evfix.write(os.path.join(td, "summary.txt"), "wall_time_s: 1.5\n")
+            self.assertEqual(fr.run_total_seconds(td), 1.5)
+
+
 if __name__ == "__main__":
     unittest.main()

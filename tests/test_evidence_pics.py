@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for bmp.py and pics.py on tiny synthetic BMP pairs with known differences."""
-import contextlib, io, os, struct, sys, tempfile, unittest, zlib
+import contextlib, io, json, os, struct, sys, tempfile, unittest, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import evfix  # noqa: E402
 import bmp  # noqa: E402
@@ -175,6 +175,162 @@ class Cli(unittest.TestCase):
             rc, out, _ = self.run_cli([ra, rb, "--out", os.path.join(td, "s.png")])
             self.assertEqual(rc, 0)
             self.assertIn("SIZE MISMATCH", out)
+
+
+def with_bitfields(d, masks, alpha=None):
+    """A 32-bit BMP rewritten as compression 3 (BITFIELDS) with the three colour masks after the 40-byte header."""
+    hdr = bytearray(d[:54])
+    struct.pack_into("<I", hdr, 30, 3)
+    struct.pack_into("<I", hdr, 10, 54 + 12)
+    return bytes(hdr) + struct.pack("<III", *masks) + d[54:]
+
+
+class Hardening(unittest.TestCase):
+    def run_cli(self, args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = pics.main(args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def runs(self, td, n=2, size=8, va=100, vb=130):
+        ra, rb = evfix.make_run(td, "T", "a", [20.0] * 10), evfix.make_run(td, "T", "b", [20.0] * 10)
+        for d, v in ((ra, va), (rb, vb)):
+            for k in range(1, n + 1):
+                evfix.write(os.path.join(d, "frames", f"frame_{k * 100}.bmp"), bmp.make_bmp(size, size, lambda x, y, v=v: gray(v)))
+        return ra, rb
+
+    def test_difference_between_sample_points_is_not_identical(self):
+        a = img(1000, 1000, lambda x, y: gray(10))
+        b = img(1000, 1000, lambda x, y: gray(200) if (x, y) == (501, 501) else gray(10))
+        d = bmp.diff_metrics(a, b)
+        self.assertFalse(d["identical"])
+        self.assertTrue(bmp.diff_metrics(a, img(1000, 1000, lambda x, y: gray(10), 32))["identical"])      # same pixels, other layout
+        self.assertFalse(bmp.diff_metrics(img(8, 8, lambda x, y: gray(5)), img(8, 8, lambda x, y: gray(5) if x else gray(6)))["identical"])
+
+    def test_printed_verdict_for_unsampled_difference(self):
+        with tempfile.TemporaryDirectory() as td:
+            ra, rb = self.runs(td, n=1, size=1000, va=10, vb=10)
+            evfix.write(os.path.join(rb, "frames", "frame_100.bmp"), bmp.make_bmp(1000, 1000, lambda x, y: gray(200) if (x, y) == (501, 501) else gray(10)))
+            rc, out, _ = self.run_cli([ra, rb])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("identical", out.split("flicker")[0])
+            self.assertIn("sample", out.split("flicker")[0])
+
+    def test_sheet_with_pairs_of_different_widths(self):
+        with tempfile.TemporaryDirectory() as td:
+            pairs = []
+            for i, w in enumerate((8, 20, 12)):
+                pa, pb = os.path.join(td, f"a{i}.bmp"), os.path.join(td, f"b{i}.bmp")
+                evfix.write(pa, bmp.make_bmp(w, 4, lambda x, y: gray(50)))
+                evfix.write(pb, bmp.make_bmp(w, 4, lambda x, y: gray(90)))
+                pairs.append(("s", i, pa, pb))
+            out = os.path.join(td, "s.png")
+            pics.make_sheet(pairs, out)
+            with open(out, "rb") as fh:
+                p = fh.read()
+            w, h = struct.unpack(">II", p[16:24])
+            i, idat = 8, b""
+            while i < len(p):
+                n, tag = struct.unpack(">I4s", p[i:i + 8])
+                if tag == b"IDAT":
+                    idat += p[i + 8:i + 8 + n]
+                i += 12 + n
+            raw = zlib.decompress(idat)
+            self.assertEqual(len(raw), h * (1 + 3 * w))                  # every row is exactly as wide as the header says
+            self.assertEqual(w, 3 * 20 + 2 * 4)                          # the widest pair
+            with self.assertRaises(ValueError):
+                pics.make_sheet([], os.path.join(td, "none.png"))
+            self.assertFalse(os.path.exists(os.path.join(td, "none.png")))
+
+    def test_corrupt_dump_is_counted_not_fatal(self):
+        with tempfile.TemporaryDirectory() as td:
+            ra, rb = self.runs(td, n=3)
+            good = bmp.make_bmp(8, 8, lambda x, y: gray(100))
+            evfix.write(os.path.join(rb, "frames", "frame_200.bmp"), good[:60])           # truncated
+            evfix.write(os.path.join(ra, "frames", "frame_300.bmp"), b"junk")
+            sheet = os.path.join(td, "s.png")
+            rc, out, err = self.run_cli([ra, rb, "--out", sheet])
+            self.assertEqual(rc, 0)
+            self.assertIn("unreadable", out + err)
+            self.assertIn("frame_#.bmp @100", out)
+            self.assertTrue(os.path.isfile(sheet))
+            rc, out, err = self.run_cli([ra, rb, "--json"])
+            self.assertEqual(rc, 0)
+            self.assertGreaterEqual(json.loads(out)["unreadable"]["pairs"], 2)
+            for f in os.listdir(os.path.join(rb, "frames")):
+                if f.endswith(".bmp"):
+                    evfix.write(os.path.join(rb, "frames", f), b"junk")
+            rc, _, err = self.run_cli([ra, rb])
+            self.assertEqual(rc, 1)
+            self.assertIn("unreadable", err)
+
+    def test_max_limits_decoding(self):
+        with tempfile.TemporaryDirectory() as td:
+            ra, rb = self.runs(td, n=8)
+            n, real = [0], bmp.read_bmp
+            def counting(p):
+                n[0] += 1
+                return real(p)
+            bmp.read_bmp = counting
+            try:
+                rc, _, _ = self.run_cli([ra, rb, "--max", "2", "--out", os.path.join(td, "s.png")])
+            finally:
+                bmp.read_bmp = real
+            self.assertEqual(rc, 0)
+            self.assertLessEqual(n[0], 2 * 2 + 2 * 2)             # 2 pairs (decoded once each) + at most 2 dumps per series for flicker, per run
+
+    def test_option_values_are_validated(self):
+        with tempfile.TemporaryDirectory() as td:
+            ra, rb = self.runs(td)
+            for opt, v in (("--regions", "0"), ("--max", "0"), ("--max", "-3"), ("--width", "0"), ("--width", "-1"), ("--regions", "-2")):
+                rc, _, err = self.run_cli([ra, rb, opt, v])
+                self.assertEqual(rc, 2, opt + v)
+                self.assertIn(opt, err)
+
+    def test_pixel_offset_must_clear_the_headers(self):
+        d = bytearray(bmp.make_bmp(2, 2, lambda x, y: gray(0)))
+        for off in (0, 14, 53):
+            struct.pack_into("<I", d, 10, off)
+            with self.assertRaises(bmp.BmpError):
+                bmp.parse_bmp(bytes(d))
+
+    def test_bitfields(self):
+        d = bmp.make_bmp(2, 2, lambda x, y: (1, 2, 3), 32)
+        ok = bmp.parse_bmp(with_bitfields(d, (0xFF0000, 0xFF00, 0xFF)))
+        self.assertEqual(ok.pixel(0, 0), (1, 2, 3))
+        for masks in ((0xFF, 0xFF00, 0xFF0000), (0xF800, 0x7E0, 0x1F)):             # RGB order, 565
+            with self.assertRaises(bmp.BmpError):
+                bmp.parse_bmp(with_bitfields(d, masks))
+        d24 = bytearray(with_bitfields(d, (0xFF0000, 0xFF00, 0xFF)))
+        struct.pack_into("<H", d24, 28, 24)
+        with self.assertRaises(bmp.BmpError):
+            bmp.parse_bmp(bytes(d24))
+
+    def test_sheet_write_is_atomic_and_refuses_symlinks(self):
+        with tempfile.TemporaryDirectory() as td:
+            ra, rb = self.runs(td)
+            target = os.path.join(td, "precious.txt")
+            evfix.write(target, "keep")
+            link = os.path.join(td, "sheet.png")
+            os.symlink(target, link)
+            rc, _, err = self.run_cli([ra, rb, "--out", link])
+            self.assertEqual(rc, 1)
+            self.assertIn("symlink", err)
+            with open(target) as f:
+                self.assertEqual(f.read(), "keep")
+            os.remove(link)
+            real = os.replace
+            def boom(src, dst):
+                raise OSError("killed")
+            os.replace = boom
+            try:
+                rc, _, _ = self.run_cli([ra, rb, "--out", link])
+            finally:
+                os.replace = real
+            self.assertEqual(rc, 1)
+            self.assertEqual(os.listdir(td).count("sheet.png"), 0)                 # no partial file at the destination
+            self.assertEqual([n for n in os.listdir(td) if n.startswith(".sheet")], [])   # and no temp left behind
+            self.assertEqual(self.run_cli([ra, rb, "--out", link])[0], 0)
 
 
 if __name__ == "__main__":

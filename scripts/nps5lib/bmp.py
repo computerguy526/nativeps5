@@ -44,6 +44,15 @@ def parse_bmp(d: bytes) -> Image:
     comp = struct.unpack_from("<I", d, 30)[0]
     if bpp not in (24, 32) or comp not in (0, 3) or w <= 0 or h == 0:
         raise BmpError(f"unsupported BMP (bpp {bpp}, compression {comp})")
+    if off < 14 + hdr:                                   # off=0 would read the header as pixels
+        raise BmpError("bad pixel data offset")
+    if comp == 3:                                        # BITFIELDS: only the default BGR(A) byte order is read as such
+        if bpp != 32 or off < 14 + 40 + 12 or len(d) < 14 + 40 + 12:
+            raise BmpError("unsupported BMP (bitfields need 32 bpp and the colour masks before the pixels)")
+        mr, mg, mb = struct.unpack_from("<III", d, 54)
+        ma = struct.unpack_from("<I", d, 66)[0] if hdr >= 56 and off >= 70 else 0
+        if (mr, mg, mb) != (0xFF0000, 0xFF00, 0xFF) or ma not in (0, 0xFF000000):
+            raise BmpError("unsupported BMP (bitfield masks are not the default BGR(A) layout)")
     top_down = h < 0
     h = abs(h)
     rb = w * (bpp // 8)
@@ -105,12 +114,24 @@ def sharpness(y: list[list[float]]) -> float:
     return dx + dy
 
 
+def _same_rgb(a: Image, b: Image) -> bool:
+    """Exact equality of the R, G, B bytes of every pixel (alpha and row layout ignored)."""
+    if a.bpp == b.bpp:
+        if a.rows == b.rows:
+            return True
+        if a.cpp == 3:
+            return False
+    ca, cb = a.cpp, b.cpp
+    return all(ra[k::ca][:a.w] == rb[k::cb][:a.w] for ra, rb in zip(a.rows, b.rows) for k in range(3))
+
+
 def diff_metrics(a: Image, b: Image, threshold: int = 2, max_px: int = 250_000) -> Optional[dict]:
     """Per-channel (RGB) comparison: identical, mean abs diff (0-255), max, fraction of channel samples differing by
-    more than `threshold`. None if the images differ in size."""
+    more than `threshold`. None if the images differ in size. identical is True only for exactly equal pixels; if the
+    sample sees no difference but the pixels differ, identical is False and sample_miss is True (mad/max are then 0 = unknown)."""
     if (a.w, a.h) != (b.w, b.h):
         return None
-    if a.rows == b.rows:
+    if _same_rgb(a, b):                                  # exact, full compare: only this may say identical
         return dict(identical=True, mad=0.0, max=0, frac=0.0)
     ys, xs = _grid(a.w, a.h, max_px)
     s = n = cnt = mx = 0
@@ -123,7 +144,8 @@ def diff_metrics(a: Image, b: Image, threshold: int = 2, max_px: int = 250_000) 
                 n += 1
                 mx = max(mx, d)
                 cnt += d > threshold
-    return dict(identical=mx == 0, mad=s / n, max=mx, frac=cnt / n)
+    # the full compare above failed: a clean sample means the difference lies between grid points, never "identical"
+    return dict(identical=False, mad=s / n, max=mx, frac=cnt / n, **(dict(sample_miss=True) if mx == 0 else {}))
 
 
 def region_diff(a: Image, b: Image, regions: int = 8, max_px: int = 250_000) -> Optional[list[list[float]]]:
