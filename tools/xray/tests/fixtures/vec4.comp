@@ -1,0 +1,9 @@
+#version 450
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer In { vec4 d[]; } inb;
+layout(std430, set = 0, binding = 1) writeonly buffer Out { float o[]; } outb;
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  vec4 a = inb.d[i];
+  outb.o[i] = a.x + a.y * 2.0 + a.z * 3.0 + a.w * 5.0;
+}
