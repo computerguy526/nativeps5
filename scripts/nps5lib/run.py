@@ -337,7 +337,7 @@ def compose(tid, opts, environ=None, g=None):
     plan.put("SDL_VULKAN_LIBRARY", environ.get("NPS5_VULKAN_LIB") or os.path.join(environ.get("NPS5_BREW_PREFIX", "/opt/homebrew"), "lib/libvulkan.1.dylib"), "base")
     libs = arm["pieces"].get("libs") or titles.get("LIBS")
     # The PS5 system libraries come from AnyPS5's arm64 host libraries, also with GPU=kyty (Kyty replaces the graphics
-    # exports only). That fork is not public: without a build the plan carries a placeholder and the run stops below.
+    # exports only). Without a build (scripts/build.sh anyps5) the plan carries a placeholder and the run stops below.
     libs = os.path.expanduser(libs) if libs else (environ.get("NPS5_ANYPS5_BUILD") or ANYPS5_MISSING)
     plan.put("DYLD_LIBRARY_PATH", os.path.join(libs, "core/libs/libs/unpatched"), "back end")
     if gpu == "kyty":

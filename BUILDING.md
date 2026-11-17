@@ -103,7 +103,7 @@ preset in `titles/kyty-preset.env`: the code defaults are the slow path.
 scripts/build.sh anyps5               # -> ../anyps5/build-arm64/core/libs/libs/unpatched/ (NPS5_ANYPS5_BUILD points at build-arm64 by default)
 ```
 
-Six submodules (`--depth 1`), then a Release build with `-DAPS5_HOST_ARM64=ON` of the targets `libSceAgc
+Seven submodules (`--depth 1`; glslang only for its commit, which stamps the shader cache version), then a Release build with `-DAPS5_HOST_ARM64=ON` of the targets `libSceAgc
 libSceAgcDriver libkernel libc nps5_gpu`. The result is five images: `libkernel.prx`, `libc.prx`, `libSceAgc.prx`,
 `libSceAgcDriver.prx` and `libnps5_gpu.dylib` (the bridge the translated program calls; it also carries the host
 side of the Kyty back end). `nps5 build` links a title against them and every title run loads them, with either

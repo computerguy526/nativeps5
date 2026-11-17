@@ -12,8 +12,10 @@ J="$NPS5_BUILD_JOBS"; N="nice -n 5"
 need() { for t in "$@"; do command -v "$t" >/dev/null || { echo "build: missing tool '$t' (BUILDING.md, Prerequisites)" >&2; exit 2; }; done; }
 
 recomp() {
-  need go
+  need go git
   cd "$NPS5_RECOMP_DIR"
+  # audio decoders compiled into every translated program's runtime (nps5 build stops without them)
+  git submodule update --init --depth 1 3rdparty/minimp3 3rdparty/libatrac9
   mkdir -p bin
   $N go build -p "$J" -o bin/ps4-recomp ./cmd/ps4-recomp
   $N go build -p "$J" -o bin/nps5 ./cmd/nps5
@@ -35,7 +37,7 @@ anyps5() {
   [ -d "$NPS5_ANYPS5_DIR/.git" ] || { echo "build: no AnyPS5 checkout at $NPS5_ANYPS5_DIR: run scripts/fetch-components.sh anyps5 (BUILDING.md, step 1)" >&2; exit 2; }
   [ -e "$NPS5_BREW_PREFIX/lib/cmake/SDL2" ] || { echo "build: missing SDL2 under $NPS5_BREW_PREFIX (brew install sdl2-compat)" >&2; exit 2; }
   cd "$NPS5_ANYPS5_DIR"
-  git submodule update --init --depth 1 3rdparty/ZArchive 3rdparty/stb 3rdparty/libjpeg-turbo 3rdparty/zstd 3rdparty/Vulkan-Headers 3rdparty/SPIRV-Headers
+  git submodule update --init --depth 1 3rdparty/ZArchive 3rdparty/stb 3rdparty/libjpeg-turbo 3rdparty/zstd 3rdparty/Vulkan-Headers 3rdparty/SPIRV-Headers 3rdparty/glslang
   $N cmake -S . -B build-arm64 -G Ninja -DAPS5_HOST_ARM64=ON -DCMAKE_BUILD_TYPE=Release
   # nps5_gpu (libnps5_gpu.dylib: the runtime's bridge, with the host side of the Kyty back end) is not part of `all`
   $N cmake --build build-arm64 -j "$J" --target libSceAgc libSceAgcDriver libkernel libc nps5_gpu
