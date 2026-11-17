@@ -52,6 +52,11 @@ def _watch():
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 
 
+def _logsummary():
+    spec = importlib.util.spec_from_file_location("nps5_logsummary", os.path.join(HERE, "logsummary.py"))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+
+
 def _patch():
     spec = importlib.util.spec_from_file_location("nps5_patch", os.path.join(HERE, "patch.py"))
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
@@ -1010,6 +1015,8 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         if dv and subprocess.run(shlex.split(dv)).returncode != 0:
             print("!!!!!!!! RUN MODIFIED THE DUMP !!!!!!!!", file=sys.stderr); rj["verdict"] = "DUMP_MODIFIED"; save(); return 99
         save()
+        try: print(_logsummary().write_run_summary(plan.run_dir, rj), end="")     # the run-end SUMMARY block, also run.summary.txt
+        except Exception: pass
         print("nps5 run: %s rc=%s verdict=%s, output in %s" % (plan.tid, rc, rj["verdict"], plan.run_dir))
         if rj["verdict"] in ("EARLY_BLACK", "EARLY_STALL", "ENDED_EARLY"): return 1
         return 0 if rc in (0, 124) and rj["verdict"] in ("DONE_FIXED", "DONE_UNTIL", "TIMEOUT") else (rc if rc > 0 else 1)

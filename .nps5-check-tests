@@ -14,6 +14,9 @@ python3 -I tests/test_evidence_analyze.py
 python3 -I tests/test_evidence_pics.py
 python3 -I tests/test_evidence_ab_report.py
 [ -z "$NPS5_PRIVATE_TESTS" ] || bash "$NPS5_PRIVATE_TESTS"   # the private workspace's script tests (tools-host/tests/run.sh), when it is set
+python3 -I -m py_compile scripts/nps5lib/bugreport.py scripts/nps5lib/logsummary.py tests/test_bugreport.py tests/test_logsummary.py
+python3 -I tests/test_bugreport.py
+python3 -I tests/test_logsummary.py
 python3 -I tests/test_watch.py
 python3 -I tests/test_cache.py
 python3 -I tests/test_bench.py

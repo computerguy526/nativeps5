@@ -13,6 +13,7 @@ their scene.
 | [memory.md](memory.md) | the self limit, level-load texture residency, alias double counting, budgets and collectors, mip skip, disk |
 | [machine-safety.md](machine-safety.md) | the incidents (kernel panic, WindowServer watchdog reboots), why GPU work survives the process, loop caps and guards, the rules and their reasons |
 | [hardware.md](hardware.md) | supported and untested machines, what is derived from RAM and core count, machine classes and conditional profile rows, per-machine cache identities, how to add a machine |
+| [logging.md](logging.md) | the `[subsystem] LEVEL` line convention, `NPS5_LOG`, reading a noisy log (`nps5 log`), the run-end SUMMARY block, and `nps5 bug-report` (one redacted zip for an issue) |
 | [profiling.md](profiling.md) | the checklist before a measured run, run classes, comparing two things, where the frame goes on the CPU and GPU without timestamp queries |
 | [../env_switches.tsv](../env_switches.tsv) | every environment switch the components read: name, component, meaning (hand-written for the ones these pages use), source file |
 

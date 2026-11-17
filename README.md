@@ -88,13 +88,15 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
 
 If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an issue with the command and its output.
 
+**Troubleshooting.** `nps5 doctor` checks the machine. After a run that stopped, crashed or looks wrong, `nps5 log --last` shows the log without the noise and ends with a SUMMARY block (verdict, fps, compiles, stalls, crashes, settings), and `nps5 bug-report` writes one zip of redacted text (log, versions, commits, settings, crash report) to attach to an issue; `--dry-run` lists what would go in. It never includes game files. See [docs/reference/logging.md](docs/reference/logging.md).
+
 ## For developers
 
 - [BUILDING.md](BUILDING.md): the build, with the table of what was verified from fresh clones.
 - [AGENTS.md](AGENTS.md): rules for running things without taking the machine down; for people and coding agents.
 - [CONTRIBUTING.md](CONTRIBUTING.md): how a change gets in, what evidence a PR needs, and the rule that no game data is accepted.
 - [docs/README.md](docs/README.md): the map of the documentation; [docs/reference/](docs/reference/README.md) covers architecture, frame rate, rendering, shaders, memory, machine safety and profiling. [docs/learnings.md](docs/learnings.md) and [docs/playbook.md](docs/playbook.md) record what was tried, what worked and what failed.
-- Per-game profiles, pipeline lists and benchmark routes: [games/](games/README.md). Commands: `nps5 doctor | build | patch | run | cache | bench | regress | analyze | report`.
+- Per-game profiles, pipeline lists and benchmark routes: [games/](games/README.md). Commands: `nps5 doctor | build | patch | run | log | bug-report | cache | bench | regress | analyze | report`.
 - Before every commit run `scripts/check.sh` (game data, secrets, personal paths); `scripts/install-hooks.sh` makes it a pre-commit hook.
 
 **AI assistance.** Pull requests written by hand or with a coding agent are welcome on the same terms. Fill in the "AI assistance" line of the pull request template for every PR, name the agent if you used one, and confirm that a person read the diff and the evidence. A person decides what gets in. Details in [CONTRIBUTING.md](CONTRIBUTING.md).

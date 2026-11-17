@@ -57,38 +57,45 @@ body:
         - Not tried again
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Attach the zip from `scripts/nps5 bug-report`** (drag it into the "What happened" box below, or into a comment). It holds the trimmed log, `nps5 doctor`, commits, settings, versions and any crash report, redacted, text only; `--dry-run` lists what goes in. Open it and read it first. Details: [docs/reference/logging.md](https://github.com/computerguy526/nativeps5/blob/main/docs/reference/logging.md).
+  - type: checkboxes
+    id: bugzip
+    attributes:
+      label: Bug report zip
+      options:
+        - label: I attached the `nps5 bug-report` zip, or there was no run to report (say why below)
+          required: true
   - type: textarea
     id: doctor
     attributes:
-      label: "`scripts/nps5 doctor` output"
+      label: "`scripts/nps5 doctor` output (only if you did not attach the zip)"
       render: text
-    validations:
-      required: true
   - type: textarea
     id: report
     attributes:
-      label: "`nps5 report <run>` output, or the crash bundle"
-      description: |
-        Paste the report of the failing run (docs/agents/evidence.md), or for a crash the contents of `crash.txt` and `manifest.json` from the crash bundle. Paths in them are already redacted to `~`; check for anything else personal before pasting. Trim long logs to the lines around the failure.
+      label: "Extra evidence (optional): `nps5 report <run>` output, or the lines around the failure"
       render: text
   - type: input
     id: machine
     attributes:
-      label: Mac model, macOS and Xcode
+      label: Mac model, macOS and Xcode (also in the zip)
       placeholder: MacBook Pro M4 Pro 24 GB, macOS 26.1, Xcode 26.1
     validations:
       required: true
   - type: textarea
     id: commits
     attributes:
-      label: Component commits
+      label: Component commits (also in the zip: write "in the zip")
       description: "`components.lock` of the checkout, or the commits `nps5 doctor` prints (nativeps5, ps5recomp, Kyty / AnyPS5, KosmicKrisp), plus any local changes."
     validations:
       required: true
   - type: textarea
     id: settings
     attributes:
-      label: Settings and environment switches
+      label: Settings and environment switches (also in the zip: write "in the zip")
       description: Every `NPS5_*`, `KYTY_*`, `APS5_*` or other switch you set, and `nps5.conf` changes. Say "defaults" if none.
     validations:
       required: true

@@ -95,6 +95,14 @@ agree that your change is licensed under the licence of the repository it goes i
 
 ## Reporting a problem
 
-Open an issue with: the commit of each component, the title ID and version, the Mac model, RAM and macOS version,
-the command and environment you ran, and the text log. Remove your home folder from paths. Never attach game files,
-caches or dumps; a frame picture is fine when it shows the problem.
+Run `nps5 bug-report` (or `nps5 bug-report <run>` for an earlier run) and attach the zip it writes to the issue. It
+collects, from the run you just made: the text log trimmed to its warnings, errors and one sample of each repeated line,
+`run.json`, `summary.txt` and `crash.txt` when there are any, `nps5 doctor`, the commit of each component and whether it has
+local changes, the settings in effect, the macOS and Xcode versions and the connected controllers. It lists the files before it
+writes them (`--dry-run` stops there), redacts your home folder, user and computer name, e-mail addresses and serial numbers,
+and reads nothing but text from an allow-list: no game files, shaders, dumps, journals, caches or saves. Read the zip before
+you attach it. [docs/reference/logging.md](docs/reference/logging.md) has the details.
+
+Add what the zip cannot know: the title ID and version, where in the title it happens, the steps and how often. Without a
+run (a build that fails, a tool that crashes) paste the command and its output, with your home folder removed from paths.
+Never attach game files, caches or dumps; a frame picture is fine when it shows the problem.

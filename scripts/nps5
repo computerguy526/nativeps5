@@ -2,6 +2,8 @@
 """nps5: one command name. `run` and `patch` are handled here (scripts/nps5lib/); every other subcommand
 (build, list, play, launcher, doctor, ...) passes through to the Go nps5 of ps5recomp.
   nps5 run <id> [--scene X] [--until SPEC] [--arm LABEL:K=V,...] [--class func|perf] [--secs N] [--dry-run] ...
+  nps5 log <run|file> [--summary] [--rate] [--level W]   readable view of a noisy run log + the SUMMARY block
+  nps5 bug-report [<run>|--last] [--out F.zip] [--dry-run]   one zip of redacted text logs + versions + settings for an issue
   nps5 analyze|ab|pics|report ...   frame stats, noise-aware A/B, picture sheets, PR evidence (docs/agents/evidence.md)
   nps5 cache record|merge|share|verify-list|prepare|check|status <id>   pipeline list and compiled caches (games/README.md, Pipeline lists)
   nps5 bench <id> --route NAME [--arm A:... --arm B:...]          benchmark routes of bench.tsv, ABBA, quiet-machine gate
@@ -43,6 +45,10 @@ def main(argv, environ=None):
     if argv[0] in ("cache", "bench", "regress"):
         sys.path.insert(0, os.path.join(HERE, "nps5lib"))
         return _load(argv[0]).main(argv[1:], environ)
+    if argv[0] == "log":
+        return _load("logsummary").main(argv[1:], environ)
+    if argv[0] in ("bug-report", "bugreport"):
+        return _load("bugreport").main(argv[1:], environ)
     if argv[0] in ("analyze", "ab", "pics", "report"):   # evidence tooling: scripts/nps5lib/{analyze,ab,pics,report}.py
         sys.path.insert(0, os.path.join(HERE, "nps5lib"))
         return _load(argv[0]).main(argv[1:], environ)
