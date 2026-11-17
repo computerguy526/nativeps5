@@ -1,0 +1,7 @@
+# Regression routes for `nps5 regress check|baseline [--quick] [--record]` (scripts/nps5lib/regress.py). Columns:
+# name, scene (scenes.tsv), mode (quick | full | quick,full), reach (<until spec>@<s>: must be reached within s seconds), mem_max_mib (peak footprint), stall_ms_max (largest frame once steady), description.
+# --quick runs the routes whose mode has quick (title + world map, 2 x 90 s); the default runs every route whose mode has full. Green = reached, no [RED] line, memory and stall limits held, a real picture.
+# mem_max_mib is the machine ceiling (18944, NPS5_SELF_MEM_LIMIT_MB), not a measured limit; stall_ms_max values are first guesses to be tightened from the first recorded baselines.
+title	title	quick,full	marker:worldmap+5@90	18944	1500	Title screen: the world map backdrop is reached and drawn
+worldmap	worldmap	quick,full	marker:worldmap+5@90	18944	1500	World map, no input
+hoover	hoover_beach	full	scene:hoover_beach+10@180	18944	2500	First level reached and drawn (stick forward and Cross every 4 s)
