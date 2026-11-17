@@ -11,8 +11,12 @@ ban, memory limit never above the machine's, run length cap, one title at a time
 --arm LABEL:K=V,...  K=V sets an environment word; the reserved keys bin= patch= gpu= libs= (or lib=) kk= kyty=
 workdir= cache= save= select pieces instead. --dry-run prints the final environment and the command and stops.
 Every run writes <runs>/<id>/<tag>/run.json (see RUN_JSON_KEYS). Exit codes: 0 ok, 2 usage, 75 busy (lock or GPU
-process), 78 refused by a safety rule, 99 the run modified the dump; otherwise the title's own status."""
-import hashlib, importlib.util, json, os, re, shlex, shutil, subprocess, sys, time
+process), 78 refused by a safety rule, 99 the run modified the dump, 130 interrupted; otherwise the title's own status.
+Verdicts in run.json: DONE_UNTIL (the --until target was reached), DONE_FIXED (no target: ran its seconds), TIMEOUT (target
+not reached in time), ENDED_EARLY (the title exited by itself before the target), EARLY_BLACK, EARLY_STALL, CRASH,
+FAIL_RC<n>, DUMP_MODIFIED, INTERRUPTED / ERROR (the runner was stopped or failed; the title is stopped with it).
+A tag names one run: a run folder that already holds a run.json is set aside as <tag>.prev-<time>, never mixed."""
+import ctypes, hashlib, importlib.util, json, os, re, shlex, shutil, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -20,6 +24,7 @@ SCHEMA = 1
 RESERVED = ("bin", "patch", "gpu", "libs", "lib", "kk", "kyty", "workdir", "cache", "save")
 CLASSES = ("func", "perf")
 RUN_CAP_S, RUN_NO_REASON_S, GPU_PROFILE_MAX_S = 180, 90, 40
+NAME_RE = r"[A-Za-z0-9_][A-Za-z0-9_.+:-]*"       # a tag, a save name, a relative work dir: one path component, never .. or a path
 RUN_JSON_KEYS = ("schema", "title", "tag", "class", "gpu", "scene", "until", "secs", "arm", "build", "lineage", "patches",
                  "binary", "components", "env", "machine", "command", "timings", "rc", "verdict", "logs", "warnings")
 TITLES_KEYS = ("BIN", "BIN_DIR", "APP0", "GPU", "ENV", "KK", "LIBS", "KYTY_LIB", "WORKDIR", "USERDATA", "DUMP_VERIFY")
@@ -65,6 +70,9 @@ def machine_env(environ=None):
         k, eq, v = kv.partition("=")
         if eq and k.startswith("NPS5_") and not environ.get(k):
             environ[k] = v
+    miss = [k for k in need if not environ.get(k)]
+    if miss:
+        raise Refuse("cannot resolve the machine layout: %s gave no %s" % (sh, ", ".join(miss)), 2)
     return environ
 
 
@@ -172,12 +180,16 @@ def check_final(g, p, plan, secs, environ, gpu):
         raise Refuse("runs over %d s need NPS5_RUN_REASON=<why>" % RUN_NO_REASON_S)
 
 
-def sha16(path):
+def sha256_file(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for b in iter(lambda: f.read(1 << 22), b""):
             h.update(b)
-    return h.hexdigest()[:16]
+    return h.hexdigest()
+
+
+def sha16(path):
+    return sha256_file(path)[:16]
 
 
 def select_binary(g, p, titles, arm, bin_opt, patch_opt, environ, build_dry=True, patchmod=None):
@@ -228,9 +240,16 @@ def verify_binary(g, p, sel, environ, patchmod=None):
         notes.append("binary carries no embedded build ID: cannot identify the build")
     side = path + ".patches.json"
     if os.path.isfile(side):
-        with open(side) as f:
-            sc = json.load(f)
-        info["sidecar"] = dict(path=side, sha16=sha16(side), patches=[x["name"] for x in sc.get("patches", [])], source_build_id=(sc.get("build_id") or "")[:16])
+        try:
+            with open(side) as f:
+                sc = json.load(f)
+            info["sidecar"] = dict(path=side, sha16=sha16(side), patches=[x["name"] for x in sc.get("patches", [])], source_build_id=(sc.get("build_id") or "")[:16])
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            raise Refuse("sidecar %s is not a readable patch record (%s); delete the copy and its sidecar to rebuild them" % (side, e or type(e).__name__))
+        # the record must be about THESE bytes: a relinked or replaced binary beside an old sidecar would otherwise be
+        # reported as patched (nps5 patch writes output_sha256; older sidecars lack it and are checked by build ID only)
+        if sc.get("output_sha256") and sc["output_sha256"] != sha256_file(path):
+            raise Refuse("sidecar %s describes other bytes than %s (the binary changed after it was patched); delete both to rebuild" % (side, path))
         want = [x.split("=")[0] for x in sel["patches"].split(",") if x]
         have = info["sidecar"]["patches"]
         if sha and sc.get("build_id") and not sc["build_id"].startswith(sha[:16]):
@@ -242,6 +261,8 @@ def verify_binary(g, p, sel, environ, patchmod=None):
             notes.append("patches %s requested by the profile are not in the sidecar" % ",".join(miss))
         info["patches_applied"] = have
     elif sel["patches"]:
+        if sel["source"] == "cache":
+            raise Refuse("%s has no .patches.json sidecar: a cached copy is only trusted with its record; delete it to rebuild" % path)
         notes.append("no sidecar next to the binary; patches checked by reading the sites")
         try:
             import io
@@ -300,13 +321,18 @@ def compose(tid, opts, environ=None, g=None):
             raise Refuse("scene %s is not defined in %s/scenes.tsv" % (scene, p.id), 2)
         row = g.scene_dict(row)
     tag = opts.get("tag") or environ.get("NPS5_RUN_TAG") or time.strftime("%Y%m%d-%H%M%S")
+    for what, v in (("--tag", tag), ("--save", opts.get("save") or arm["pieces"].get("save")), ("scene save", (row or {}).get("save") or None)):
+        if v is not None and v != "-" and not re.fullmatch(NAME_RE, v):
+            raise Refuse("%s %r must be a plain name (letters, digits, _ . + : -), not a path" % (what, v), 2)
     secs = opts.get("secs")
     if secs is None:
-        secs = (row or {}).get("secs", "-")
-        if not re.fullmatch(r"\d+", secs or ""):
+        m = re.match(r"\d+", (row or {}).get("secs", "") or "")          # scenes.tsv: <s> or <s>/<max>
+        if not m:
             m = re.search(r"default=(\d+)", p.one("run_secs", "") or "")
-            secs = m.group(1) if m else "90"
+        secs = m.group(m.lastindex or 0) if m else "90"
     secs = _int(secs, "--secs")
+    if secs < 1:
+        raise Refuse("--secs must be at least 1 (0 would start the title without a time limit)", 2)
     until = opts.get("until") or ((row or {}).get("until") if (row or {}).get("until", "-") != "-" else None)
 
     if until:
@@ -318,6 +344,8 @@ def compose(tid, opts, environ=None, g=None):
     scratch = environ["NPS5_SCRATCH"]
     wd = opts.get("workdir") or arm["pieces"].get("workdir")
     if wd and not os.path.isabs(wd):
+        if not re.fullmatch(NAME_RE, wd):
+            raise Refuse("--workdir %r must be a plain name or an absolute path" % wd, 2)
         wd = os.path.join(scratch, "work", tid, wd)
     wd = wd or titles.get("WORKDIR") or os.path.join(scratch, "work", tid)
     run_dir = os.path.join(scratch, "runs", tid, tag)
@@ -431,7 +459,34 @@ def gpu_processes():
         out = subprocess.run(["pgrep", "-fl", "agc_frame_replay|kk_spv|spvpipe|harness|/native_"], capture_output=True, text=True).stdout
     except Exception:
         return []
-    return [l for l in out.splitlines() if str(os.getpid()) != l.split(" ", 1)[0] and "nps5" not in l.split(" ", 1)[-1][:40]]
+    return other_gpu_lines(out.splitlines(), _ancestors())
+
+
+RUNNER_NAMES = ("nps5", "run-title.sh", "prepare-pipelines.sh")
+
+
+def _ancestors(pid=None, limit=12):
+    """This process and its parents (a bench or regress that started this run names a native_ binary on its own command line)."""
+    out, pid = set(), pid or os.getpid()
+    while pid > 1 and len(out) < limit:
+        out.add(pid)
+        try: pid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout.strip() or 0)
+        except (OSError, ValueError): break
+    return out
+
+
+def other_gpu_lines(lines, mine):
+    """`pgrep -fl` lines that are another GPU-using process: not this process or a parent, and not an nps5 runner command
+    (whose arguments name the binary). The decision is by pid and by the command's own words, never by a substring of a path."""
+    res = []
+    for l in lines:
+        pid, _, cmd = l.strip().partition(" ")
+        if not pid.isdigit() or int(pid) in mine:
+            continue
+        if any(os.path.basename(t) in RUNNER_NAMES for t in cmd.split()[:4]):
+            continue
+        res.append(l)
+    return res
 
 
 def preflight(plan, power=power_source, others=gpu_others, procs=gpu_processes):
@@ -545,6 +600,8 @@ class Queue:
             else:
                 open(os.path.join(self.g, "title.active"), "w").write("%d\n" % self.pid)
             return True
+        try: os.remove(self.ticket)
+        except OSError: pass
         return False
 
     def release(self):
@@ -558,11 +615,44 @@ class Queue:
 
 
 # ---------------------------------------------------------------- run.json
+def _git_out(d, *a, binary=False):
+    try:
+        r = subprocess.run(("git", "-C", d) + a, capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout if binary else r.stdout.decode(errors="replace").strip()
+
+
 def commit_of(d):
+    """Identity of the source in checkout `d` (its top folder, not a folder inside some other repository): the commit, 10 hex,
+    when the tracked files are as committed; <commit>+<8 hex of the difference> when they are not, so a build from changed
+    sources is never reported under, or cached under, the commit it only started from. None when `d` is no checkout."""
     if not d or not os.path.isdir(d):
         return None
-    r = subprocess.run(["git", "-C", d, "rev-parse", "--short=10", "HEAD"], capture_output=True, text=True)
-    return r.stdout.strip() or None if r.returncode == 0 else None
+    top = _git_out(d, "rev-parse", "--show-toplevel")
+    if not top or os.path.realpath(top) != os.path.realpath(d):
+        return None
+    head = _git_out(d, "rev-parse", "--short=10", "HEAD")
+    if not head:
+        return None
+    diff = _git_out(d, "diff", "HEAD", "--no-ext-diff", binary=True)
+    if diff is None:
+        return head + "+unknown"
+    return head + ("+" + hashlib.sha256(diff).hexdigest()[:8] if diff else "")
+
+
+def kk_commit(*dirs):
+    """KosmicKrisp's identity from the first folder that is a checkout: the folder itself (a Mesa branch with the changes
+    committed) or its mesa/ (the public layout: kosmickrisp/build-kosmickrisp.sh applies the patch series on the pinned
+    commit without committing, so the identity reads <pin>+<hash of the applied changes>)."""
+    for d in dirs:
+        for c in (d, os.path.join(d, "mesa") if d else None):
+            v = commit_of(c)
+            if v:
+                return v
+    return None
 
 
 def machine_class():
@@ -606,7 +696,7 @@ def components(plan):
     kk = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(plan.env["VK_DRIVER_FILES"])))) if "install-arm64" in plan.env["VK_DRIVER_FILES"] else None
     out = dict(public=commit_of(e.get("NPS5_PUBLIC_DIR", REPO)), ps5recomp=commit_of(e.get("NPS5_RECOMP_DIR")),
                anyps5=commit_of(libs if "build" in os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(plan.env["DYLD_LIBRARY_PATH"])))) else e.get("NPS5_ANYPS5_DIR")),
-               kk=commit_of(os.path.dirname(kk) if kk and os.path.basename(kk) == "install-arm64" else kk))
+               kk=kk_commit(os.path.dirname(kk) if kk and os.path.basename(kk) == "install-arm64" else kk))
     kl = plan.env.get("NPS5_KYTY_GPU_LIB")
     out["kyty"] = commit_of(os.path.dirname(os.path.dirname(kl))) if kl else None
     return out
@@ -706,9 +796,117 @@ def watch_run(plan, pr, err_path, environ):
     return None if v[0] is None else v
 
 
-def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, hasher=sha16):
+# ---------------------------------------------------------------- peak memory of the title
+class Footprint:
+    """Peak phys_footprint of the started command and its children, in MiB: what the memory limit and the machine guard
+    count (RSS hides compressed and GPU memory). Sampled once a second from proc_pid_rusage's lifetime maximum, so the
+    last sample before the exit holds the peak up to that moment. peak() is None when nothing could be read."""
+    RUSAGE_INFO_V4, WORDS, LIFETIME_MAX = 4, 35, 28          # struct rusage_info_v4: 16 uuid bytes, then 35 uint64
+
+    def __init__(self, pid, interval=1.0, children=None, reader=None):
+        self.pid, self.interval, self.max = pid, interval, None
+        self.children = children or self._children
+        self.reader = reader or self._reader()
+        self._stop = threading.Event(); self._t = None
+
+    @staticmethod
+    def _children(pid):
+        try:
+            return [int(x) for x in subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()]
+        except (OSError, ValueError):
+            return []
+
+    @classmethod
+    def _reader(cls):
+        try:
+            lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            buf = (ctypes.c_uint64 * (2 + cls.WORDS))()
+        except (OSError, AttributeError):
+            return lambda pid: None
+        def read(pid):
+            try:
+                if lib.proc_pid_rusage(ctypes.c_int(pid), ctypes.c_int(cls.RUSAGE_INFO_V4), ctypes.byref(buf)) != 0:
+                    return None
+            except (OSError, AttributeError, ValueError):
+                return None
+            return int(buf[2 + cls.LIFETIME_MAX])
+        return read
+
+    def sample(self):
+        for pid in [self.pid] + self.children(self.pid):
+            v = self.reader(pid)
+            if v:
+                self.max = max(self.max or 0, v)
+
+    def start(self):
+        def loop():
+            while not self._stop.is_set():
+                self.sample(); self._stop.wait(self.interval)
+        self._t = threading.Thread(target=loop, daemon=True); self._t.start()
+        return self
+
+    def peak(self):
+        """Stops the sampling; MiB or None."""
+        self._stop.set()
+        if self._t: self._t.join(5)
+        return None if not self.max else int(round(self.max / 1048576.0))
+
+
+def end_child(pr, grace=10):
+    """The started command must not outlive the runner (the title lock is released when the runner ends): SIGTERM, which
+    gtimeout forwards to the title, then SIGKILL of the command and its children."""
+    if not hasattr(pr, "poll") or pr.poll() is not None:
+        return
+    kids = Footprint._children(pr.pid) if isinstance(getattr(pr, "pid", None), int) else []
+    try: pr.terminate()
+    except OSError: pass
+    try:
+        pr.wait(grace)
+    except Exception:
+        for k in kids:
+            try: os.kill(k, signal.SIGKILL)
+            except OSError: pass
+        try: pr.kill()
+        except OSError: pass
+        try: pr.wait(5)
+        except Exception: pass
+
+
+def set_aside(run_dir):
+    """A run folder that already holds a run.json belongs to an earlier run of this tag: rename it <tag>.prev-<time> so its
+    frames, logs and run.json are neither lost nor read as this run's. Returns the new name or None."""
+    old = os.path.join(run_dir, "run.json")
+    if not os.path.isfile(old):
+        return None
+    base = "%s.prev-%s" % (run_dir, time.strftime("%Y%m%d-%H%M%S", time.localtime(os.stat(old).st_mtime)))
+    aside, n = base, 1
+    while os.path.exists(aside):
+        n += 1; aside = "%s-%d" % (base, n)
+    os.rename(run_dir, aside)
+    return aside
+
+
+def run_interruptible(fn):
+    """Runs fn with SIGTERM raised as KeyboardInterrupt, so a killed runner still stops its title, finishes run.json and
+    releases the lock (the `finally` blocks of execute). Exit 130 when interrupted."""
+    def on_term(signum, frame):
+        raise KeyboardInterrupt()
+    old = None
+    try:
+        old = signal.signal(signal.SIGTERM, on_term)
+    except ValueError:
+        pass                    # not the main thread (a test, an embedding tool): the caller owns signals
+    try:
+        return fn()
+    except KeyboardInterrupt:
+        print("nps5 run: interrupted; the title was stopped", file=sys.stderr); return 130
+    finally:
+        if old is not None:
+            signal.signal(signal.SIGTERM, old)
+
+
+def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, hasher=sha16, footprint=Footprint):
     """The real run. Returns the exit code. Ticket -> lock -> binary -> run -> manifest verify -> run.json."""
-    bininfo_pre = None
     warn, busy = preflight(plan)
     plan.warnings += warn
     for w in warn: print("nps5 run: warning: " + w, file=sys.stderr)
@@ -720,11 +918,15 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
               "scripts/build.sh anyps5 (BUILDING.md, step 5)" % plan.titles_path, file=sys.stderr); return 2
     if not os.path.isdir(plan.titles.get("APP0", "")):
         print("nps5 run: APP0 %r is not a folder (set it in %s)" % (plan.titles.get("APP0"), plan.titles_path), file=sys.stderr); return 2
+    tmo = shutil.which("gtimeout") or shutil.which("timeout")
+    if not tmo:
+        print("nps5 run: needs gtimeout (brew install coreutils)", file=sys.stderr); return 2
     guard = environ.get("NPS5_GUARD_DIR") or os.path.join(environ["NPS5_SCRATCH"], "guard")
     os.makedirs(guard, exist_ok=True)
     q = queue_factory(guard, plan.cls, environ.get("NPS5_TITLE_PRIO", "nps5"))
     if not q.acquire():
         print("nps5 run: title lock not acquired in the wait time; exit 75", file=sys.stderr); return 75
+    rj = save = None
     try:
         if plan.sel["state"] == "missing":
             print("nps5 run: binary %s is missing (BUILDING.md, Translate a title)" % plan.sel["path"], file=sys.stderr); return 2
@@ -732,6 +934,9 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
             build_patched(plan.sel, plan.p, environ); plan.sel["state"] = "ready"
         info = verify_binary(None, plan.p, plan.sel, environ)
         for n in info["notes"]: print("nps5 run: note: " + n, file=sys.stderr)
+        aside = set_aside(plan.run_dir)
+        if aside:
+            print("nps5 run: note: tag %s was used before; the earlier run is now %s" % (plan.tag, os.path.basename(aside)), file=sys.stderr)
         os.makedirs(os.path.join(plan.run_dir, "frames"), exist_ok=True); os.makedirs(os.path.join(plan.workdir, "home"), exist_ok=True)
         keep_cache_per_hardware(plan.env.get("PS4RECOMP_CACHE_DIR") or os.path.join(plan.workdir, "home", "cache"), environ.get("NPS5_HW_CACHE_KEY"))
         rj = new_run_json(plan, info, hasher(plan.sel["path"]), components(plan))
@@ -740,37 +945,48 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
             with open(rjp + ".tmp", "w") as f: json.dump(rj, f, indent=1); f.write("\n")
             os.replace(rjp + ".tmp", rjp)
         t0 = time.time(); rj["timings"]["start"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0)); rj["verdict"] = "RUNNING"; save()
-        tmo = shutil.which("gtimeout") or shutil.which("timeout")
-        if not tmo:
-            print("nps5 run: needs gtimeout (brew install coreutils)", file=sys.stderr); return 2
         env = {"PATH": "/usr/bin:/bin"}; env.update(plan.env)
         with open(rj["logs"]["err"], "w") as ef:
             ef.write(config_block(plan)); ef.flush()
             with open(rj["logs"]["out"], "w") as of:
                 pr = popen(command_line(plan, tmo), env=env, cwd=os.path.join(plan.run_dir, "frames"), stdout=of, stderr=ef, stdin=subprocess.DEVNULL)
-                wv = watch_run(plan, pr, rj["logs"]["err"], environ)
-                rc = pr.wait() if wv is None else wv[2]
+                fp = footprint(pr.pid).start() if isinstance(getattr(pr, "pid", None), int) else None
+                try:
+                    wv = watch_run(plan, pr, rj["logs"]["err"], environ)
+                    rc = pr.wait() if wv is None else wv[2]
+                finally:
+                    rj["timings"]["peak_footprint_mib"] = fp.peak() if fp else None
+                    end_child(pr)
         t1 = time.time()
         rj["rc"] = rc; rj["timings"].update(end=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t1)), wall_s=round(t1 - t0, 1))
         rj["verdict"] = "DONE_FIXED" if rc in (0, 124) else ("CRASH" if rc < 0 or rc > 128 else "FAIL_RC%d" % rc)
         if wv and wv[0]:
             rj["verdict"] = wv[0]; rj["timings"]["watch"] = wv[1]
             if wv[0] in ("DONE_UNTIL", "DONE_FIXED"): rc = 0
-        elif plan.until and rc == 124 and rj["verdict"] == "DONE_FIXED":
-            rj["verdict"] = "TIMEOUT"
+        elif plan.until and rj["verdict"] == "DONE_FIXED":
+            # no watcher verdict: the time ran out (124) or the title exited by itself (0) before the target was seen
+            rj["verdict"] = "TIMEOUT" if rc == 124 else "ENDED_EARLY"
         dv = plan.titles.get("DUMP_VERIFY")
         if dv and subprocess.run(shlex.split(dv)).returncode != 0:
             print("!!!!!!!! RUN MODIFIED THE DUMP !!!!!!!!", file=sys.stderr); rj["verdict"] = "DUMP_MODIFIED"; save(); return 99
         save()
         print("nps5 run: %s rc=%s verdict=%s, output in %s" % (plan.tid, rc, rj["verdict"], plan.run_dir))
-        if rj["verdict"] in ("EARLY_BLACK", "EARLY_STALL"): return 1
+        if rj["verdict"] in ("EARLY_BLACK", "EARLY_STALL", "ENDED_EARLY"): return 1
         return 0 if rc in (0, 124) and rj["verdict"] in ("DONE_FIXED", "DONE_UNTIL", "TIMEOUT") else (rc if rc > 0 else 1)
+    except BaseException as e:
+        if rj is not None and rj.get("verdict") == "RUNNING":       # never leave a run.json that says a dead run is going
+            rj["verdict"] = "INTERRUPTED" if isinstance(e, (KeyboardInterrupt, SystemExit)) else "ERROR"
+            rj["warnings"].append("runner stopped: %s" % (str(e) or type(e).__name__))
+            rj["timings"]["end"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            try: save()
+            except OSError: pass
+        raise
     finally:
         q.release()
 
 
 def main(argv, environ=None):
-    if not argv or argv[0] in ("-h", "--help"):
+    if not argv or "-h" in argv or "--help" in argv:
         print(__doc__); return 0 if argv else 2
     try:
         tid, opts = parse_args(argv)
@@ -783,7 +999,7 @@ def main(argv, environ=None):
                 except Refuse as e: plan.warnings.append("binary: %s" % e)
             w, busy = preflight(plan); plan.warnings += w + busy
             sys.stdout.write(dry_run_text(plan, info)); return 0
-        return execute(plan, opts, environ)
+        return run_interruptible(lambda: execute(plan, opts, environ))
     except Refuse as e:
         print("nps5 run: %s" % e, file=sys.stderr); return e.code
     except OSError as e:

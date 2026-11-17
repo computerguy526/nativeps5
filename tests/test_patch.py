@@ -149,5 +149,62 @@ class T(unittest.TestCase):
         md = P.docs_text([("PPSA00001", self.pd)]); self.assertIn("| `x` |", md); self.assertIn("`xs` (pending)", md)
 
 
+class Review(unittest.TestCase):
+    """Findings of the review: short BUILDS prefixes, usage exit code, the sidecar's binding to the bytes."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.pp = os.path.join(self.d, "patches.py")
+        self.bin = os.path.join(self.d, "native"); macho(self.bin)
+
+    def test_short_or_empty_build_prefix_is_refused(self):
+        for bad in ("''", "'ab'", "'ABABABABABABABAB'", "'abababababababag'", "5"):
+            open(self.pp, "w").write(DATA.replace("'abababababababab'", bad))
+            with self.assertRaises(P.PatchError, msg=bad):
+                P.load_patches(self.pp)
+
+    def test_wrong_shapes_are_refused_not_crashes(self):
+        for bad in ("BUILDS = []\nCUTS = {}\nBINDING = []\n", "BUILDS = {}\nCUTS = []\nBINDING = []\n", "BUILDS = {}\nCUTS = {}\nBINDING = 3\n",
+                    "BUILDS = {}\nCUTS = {[]: 1}\nBINDING = []\n"):
+            open(self.pp, "w").write(bad)
+            with self.assertRaises(P.PatchError, msg=bad):
+                P.load_patches(self.pp)
+
+    def test_sidecar_names_the_bytes_it_describes(self):
+        import hashlib
+        open(self.pp, "w").write(DATA); pd = P.load_patches(self.pp); P.SIGN = False
+        out = os.path.join(self.d, "copy")
+        info = P.apply(pd, self.bin, P.parse_request("x"), out)
+        self.assertEqual(info["output_sha256"], hashlib.sha256(open(out, "rb").read()).hexdigest())
+        self.assertEqual(json.load(open(out + ".patches.json"))["output_sha256"], info["output_sha256"])
+
+    def test_new_word_out_of_range_is_refused_and_leaves_nothing(self):
+        open(self.pp, "w").write(DATA.replace("0x22222222", "0x222222222")); pd = P.load_patches(self.pp); P.SIGN = False
+        out = os.path.join(self.d, "copy")
+        with self.assertRaises(P.PatchError):
+            P.apply(pd, self.bin, P.parse_request("x"), out)
+        self.assertEqual(sorted(os.listdir(self.d)), ["native", "patches.py"])
+
+    def test_stab_entry_is_not_a_definition(self):
+        b = bytearray(open(self.bin, "rb").read())
+        i = b.index(struct.pack("<IBBHQ", 1, 0x0f, 1, 0, BASE + FN_A))
+        b[i + 4] = 0x2e                                       # N_BNSYM: a debug entry whose type bits look like N_SECT
+        open(self.bin, "wb").write(b)
+        mo = P.MachO(self.bin)
+        try: self.assertNotIn("_fn_0x1000", mo.symbols(["_fn_0x1000", "_fn_0x2000"]))
+        finally: mo.close()
+
+    def test_usage_errors_exit_2_and_help_anywhere(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
+            env = dict(NPS5_GAMES_DIR=os.path.join(self.d, "g"), NPS5_GAMES_FIRST="1")
+            gd = os.path.join(self.d, "g", "PPSA00009"); os.makedirs(gd)
+            open(os.path.join(gd, "game.tsv"), "w").write("title_id\tPPSA00009\n"); open(os.path.join(gd, "patches.py"), "w").write(DATA)
+            self.assertEqual(P.main(["PPSA00009", self.bin], env), 2)
+            self.assertEqual(P.main(["PPSA00009", "--check"], env), 2)
+            self.assertEqual(P.main(["PPSA00009", "--anchor", "zz", self.bin, "x"], env), 2)
+            self.assertEqual(P.main(["PPSA00009", self.bin, "nosuch", "-o", os.path.join(self.d, "o")], env), 1)
+            self.assertEqual(P.main(["PPSA00009", "--check", self.bin, "--help"], env), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

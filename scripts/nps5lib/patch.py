@@ -3,14 +3,16 @@
 
   patch.py <id> --list                              patches, purpose, binding now/goal, review, setting, checked
   patch.py <id> --check <native> [names]            resolve and assert every site, write nothing
-  patch.py <id> <native> <name>[,<name>=ARG...] [-o COPY] [--lineage NAME] [--anchor symbol|lineage] [--force]
+  patch.py <id> <native> <name>[,<name>=ARG...] [-o COPY] [--lineage NAME] [--anchor symbol|lineage] [--build VERSION] [--force]
   patch.py --docs [--out FILE]                      regenerate docs/agents/game-patches.md from every BINDING
 
 Sites are anchored by symbol: guest function _fn_0x<entry> + byte offset + asserted original word. The binary's
 embedded build ID (nps5_input_sha256) must match BUILDS. Every word must be the original or already the new value;
 anything else refuses the whole set and nothing is written (fail closed). The copy is re-signed ad hoc and a
 <copy>.patches.json sidecar records what was applied. The source binary is only ever read.
-`--lineage NAME` (symbol-less binaries only) falls back to the LINEAGES shift table of patches.py.
+`--lineage NAME` (symbol-less binaries only) falls back to the LINEAGES shift table of patches.py; `--build VERSION` names
+the build of a binary that carries no build ID (ignored when it carries one). The sidecar records the SHA-256 of the
+patched copy (output_sha256), so `nps5 run` can tell a copy that was replaced after patching.
 Exit codes: 0 ok, 1 refused / mismatch, 2 usage or file problem."""
 import ast, fcntl, hashlib, json, mmap, os, shutil, struct, subprocess, sys
 
@@ -24,6 +26,10 @@ SIGN = True  # tests on synthetic files switch this off
 
 
 class PatchError(Exception):
+    pass
+
+
+class UsageError(PatchError):
     pass
 
 
@@ -100,7 +106,7 @@ class MachO:
             return out
         for strx, ntype, _sect, _desc, value in struct.iter_unpack("<IBBHQ", m[symoff:symoff + nsyms * 16]):
             n = want.get(strx)
-            if n is not None and (ntype & 0x0e) == 0x0e:
+            if n is not None and (ntype & 0x0e) == 0x0e and not ntype & 0xe0:      # defined in a section, not a debug (stab) entry
                 if n in out and out[n] != value:
                     raise PatchError("symbol %s is defined twice with different addresses" % n)
                 out[n] = value
@@ -131,12 +137,19 @@ def load_patches(path):
             raise PatchError("%s:%d: patches.py is data only (NAME = literal)" % (path, getattr(node, "lineno", 0)))
         try:
             d[node.targets[0].id] = ast.literal_eval(node.value)
-        except ValueError:
+        except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError):
             raise PatchError("%s:%d: %s is not a literal (no code, no arithmetic)" % (path, node.lineno, node.targets[0].id))
     for need in ("BUILDS", "CUTS", "BINDING"):
         if need not in d:
             raise PatchError("%s: %s missing" % (path, need))
     d.setdefault("PARAM_CUTS", {}); d.setdefault("REQUIRES", {}); d.setdefault("LINEAGES", {}); d.setdefault("FALLBACK_FUNCS", {})
+    for name, kind in (("BUILDS", dict), ("CUTS", dict), ("PARAM_CUTS", dict), ("REQUIRES", dict), ("LINEAGES", dict), ("FALLBACK_FUNCS", dict), ("BINDING", (list, tuple))):
+        if not isinstance(d[name], kind):
+            raise PatchError("%s: %s has the wrong shape" % (path, name))
+    for ver, prefix in d["BUILDS"].items():
+        # a short or empty prefix would match other builds, and then every site check runs against the wrong table
+        if not (isinstance(prefix, str) and len(prefix) >= 16 and all(c in "0123456789abcdef" for c in prefix)):
+            raise PatchError("%s: BUILDS[%r] must be at least 16 lowercase hex digits of the eboot SHA-256" % (path, ver))
     return d
 
 
@@ -441,7 +454,11 @@ def apply(pd, src, reqs, out_path=None, lineage=None, anchor=None, build=None, f
             shutil.copyfile(src, tmp)
         with open(tmp, "r+b") as f:
             for fo, s in offs:
-                f.seek(fo); f.write(struct.pack("<I", s.new))
+                try:
+                    word = struct.pack("<I", s.new)
+                except (struct.error, TypeError):
+                    raise PatchError("patch %s: new word %r for fn 0x%x+0x%x is not a 32-bit value" % (s.patch, s.new, s.fn, s.off))
+                f.seek(fo); f.write(word)
         mc = MachO(tmp)
         try:
             for _, s in offs:
@@ -461,10 +478,17 @@ def apply(pd, src, reqs, out_path=None, lineage=None, anchor=None, build=None, f
                                   sites=[dict(function="0x%x" % s.fn, offset="0x%x" % s.off, anchor=s.anchor,
                                               address="0x%x" % s.vm, original="%08x" % s.old, new="%08x" % s.new,
                                               was="%08x" % before[s.vm], note=s.note) for s in l]) for n, p, l in res])
+        h = hashlib.sha256()
+        with open(tmp, "rb") as f:
+            for b in iter(lambda: f.read(1 << 22), b""):
+                h.update(b)
+        info["output_sha256"] = h.hexdigest()      # of the signed copy: binds this record to these bytes
         with open(tmp_side, "w") as f:
             json.dump(info, f, indent=1); f.write("\n")
-        os.replace(tmp_side, side)
+        # the binary first: if the second rename never happens, an old sidecar no longer matches output_sha256 and
+        # `nps5 run` refuses the pair, instead of a new record sitting beside an old binary
         os.replace(tmp, out_path)
+        os.replace(tmp_side, side)
         return info
     finally:
         for p in (tmp, tmp_side):
@@ -524,20 +548,20 @@ def cmd_docs(out_file=None, environ=None):
         if os.path.isfile(p):
             pd = load_patches(p)
             for ver, eb in pd["BUILDS"].items():
-                for otid, oeb in claimed.items():
-                    if eb[:16] == oeb[:16]:
-                        raise PatchError("build %s is claimed by both %s and %s" % (eb, otid, tid))
-                claimed[tid] = eb
+                if claimed.get(eb[:16], tid) != tid:
+                    raise PatchError("build %s is claimed by both %s and %s" % (eb, claimed[eb[:16]], tid))
+                claimed[eb[:16]] = tid
             profiles.append((tid, pd))
     out_file = out_file or os.path.join(REPO, "docs", "agents", "game-patches.md")
-    with open(out_file, "w") as f:
+    with open(out_file + ".tmp", "w") as f:
         f.write(docs_text(profiles))
+    os.replace(out_file + ".tmp", out_file)
     print("wrote %s" % out_file)
     return 0
 
 
 def main(argv, environ=None):
-    if not argv or argv[0] in ("-h", "--help"):
+    if not argv or "-h" in argv or "--help" in argv:
         print(__doc__); return 0 if argv else 2
     opts, pos, i = {}, [], 0
     VAL = ("-o", "--lineage", "--anchor", "--build", "--out")
@@ -565,18 +589,20 @@ def main(argv, environ=None):
             return cmd_list(pd, tid)
         lin, anc, bld = opts.get("--lineage"), opts.get("--anchor"), opts.get("--build")
         if anc not in (None, "symbol", "lineage"):
-            raise PatchError("--anchor is symbol or lineage")
+            raise UsageError("--anchor is symbol or lineage")
         if "--check" in opts:
             if not rest:
-                raise PatchError("usage: patch.py <id> --check <native> [names]")
+                raise UsageError("usage: patch.py <id> --check <native> [names]")
             return cmd_check(pd, rest[0], rest[1] if len(rest) > 1 else None, lin, anc, bld)
         if len(rest) != 2:
-            raise PatchError("usage: patch.py <id> <native> <name>[,<name>=ARG...] [-o COPY]")
+            raise UsageError("usage: patch.py <id> <native> <name>[,<name>=ARG...] [-o COPY]")
         info = apply(pd, rest[0], parse_request(rest[1]), opts.get("-o"), lin, anc, bld, "--force" in opts, tid)
         for p in info["patches"]:
             print("%s%s: %d sites" % (p["name"], "=" + p["param"] if p["param"] else "", len(p["sites"])))
         print("wrote %s (re-signed) + %s.patches.json" % (info["output"], info["output"]))
         return 0
+    except UsageError as e:
+        print("patch: %s" % e, file=sys.stderr); return 2
     except PatchError as e:
         print("patch: %s" % e, file=sys.stderr); return 1
     except OSError as e:

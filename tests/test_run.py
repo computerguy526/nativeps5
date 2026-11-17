@@ -101,6 +101,69 @@ class T(unittest.TestCase):
         self.refused(["--scene", "nope"], 2); self.refused(["--class", "fast"], 2); self.refused(["--gpu", "x"], 2)
         self.refused(["--arm", "bad"], 2); self.refused(["--env", "NOEQUALS"], 2); self.refused(["--secs", "x"], 2)
 
+    # ---- review findings
+    def test_zero_or_negative_seconds_never_reach_the_timeout_tool(self):
+        self.refused(["--secs", "0"], 2); self.refused(["--secs", "-5"], 2)          # gtimeout 0 means no limit at all
+        open(os.path.join(self.d, "games", "PPSA00001", "scenes.tsv"), "a").write("z0\t-\t-\t-\t0\t-\td\nsm\t-\t-\t-\t45/120\t-\td\n")
+        self.refused(["--scene", "z0"], 2)
+        self.assertEqual(self.plan(["--scene", "sm"]).secs, 45)                        # <s>/<max>: the scene's seconds, not the default
+
+    def test_names_are_not_paths(self):
+        for bad in ("../x", "a/b", "..", ".hidden", "/abs", ""):
+            if bad: self.refused(["--tag", bad], 2)
+            self.refused(["--save", bad or "a b"], 2)
+        self.refused(["--workdir", "../../x"], 2); self.refused(["--arm", "a:save=../y"], 2)
+        p = self.plan(["--tag", "cache-rec-level:w1", "--workdir", "arm1"])
+        self.assertTrue(p.run_dir.endswith("/runs/PPSA00001/cache-rec-level:w1")); self.assertTrue(p.workdir.endswith("/work/PPSA00001/arm1"))
+
+    def test_layout_failure_is_a_refusal_not_a_traceback(self):
+        repo, run.REPO = run.REPO, self.d                    # no scripts/nps5-env.sh there: nothing resolves the layout
+        try:
+            with self.assertRaises(run.Refuse) as c:
+                run.machine_env(dict(PATH=os.environ.get("PATH", "")))
+        finally:
+            run.REPO = repo
+        self.assertEqual(c.exception.code, 2)
+
+    def test_other_gpu_process_is_judged_by_pid_and_command_not_path_text(self):
+        mine = {100, 50}
+        lines = ["100 python3 scripts/nps5 run PPSA00001 --bin /s/native_x", "50 python3 /r/scripts/nps5 bench PPSA00001 --arm A:bin=/s/native_a",
+                 "200 gtimeout 90 /ws/nps5-scratch/build/PPSA00001/native_kyty6", "201 /ws/nps5-scratch/build/PPSA00001/native_kyty6 -guest",
+                 "300 python3 -I /r/scripts/nps5 run PPSA00002 --bin /s/native_y", "301 /bin/bash /r/scripts/run-title.sh PPSA00002 60",
+                 "400 /t/agc_frame_replay cap4"]
+        got = [l.split()[0] for l in run.other_gpu_lines(lines, mine)]
+        self.assertEqual(got, ["200", "201", "400"])        # a title under a folder named nps5-* is still another title
+        self.assertIn(os.getpid(), run._ancestors())
+
+    def test_component_identity_names_changed_sources(self):
+        import subprocess
+        d = os.path.join(self.d, "co"); os.makedirs(os.path.join(d, "sub"))
+        def g(*a, data=None): return subprocess.run(("git", "-C", d) + a, input=data, capture_output=True, check=True).stdout.decode().strip()
+        g("init", "-q")
+        g("fast-import", "--quiet", data=b"commit refs/heads/main\ncommitter T <t@example.invalid> 1 +0000\ndata 1\nc\nM 100644 inline f.c\ndata 6\nint a;\nM 100644 inline sub/g.c\ndata 6\nint b;\n\n")
+        g("symbolic-ref", "HEAD", "refs/heads/main"); g("reset", "-q", "--hard")
+        head = g("rev-parse", "--short=10", "HEAD")
+        self.assertEqual(run.commit_of(d), head)
+        self.assertIsNone(run.commit_of(os.path.join(d, "sub")))            # a folder inside a checkout is not that component
+        self.assertIsNone(run.commit_of(os.path.join(self.d, "nope")))
+        open(os.path.join(d, "f.c"), "w").write("int a = 1;\n")
+        one = run.commit_of(d); self.assertRegex(one, "^%s\\+[0-9a-f]{8}$" % head)
+        open(os.path.join(d, "f.c"), "w").write("int a = 2;\n")
+        self.assertNotEqual(run.commit_of(d), one)                          # another change, another identity
+        # the public layout: <NPS5_KK_WORK>/mesa is the checkout, with the series applied and not committed
+        work = os.path.join(self.d, "kkwork"); os.makedirs(work); os.rename(d, os.path.join(work, "mesa"))
+        self.assertRegex(run.kk_commit(work), "^%s\\+[0-9a-f]{8}$" % head)
+        self.assertIsNone(run.kk_commit(os.path.join(self.d, "s"), None))
+
+    def test_peak_footprint_sampler(self):
+        vals = {7: [5 << 20, 900 << 20, 100 << 20], 8: [3000 << 20]}
+        f = run.Footprint(7, children=lambda pid: [8], reader=lambda pid: vals[pid].pop(0) if vals[pid] else None)
+        f.sample(); f.sample(); f.sample()
+        self.assertEqual(f.peak(), 3000)
+        self.assertIsNone(run.Footprint(7, children=lambda pid: [], reader=lambda pid: None).start().peak())
+        me = run.Footprint(os.getpid()); me.sample()                         # the real call, on this process
+        self.assertGreater(me.peak() or 0, 1)
+
     def test_profiling_ban_off_needs_flag_and_short_run(self):
         open(os.path.join(self.d, "games", "PPSA00001", "game.tsv"), "a").write("gpu_profile_ban\toff\n")
         self.refused(["--env", "APS5_PROFILE_PASSES=1", "--secs", "30"])
@@ -173,6 +236,116 @@ class T(unittest.TestCase):
         p = self.plan(["--scene", "scn", "--until", "marker:m+5,stall:20"])
         j = run._watch().judge_for(p)
         self.assertEqual((j.blank_fail, j.stall_fail, j.until["kind"], j.until["arg"], j.until["n"]), (33.0, 20.0, "log", "READY", 5.0))
+
+
+class FakeProc:
+    def __init__(self, rc=0, boom=None): self.returncode, self.boom, self.terminated, self.alive = rc, boom, False, True
+    def poll(self): return None if self.alive else self.returncode
+    def wait(self, timeout=None):
+        if self.boom: b, self.boom = self.boom, None; raise b
+        self.alive = False; return self.returncode
+    def terminate(self): self.terminated = True; self.alive = False
+    def kill(self): self.alive = False
+
+
+class FakeQueue:
+    def __init__(self, *a, **k): self.released = False; FakeQueue.last = self
+    def acquire(self): return True
+    def release(self): self.released = True
+
+
+class Exec(unittest.TestCase):
+    """execute() with a fake child: run.json states, clean-up on failure, the binary's patch record."""
+    titles = T.titles
+
+    def setUp(self):
+        T.setUp(self)
+        self.app0 = os.path.join(self.d, "app0"); os.makedirs(self.app0)
+        self.bin = os.path.join(self.d, "native"); open(self.bin, "w").write("bin")
+        self.titles("APP0=%s\nBIN=%s\n" % (self.app0, self.bin))
+        self.saved = (run.preflight, run.verify_binary, run.components, run.shutil.which)
+        run.preflight = lambda plan: ([], [])
+        run.verify_binary = lambda g, p, sel, environ, patchmod=None: dict(build="01.001", build_id="0123456789abcdef", sidecar=None, patches_applied=[], notes=[])
+        run.components = lambda plan: dict(public=None, ps5recomp="r", anyps5="a", kk="k", kyty="y")
+        run.shutil.which = lambda n: "/usr/bin/true"
+        self.env["NPS5_WATCH"] = "0"
+
+    def tearDown(self):
+        run.preflight, run.verify_binary, run.components, run.shutil.which = self.saved
+
+    def go(self, argv, proc):
+        tid, opts = run.parse_args(["PPSA00001", "--tag", "t1"] + argv)
+        plan = run.compose(tid, opts, dict(self.env)); self.plan_ = plan
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return run.execute(plan, opts, plan.environ, queue_factory=FakeQueue, popen=lambda *a, **k: proc, hasher=lambda p: "abcd")
+
+    def rj(self): return json.load(open(os.path.join(self.plan_.run_dir, "run.json")))
+
+    def test_fixed_run_and_schema(self):
+        self.assertEqual(self.go([], FakeProc(124)), 0)
+        rj = self.rj(); self.assertEqual(rj["verdict"], "DONE_FIXED"); self.assertEqual(run.validate_run_json(rj), [])
+        self.assertIn("peak_footprint_mib", rj["timings"]); self.assertTrue(FakeQueue.last.released)
+
+    def test_target_not_seen_is_never_done(self):
+        self.assertEqual(self.go(["--until", "marker:m"], FakeProc(124)), 0); self.assertEqual(self.rj()["verdict"], "TIMEOUT")
+        self.assertEqual(self.go(["--until", "marker:m"], FakeProc(0)), 1)                 # the title quit by itself before the target
+        self.assertEqual(self.rj()["verdict"], "ENDED_EARLY")
+
+    def test_reused_tag_sets_the_earlier_run_aside(self):
+        self.go([], FakeProc(124))
+        open(os.path.join(self.plan_.run_dir, "frames", "old_frame.txt"), "w").write("from run 1")
+        self.go([], FakeProc(124))
+        self.assertEqual(os.listdir(os.path.join(self.plan_.run_dir, "frames")), [])        # nothing of run 1 is read as run 2
+        prev = [n for n in os.listdir(os.path.dirname(self.plan_.run_dir)) if n.startswith("t1.prev-")]
+        self.assertEqual(len(prev), 1)
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(self.plan_.run_dir), prev[0], "frames", "old_frame.txt")))
+
+    def test_runner_failure_stops_the_child_and_closes_run_json(self):
+        pr = FakeProc(0, boom=RuntimeError("watcher broke"))
+        with self.assertRaises(RuntimeError):
+            self.go([], pr)
+        self.assertTrue(pr.terminated); self.assertEqual(self.rj()["verdict"], "ERROR"); self.assertTrue(FakeQueue.last.released)
+        pr = FakeProc(0, boom=KeyboardInterrupt())
+        self.assertEqual(run.run_interruptible(lambda: self.go([], pr)), 130)
+        self.assertTrue(pr.terminated); self.assertEqual(self.rj()["verdict"], "INTERRUPTED")
+
+    def test_sigterm_is_an_interrupt(self):
+        import signal
+        def body():
+            os.kill(os.getpid(), signal.SIGTERM); import time as t; t.sleep(5); return 0
+        self.assertEqual(run.run_interruptible(body), 130)
+        self.assertNotEqual(signal.getsignal(signal.SIGTERM).__class__.__name__, "function")   # handler restored
+
+    def test_sidecar_must_match_the_bytes_and_cache_copies_need_one(self):
+        import hashlib
+        _, verify, _, _ = self.saved
+        class PM:
+            PatchError = Exception
+            class MachO:
+                def __init__(s, path): pass
+                def build_id(s): return "0123456789abcdef" + "0" * 48
+                def close(s): pass
+        tid, opts = run.parse_args(["PPSA00001"]); plan = run.compose(tid, opts, dict(self.env))
+        sel = dict(plan.sel, patches="a")
+        good = dict(build_id="0123456789abcdef" + "0" * 48, patches=[dict(name="a")], output_sha256=hashlib.sha256(b"bin").hexdigest())
+        json.dump(good, open(self.bin + ".patches.json", "w"))
+        self.assertEqual(verify(None, plan.p, sel, self.env, PM)["patches_applied"], ["a"])
+        open(self.bin, "w").write("relinked")                                                  # same name, other bytes, old record
+        with self.assertRaises(run.Refuse) as c: verify(None, plan.p, sel, self.env, PM)
+        self.assertIn("other bytes", str(c.exception))
+        open(self.bin + ".patches.json", "w").write("{not json")
+        with self.assertRaises(run.Refuse): verify(None, plan.p, sel, self.env, PM)
+        open(self.bin + ".patches.json", "w").write('{"patches": [3]}')
+        with self.assertRaises(run.Refuse): verify(None, plan.p, sel, self.env, PM)
+        os.remove(self.bin + ".patches.json")
+        with self.assertRaises(run.Refuse) as c: verify(None, plan.p, dict(sel, source="cache"), self.env, PM)
+        self.assertIn("no .patches.json", str(c.exception))
+
+    def test_help_anywhere(self):
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(run.main(["PPSA00001", "--help"], dict(self.env)), 0)
 
 
 if __name__ == "__main__":

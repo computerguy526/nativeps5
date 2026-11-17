@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Property / fuzz tests for scripts/nps5lib/patch.py on synthetic Mach-O-like files (no game data, no real binary).
 Everything is seeded (PATCH_FUZZ_SEED, default 20261117) so a failure reproduces; the seed is part of every failure message."""
-import importlib.util, io, itertools, json, os, random, re, signal, struct, subprocess, sys, tempfile, textwrap, time, unittest
+import hashlib, importlib.util, io, itertools, json, os, random, re, signal, struct, subprocess, sys, tempfile, textwrap, time, unittest
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -449,7 +449,9 @@ class Sidecar(Base):
 
     def validate(self, side, src, out):
         self.assertEqual(sorted(side), sorted(["tool", "tool_version", "title", "build", "build_id", "source", "output",
-                                                "anchor_mode", "patches"]))
+                                                "anchor_mode", "patches", "output_sha256"]))
+        with open(out, "rb") as f:
+            self.assertEqual(side["output_sha256"], hashlib.sha256(f.read()).hexdigest())
         self.assertEqual(side["tool"], "nps5 patch"); self.assertIsInstance(side["tool_version"], str)
         self.assertEqual(side["build"], "1.0"); self.assertEqual(side["build_id"], SHA)
         self.assertEqual(side["source"], os.path.basename(src)); self.assertEqual(side["output"], os.path.basename(out))
@@ -590,7 +592,7 @@ class Procs(Base):
 
 # ---------------------------------------------------------------- data-only enforcement
 class DataOnly(Base):
-    GOOD = "BUILDS = {'1.0': 'ab'}\nCUTS = {}\nBINDING = []\n"
+    GOOD = "BUILDS = {'1.0': 'abababababababab'}\nCUTS = {}\nBINDING = []\n"
 
     def load(self, text, name="bad.py"):
         p = os.path.join(self.d, name); open(p, "w").write(text)
