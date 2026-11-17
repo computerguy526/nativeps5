@@ -14,10 +14,11 @@ KytyPS5          https://github.com/Jetsku/KytyPS5                 GPL-2.0   bas
                                                                              InoriRus is MIT (LICENSES/Kyty-MIT.txt there)
 Mesa             https://gitlab.freedesktop.org/mesa/mesa          MIT       kosmickrisp/patches applies on the commit in
                                                                              kosmickrisp/MESA_COMMIT; no Mesa source is included here
-AnyPS5           https://github.com/boykopovar/AnyPS5              GPL-2.0   NOT included and not fetched: the runtime can load the
-                                                                             arm64 host libraries of an AnyPS5 build as an optional
-                                                                             external component. Documents and game profiles here
-                                                                             describe that back end and name its settings (APS5_*).
+AnyPS5           https://github.com/boykopovar/AnyPS5              GPL-2.0   base of nativeps5-anyps5 (checked out as anyps5/), commit
+                                                                             ea0c471cbc: the PS5 system libraries, the AGC driver and
+                                                                             the runtime's bridge library, built for arm64 macOS. Every
+                                                                             title run loads them; documents and game profiles here
+                                                                             name its settings (APS5_*).
 
 AstroHybrid patch series
 ------------------------

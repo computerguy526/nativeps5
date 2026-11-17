@@ -3,8 +3,8 @@
 #   scripts/build.sh recomp        Go translator + packager (ps4-recomp, nps5) and its unit tests
 #   scripts/build.sh kosmickrisp   Mesa KosmicKrisp with kosmickrisp/patches, into $NPS5_KK_WORK
 #   scripts/build.sh kyty          Kyty GPU dylib (kyty_gpu.dylib)
-#   scripts/build.sh all           recomp, kosmickrisp, kyty
-#   scripts/build.sh anyps5        optional: AnyPS5 arm64 host libraries, only when you have a checkout (not public)
+#   scripts/build.sh anyps5        AnyPS5 arm64 host libraries (PS5 system libraries, AGC driver, libnps5_gpu.dylib)
+#   scripts/build.sh all           recomp, kosmickrisp, kyty, anyps5
 # Steps and their prerequisites are described in BUILDING.md; each step prints what it produced.
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nps5-env.sh"
@@ -31,13 +31,19 @@ kosmickrisp() {
   fi
 }
 anyps5() {
-  need cmake ninja
-  [ -d "$NPS5_ANYPS5_DIR/.git" ] || { echo "build: no AnyPS5 checkout at $NPS5_ANYPS5_DIR. AnyPS5 is optional and its arm64 fork is not public (BUILDING.md, step 6); nothing to build." >&2; exit 2; }
+  need cmake ninja glslangValidator
+  [ -d "$NPS5_ANYPS5_DIR/.git" ] || { echo "build: no AnyPS5 checkout at $NPS5_ANYPS5_DIR: run scripts/fetch-components.sh anyps5 (BUILDING.md, step 1)" >&2; exit 2; }
+  [ -e "$NPS5_BREW_PREFIX/lib/cmake/SDL2" ] || { echo "build: missing SDL2 under $NPS5_BREW_PREFIX (brew install sdl2-compat)" >&2; exit 2; }
   cd "$NPS5_ANYPS5_DIR"
   git submodule update --init --depth 1 3rdparty/ZArchive 3rdparty/stb 3rdparty/libjpeg-turbo 3rdparty/zstd 3rdparty/Vulkan-Headers 3rdparty/SPIRV-Headers
   $N cmake -S . -B build-arm64 -G Ninja -DAPS5_HOST_ARM64=ON -DCMAKE_BUILD_TYPE=Release
-  $N cmake --build build-arm64 -j "$J" --target libs agc_frame_replay agc_shader_replay
-  echo "built: $NPS5_ANYPS5_DIR/build-arm64 (set NPS5_ANYPS5_BUILD to it)"
+  # nps5_gpu (libnps5_gpu.dylib: the runtime's bridge, with the host side of the Kyty back end) is not part of `all`
+  $N cmake --build build-arm64 -j "$J" --target libSceAgc libSceAgcDriver libkernel libc nps5_gpu
+  local out="$NPS5_ANYPS5_DIR/build-arm64/core/libs/libs/unpatched"
+  for f in libSceAgc.prx libSceAgcDriver.prx libkernel.prx libc.prx libnps5_gpu.dylib; do
+    [ -f "$out/$f" ] || { echo "build: $out/$f was not produced" >&2; exit 1; }
+  done
+  echo "built: $out (NPS5_ANYPS5_BUILD defaults to $NPS5_ANYPS5_DIR/build-arm64)"
 }
 kyty() {
   need cmake ninja glslangValidator
@@ -52,7 +58,7 @@ kyty() {
 for step in "${@:-help}"; do
   case "$step" in
     recomp|kosmickrisp|anyps5|kyty) "$step" ;;
-    all) recomp; kosmickrisp; kyty ;;
+    all) recomp; kosmickrisp; kyty; anyps5 ;;
     *) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 done

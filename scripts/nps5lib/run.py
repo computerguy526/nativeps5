@@ -49,14 +49,14 @@ def _patch():
     return m
 
 
-ANYPS5_MISSING = "<AnyPS5 host libraries missing: set NPS5_ANYPS5_BUILD or LIBS (BUILDING.md, step 6)>"
+ANYPS5_MISSING = "<AnyPS5 host libraries missing: set NPS5_ANYPS5_BUILD or LIBS (BUILDING.md, step 5)>"
 
 
 # ---------------------------------------------------------------- machine layout (scripts/nps5-env.sh)
 def machine_env(environ=None):
     """The NPS5_* layout and limits. Resolved by sourcing scripts/nps5-env.sh unless the caller already did."""
     environ = dict(os.environ if environ is None else environ)
-    need = ("NPS5_SCRATCH", "NPS5_SELF_MEM_LIMIT_MB", "NPS5_PUBLIC_DIR", "NPS5_KK_ICD")   # NPS5_ANYPS5_BUILD is optional: set only when a build exists
+    need = ("NPS5_SCRATCH", "NPS5_SELF_MEM_LIMIT_MB", "NPS5_PUBLIC_DIR", "NPS5_KK_ICD")   # NPS5_ANYPS5_BUILD is set by nps5-env.sh only when a build exists
     if all(environ.get(k) for k in need):
         return environ
     sh = os.path.join(REPO, "scripts", "nps5-env.sh")
@@ -716,8 +716,8 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         print("nps5 run: " + busy[0], file=sys.stderr); return 75
     if plan.env.get("DYLD_LIBRARY_PATH", "").startswith(ANYPS5_MISSING):
         print("nps5 run: the AnyPS5 arm64 host libraries are missing: set NPS5_ANYPS5_BUILD or LIBS in %s. They provide the PS5 "
-              "system libraries for every title run (also with GPU=kyty) and are not part of the public repositories "
-              "(BUILDING.md, step 6)" % plan.titles_path, file=sys.stderr); return 2
+              "system libraries for every title run (also with GPU=kyty): scripts/fetch-components.sh anyps5, then "
+              "scripts/build.sh anyps5 (BUILDING.md, step 5)" % plan.titles_path, file=sys.stderr); return 2
     if not os.path.isdir(plan.titles.get("APP0", "")):
         print("nps5 run: APP0 %r is not a folder (set it in %s)" % (plan.titles.get("APP0"), plan.titles_path), file=sys.stderr); return 2
     guard = environ.get("NPS5_GUARD_DIR") or os.path.join(environ["NPS5_SCRATCH"], "guard")

@@ -4,19 +4,19 @@ From a clean Apple silicon Mac to the built toolchain. Every step is CPU only un
 it was followed literally from fresh clones in a clean directory ("What was verified" at the end has the table with
 times). If a step fails for you, that is a bug in this page: open an issue with the command and its output.
 
-**Read this first.** Three repositories are public: this one, the translator and runtime
-([nativeps5-recomp](https://github.com/computerguy526/nativeps5-recomp)) and the Kyty GPU back end
-([nativeps5-kyty](https://github.com/computerguy526/nativeps5-kyty)). Steps 1 to 4 build all of it. Running a PS5
-title needs one more piece that is **not public**: the arm64 host libraries of the maintainers' AnyPS5 fork, which
-provide the PS5 system libraries (libkernel, libc, pad, audio and about 1,300 other exports). The Kyty back end
-replaces the graphics exports only. Without those libraries steps 7 and 8 stop with a message that says so; see
-step 6.
+**Four repositories** make up the project: this one, the translator and runtime
+([nativeps5-recomp](https://github.com/computerguy526/nativeps5-recomp)), the Kyty GPU back end
+([nativeps5-kyty](https://github.com/computerguy526/nativeps5-kyty)) and the PS5 system libraries
+([nativeps5-anyps5](https://github.com/computerguy526/nativeps5-anyps5)). Steps 1 to 5 fetch and build all of it;
+a title run needs every piece. The Kyty back end replaces the graphics exports only: libkernel, libc, pad, audio
+and about 1,300 other exports come from the `anyps5` libraries.
 
 ## 0. Prerequisites
 
 - An Apple silicon Mac, macOS 26 or later. 24 GB of RAM is the development machine; the scripts size their limits
   from your RAM (`scripts/nps5-env.sh`).
-- About 5 GB of free disk for sources and build trees (Mesa 0.5 GB, Kyty with submodules 2.2 GB), and tens of GB
+- About 7 GB of free disk for sources and build trees (Mesa 0.5 GB, Kyty with submodules 2.2 GB, AnyPS5 with its
+  history and build 1.5 GB), and tens of GB
   for a title's work files, outside iCloud-synced folders.
 - Xcode (the full app, for the `metal` compiler used by the shader tools) or at least the Command Line Tools
   (`xcode-select --install`) for everything else. With Xcode 26 the Metal toolchain is a separate download:
@@ -25,12 +25,12 @@ step 6.
 
   ```sh
   brew install git go cmake ninja meson bison llvm coreutils python sdl3 glslang spirv-tools \
-               vulkan-loader vulkan-headers vulkan-tools freetype ffmpeg nasm
+               vulkan-loader vulkan-headers vulkan-tools freetype ffmpeg nasm sdl2-compat zstd
   ```
 
   `coreutils` gives `gtimeout` (the run scripts), `llvm` and `bison` are for Mesa, `sdl3` and `glslang`
-  (`glslangValidator`) for the Kyty library, `freetype ffmpeg` for the translator's runtime, `nasm` only for the
-  FEX differential tests.
+  (`glslangValidator`) for the Kyty library, `sdl2-compat zstd glslang` for the AnyPS5 libraries,
+  `freetype ffmpeg` for the translator's runtime, `nasm` only for the FEX differential tests.
 - Python packages for the Mesa build, in a venv (nothing is installed system-wide):
 
   ```sh
@@ -46,11 +46,11 @@ git clone https://github.com/computerguy526/nativeps5 nativeps5
 cd nativeps5
 cp nps5.conf.example nps5.conf        # then set NPS5_DUMPS_DIR; the rest has defaults
 scripts/install-hooks.sh              # optional: scripts/check.sh as the pre-commit hook
-scripts/fetch-components.sh           # clones ../ps5recomp and ../kyty at the commits in components.lock
+scripts/fetch-components.sh           # clones ../ps5recomp, ../kyty and ../anyps5 at the commits in components.lock
 ```
 
 The workspace root (`NPS5_ROOT`) is the folder that holds this checkout and the components: `nativeps5-ws/` with
-`nativeps5/`, `ps5recomp/`, `kyty/`, and later `build/` and `scratch/`. `. scripts/nps5-env.sh` prints nothing and
+`nativeps5/`, `ps5recomp/`, `kyty/`, `anyps5/`, and later `build/` and `scratch/`. `. scripts/nps5-env.sh` prints nothing and
 exports the layout; `env | grep ^NPS5_` shows it. No script contains an absolute path: everything is relative to
 `NPS5_ROOT` or comes from `nps5.conf`. `NPS5_FORK_BASE=<URL prefix>` makes `fetch-components.sh` clone from a mirror
 or from your own forks.
@@ -64,7 +64,7 @@ scripts/build.sh recomp               # go build ./cmd/ps4-recomp ./cmd/nps5 -> 
 ../ps5recomp/bin/nps5 doctor          # lists what the toolkit still misses on this Mac
 ```
 
-`nps5 doctor` warns about the KosmicKrisp ICD until step 3 is done. Go modules are vendored. `ps5recomp/go.mod` asks
+`nps5 doctor` warns about the KosmicKrisp ICD and the AnyPS5 libraries until steps 3 and 5 are done. Go modules are vendored. `ps5recomp/go.mod` asks
 for Go 1.27.1: an older Homebrew Go downloads that toolchain on the first build (network, about 70 MB).
 Tests that need upstream's sample ELF or a PS5 payload SDK skip when those are absent (`ps5recomp/README.md`).
 
@@ -97,7 +97,21 @@ scripts/build.sh kyty                 # -> ../kyty/build-arm64/kyty_gpu.dylib (N
 `-DKYTY_BUILD_LAUNCHER=OFF` of the one target `kyty_gpu`. It links Homebrew's shared SDL3. Run titles with the
 preset in `titles/kyty-preset.env`: the code defaults are the slow path.
 
-## 5. Prepare your own dump
+## 5. AnyPS5 host libraries
+
+```sh
+scripts/build.sh anyps5               # -> ../anyps5/build-arm64/core/libs/libs/unpatched/ (NPS5_ANYPS5_BUILD points at build-arm64 by default)
+```
+
+Six submodules (`--depth 1`), then a Release build with `-DAPS5_HOST_ARM64=ON` of the targets `libSceAgc
+libSceAgcDriver libkernel libc nps5_gpu`. The result is five images: `libkernel.prx`, `libc.prx`, `libSceAgc.prx`,
+`libSceAgcDriver.prx` and `libnps5_gpu.dylib` (the bridge the translated program calls; it also carries the host
+side of the Kyty back end). `nps5 build` links a title against them and every title run loads them, with either
+back end. Source `scripts/nps5-env.sh` again afterwards: it exports `NPS5_ANYPS5_BUILD` once the build exists.
+[Upstream AnyPS5](https://github.com/boykopovar/AnyPS5) is x86-64 Windows and Linux only; only the arm64 macOS
+host libraries are built from this fork.
+
+## 6. Prepare your own dump
 
 You need a decrypted, extracted folder of a game you own, as it sits on the console: `eboot.bin`, `sce_sys/`,
 `sce_module/` and the game's data. How you dump your console is outside this project, and nobody here can give you
@@ -108,23 +122,7 @@ game files. Rules:
 - Everything derived from a dump (translated code, shader and pipeline caches, frame dumps, logs) goes to
   `NPS5_SCRATCH`, never into a checkout. `scripts/check.sh` refuses such files in a commit.
 
-## 6. AnyPS5 host libraries (optional, not public)
-
-`nps5 build` and every title run load the PS5 system libraries from an arm64 build of AnyPS5
-(`<build>/core/libs/libs/unpatched/*.prx`), found through `NPS5_ANYPS5_BUILD` (or `LIBS` in `titles/<id>.env`).
-The fork that builds them for Apple silicon is the maintainers' and is not published;
-[upstream AnyPS5](https://github.com/boykopovar/AnyPS5) is x86-64 Windows and Linux only. So today:
-
-- everything in steps 1 to 4 builds and tests without AnyPS5;
-- `ps4-recomp -gpu off` (PS4Recomp's own HLE and Metal renderer) translates and links PS4 programs and simple PS5
-  payloads without it;
-- `nps5 build`, `ps4-recomp -gpu anyps5` and `nps5 run` stop with "AnyPS5 ... missing" until `NPS5_ANYPS5_BUILD`
-  points at a build. If you have one: `scripts/build.sh anyps5` builds a checkout placed at `$NPS5_ANYPS5_DIR`.
-
-Removing this dependency (PS5 system libraries without AnyPS5) is the largest open item for outside contributors;
-`docs/reference/architecture.md` shows where the seam is.
-
-## 7. Translate a title (needs your dump and step 6)
+## 7. Translate a title (needs your dump)
 
 ```sh
 ../ps5recomp/bin/nps5 build "$NPS5_DUMPS_DIR/<title folder>" -o "$NPS5_SCRATCH/apps" [--profile <name>]
@@ -135,7 +133,7 @@ Removing this dependency (PS5 system libraries without AnyPS5) is the largest op
 `NPS5_KK_PREFIX=$NPS5_KK_WORK/install-arm64`, `NPS5_VULKAN_LIB`). Translation of a large title takes tens of minutes
 and several GB of scratch.
 
-## 8. Run (needs your dump, step 6 and a GPU)
+## 8. Run (needs your dump and a GPU)
 
 ```sh
 cp titles/example.env titles/<TITLE ID>.env      # set BIN (the translated native program), APP0 (your dump), GPU

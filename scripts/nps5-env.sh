@@ -36,7 +36,7 @@ export NPS5_KK_ICD="${NPS5_KK_ICD:-$NPS5_KK_WORK/install-arm64/share/vulkan/icd.
 # what `nps5 doctor` / `nps5 build` (ps5recomp) look for
 export NPS5_KK_INSTALL="${NPS5_KK_INSTALL:-$NPS5_KK_WORK/install-arm64}"
 export NPS5_KK_PREFIX="${NPS5_KK_PREFIX:-$NPS5_KK_WORK/install-arm64}"
-# AnyPS5 is optional (not public): the variable is set only when a build is there, so tools report it as absent otherwise
+# set only when a build is there (scripts/build.sh anyps5), so tools report the AnyPS5 host libraries as absent otherwise
 [ -n "${NPS5_ANYPS5_BUILD:-}" ] || { [ -d "$NPS5_ANYPS5_DIR/build-arm64" ] && export NPS5_ANYPS5_BUILD="$NPS5_ANYPS5_DIR/build-arm64"; } || true
 export NPS5_VULKAN_LIB="${NPS5_VULKAN_LIB:-$NPS5_BREW_PREFIX/lib/libvulkan.1.dylib}"
 unset _nps5_here _nps5_conf _k _v _ram_mb

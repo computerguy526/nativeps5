@@ -1,7 +1,7 @@
 # Notes for agents
 
 nativeps5 statically recompiles PS5 games to native arm64 macOS programs: a translator and runtime (`ps5recomp`),
-system libraries with an AGC graphics driver and an RDNA to SPIR-V shader recompiler (`anyps5`, a fork that is not public: BUILDING.md step 6), an alternative GPU
+system libraries with an AGC graphics driver and an RDNA to SPIR-V shader recompiler (`anyps5`, the nativeps5-anyps5 fork: BUILDING.md step 5), an alternative GPU
 back end (`kyty`), and Mesa KosmicKrisp (Vulkan on Metal) with the patch series in `kosmickrisp/`. It is not an
 emulator and must not become a JIT. [README.md](README.md) is the overview, [BUILDING.md](BUILDING.md) the build,
 [CONTRIBUTING.md](CONTRIBUTING.md) what a pull request needs, [docs/README.md](docs/README.md) the map of the

@@ -7,7 +7,7 @@
 
 # Component checkouts (defaults under NPS5_ROOT, as scripts/fetch-components.sh lays them out)
 #NPS5_RECOMP_DIR=$NPS5_ROOT/ps5recomp
-#NPS5_ANYPS5_DIR=$NPS5_ROOT/anyps5               # optional, not public: only if you have your own AnyPS5 arm64 checkout
+#NPS5_ANYPS5_DIR=$NPS5_ROOT/anyps5
 #NPS5_KYTY_DIR=$NPS5_ROOT/kyty
 #NPS5_KK_WORK=$NPS5_ROOT/build/kosmickrisp        # Mesa checkout, build dir and install prefix
 

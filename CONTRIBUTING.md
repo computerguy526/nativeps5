@@ -41,7 +41,7 @@ amended: the data would stay in the history.
 | Change | Repository | Its own rules |
 |---|---|---|
 | Translator, runtime, HLE, packaging, regression gates | `ps5recomp` | `AGENTS.md` there |
-| System libraries, AGC driver, shader recompiler | `anyps5` (not public: no pull requests possible yet; [BUILDING.md](BUILDING.md), step 6) | - |
+| System libraries, AGC driver, shader recompiler | `anyps5` | - |
 | Kyty GPU back end | `kyty` | `README.md` there |
 | KosmicKrisp | `kosmickrisp/patches` here: one patch file per change, on top of the series | Mesa's coding style; a patch that is general should also go to Mesa upstream |
 | Safety scripts, shader tools, build and run scripts, docs | this repository | this page |

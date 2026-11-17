@@ -45,7 +45,7 @@ contributors, many of them agents, one body of findings. Names are kept where th
 | `dm/games/README.md` | `games/README.md` | the profile index |
 | `dm/games/<title id>/README.md`, `game.tsv`, `patches.py`, `bench.tsv`, `validated.tsv` | the same names in `games/<title id>/` | e.g. `games/PPSA21564/` |
 | `dm/games/<title id>/pso_manifest.tsv` (prewarm seed list) | `games/<title id>/pipelines.kyplst` + `.verified` | keys, hashes and state only; the no-game-code proof is recorded and checked |
-| `dm/` (host, graphics, tools) | the component repositories `ps5recomp`, `kyty` (and `anyps5`, not public); `kosmickrisp/` here | forks keep their upstream's layout and licence |
+| `dm/` (host, graphics, tools) | the component repositories `ps5recomp`, `kyty`, `anyps5`; `kosmickrisp/` here | forks keep their upstream's layout and licence |
 | `scripts/` | `scripts/`, `host/`, `tools/` | `scripts/` is what a person runs |
 | `scripts/regress.py`, `bench.py` | `ps5recomp/tools/regress.sh`, `tools/shaderlab/gate.sh` | gates on free homebrew and on your own shader corpus |
 | `scripts/bug_report.py` | - | not built; "Reporting a problem" in `CONTRIBUTING.md` says what to send |

@@ -20,15 +20,14 @@ a fork that keeps its upstream's licence ([NOTICE](NOTICE), [components.lock](co
 |---|---|---|---|
 | [`ps5recomp`](https://github.com/computerguy526/nativeps5-recomp) | x86-64 to arm64 translator, runtime, packager (`nps5 build`, `nps5 play`), regression gates | wie-project/PS4Recomp | GPL-2.0 |
 | [`kyty`](https://github.com/computerguy526/nativeps5-kyty) | the GPU back end as a library (`kyty_gpu.dylib`): KytyPS5's renderer on arm64 macOS | Jetsku/KytyPS5 with the AstroHybrid `kyty-hybrid` series | GPL-2.0 |
+| [`anyps5`](https://github.com/computerguy526/nativeps5-anyps5) | the PS5 system libraries, the AGC graphics driver (the second back end) and the runtime's bridge library, built for arm64 macOS | boykopovar/AnyPS5 | GPL-2.0 |
 | `kosmickrisp/` (here) | patch series on Mesa's Vulkan-on-Metal driver: pipeline archive, mesh shaders, MSL optimisations | Mesa | MIT |
 | `host/` (here) | machine guard, run queue helpers, disk cleanup | - | GPL-2.0 |
 | `tools/` (here) | offline shader tools: shaderlab gate, shader x-ray, AGX disassembly statistics | - | GPL-2.0 |
 
-**Not public yet: the PS5 system libraries.** A title run also loads the arm64 host libraries of the maintainers'
-AnyPS5 fork (libkernel, libc, pad, audio and about 1,300 other exports; with the second back end also its AGC
-graphics driver). That fork is not published. Everything here builds and tests without it, and the tools say so
-when it is missing, but a PS5 title cannot be linked or run from the public repositories alone today
-([BUILDING.md](BUILDING.md), step 6). The Kyty back end replaces the graphics exports only.
+Every title run loads all three components: the `anyps5` libraries provide the PS5 system libraries (libkernel,
+libc, pad, audio and about 1,300 other exports), and the Kyty back end replaces the graphics exports only
+([BUILDING.md](BUILDING.md)).
 
 ## Status
 

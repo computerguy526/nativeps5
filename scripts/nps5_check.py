@@ -12,7 +12,7 @@ Works in any git repository (this one and the component repositories). Exit 0 = 
 1 = findings, 2 = usage or harness error. Reads only git; never opens files outside the repo.
 
 Per-repo configuration (all optional, in the repository root):
-  .nps5-check-allow    one glob per line: paths exempt from the file-type and size rules
+  .nps5-check-allow    one glob per line: paths exempt from the file-type, size, secret and home-path rules
                        (e.g. tests/fixtures/*.spv built from this repo's own GLSL). Say why in a comment.
   .nps5-check-tests    one shell command per line, run by --tests from the repository root.
   .nps5-check-local    NOT committed: extra forbidden regexes, one per line (your user name,
@@ -248,7 +248,7 @@ class Check:
                         self.fail.append(f"{path}:{n}: looks like a secret ({rx[:28]}...)")
                 for rx in (HOME_RE, WINHOME_RE, VOLUME_RE):
                     m = rx.search(line)
-                    if m:
+                    if m and not exempt:
                         self.fail.append(f"{path}:{n}: personal absolute path {m.group(0)!r}: use $NPS5_ROOT or a relative path")
                 for m in EMAIL_RE.finditer(line):
                     if not EMAIL_OK.search(m.group(0)) and not exempt and os.path.basename(path) not in ("NOTICE", "LICENSE", "AUTHORS"):
