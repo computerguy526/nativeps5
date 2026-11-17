@@ -143,7 +143,13 @@ bridge, which is expected. Translation of a large title takes about 11 minutes a
 cp titles/example.env titles/<TITLE ID>.env      # set BIN (the translated native program), APP0 (your dump), GPU=kyty
 scripts/nps5 run <TITLE ID> --dry-run            # prints the environment, the binary and the command; runs nothing
 scripts/nps5 run <TITLE ID> --scene title --until first-present+10 --class func
+scripts/nps5 run <TITLE ID> --scene title --until pic+10 --class func   # until a real picture (not a black or loading frame)
 ```
+
+Keep the example's `ENV="NPS5_PERF=2"` line in `titles/<TITLE ID>.env`. A binary you translated yourself is not one of the
+profile's recorded lineages, so its default binary patches (`patches_default` in `games/<id>/game.tsv`) cannot be found
+by their bytes: `nps5 run` refuses with exit 78 and names the patch. Pass `--patch dr` (or another subset the run reports
+as found) to run it; patches the binary does not carry are then listed as "not applied" and the title runs without them.
 
 Logs, frame dumps and `run.json` go to `$NPS5_SCRATCH/runs/<TITLE ID>/<tag>`. `--until first-present+10` stops the
 run ten seconds after the first frame is presented; look for a picture in the frame dumps. A first run has a cold
@@ -174,26 +180,27 @@ reference until it is adapted to this layout.
 
 From fresh clones of the four repositories in an empty directory, with a scrubbed environment (`env -i`, PATH =
 Homebrew + system, an empty HOME, so cold Go and pip caches), at nice 10 with 4 jobs, while other work ran on the
-machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components at `components.lock` (recomp f1a5d35, Kyty 3e0eab0,
-AnyPS5 bff91d13); the repositories were cloned from local copies because the GitHub URLs did not exist yet.
+machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components: recomp 26faf6d, Kyty 433734b (the lock is now 499f7af, which only adds a test-only switch),
+AnyPS5 4696b46); the repositories were cloned from local copies because the GitHub URLs did not exist yet.
 
 | Step | Result | Time |
 |---|---|---|
-| 0: venv with mako, pyyaml, packaging | ok | 11 s |
-| 1: clone, `nps5.conf`, hook, `fetch-components.sh` | ok | 3 s |
-| `scripts/check.sh --tree --tests` in this repository; `--tree` in the three components | clean | clean, 0 failures (the entry repository also runs its tests) |
-| pre-commit hook with a planted ELF named `notes.txt` | commit refused | - |
-| 2: `scripts/build.sh recomp` (Go 1.25 downloaded the 1.27.1 toolchain), `go test ./pkg/diag/ ./pkg/elfloader/ ./pkg/disasm/`, `nps5 doctor` | ok (sample-ELF tests skip) | 40 s (about 4 min on the first pass, with colder caches) |
-| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 20 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 52 s (about 4 min on the first pass) |
-| 3: `vulkaninfo` with the built ICD | NOT RUN (opens a GPU device; the test was CPU only) | - |
-| 5: `scripts/build.sh anyps5`: seven submodules, configure, build of five targets | ok after one fix (the glslang submodule) | 189 s |
-| 4: `scripts/build.sh kyty`: submodules, configure, compile (795 steps), link | ok after one fix (a codegen fingerprint check that only a full CMake build runs) | 34 min (2039 s) while other builds and runs shared the machine |
-| 4: Kyty CPU-only unit tests (`.nps5-check-tests` there) | ok | seconds |
-| 7: `nps5 build "<ASTRO BOT dump>"` | ok: translated, 11 expected stub lines, `.app` assembled | 11.5 min (687 s) |
-| 8: `scripts/nps5 run PPSA21564 --dry-run` | resolves the environment, binary path and command | seconds |
-| 8: `scripts/nps5 run PPSA21564 --scene title --until first-present+10 --class func` | NOT RUN: refused with exit 75 (another GPU-using process on the shared machine) | - |
+| 0: venv with mako, pyyaml, packaging | ok | 9 s |
+| 1: clone, `nps5.conf`, hook, `fetch-components.sh` | ok | 2 s |
+| 2: `scripts/build.sh recomp`, `go test ./pkg/diag/ ./pkg/elfloader/ ./pkg/disasm/`, `nps5 doctor` | ok | 28 s |
+| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 20 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 49 s (warm Mesa download) |
+| 5: `scripts/build.sh anyps5`: seven submodules, configure, build of five targets | ok | 702 s |
+| 4: `scripts/build.sh kyty`: submodules, configure, compile, link | ok | 1436 s while other builds and runs shared the machine |
+| 4: Kyty CPU-only unit tests (`.nps5-check-tests` there, incl. load card, hitch switches, sequencer) | ok | seconds |
+| `scripts/check.sh --tree` in all four checkouts, `--tree --tests` in this repository | clean, 0 failures | 65 s |
+| 7: `nps5 build "<ASTRO BOT dump>"` | ok: translated, expected stub lines, `.app` assembled | 528 s |
+| 8: `scripts/nps5 run PPSA21564 --scene title --until first-present+10 --class func --patch dr` (cold shader cache) | DONE_UNTIL: first present at 2 s, stopped at 12 s | 16 s |
+| 8: the same with `--until pic+10` | DONE_UNTIL: first picture (the intro video) at 12 s | 29 s |
 
-Not verified: a real title boot from this layout (every attempt was refused by the one-GPU-process check, exit 75, because other title runs were queued all session), `host/` and `tools/` scripts in this layout (they still assume the maintainers' private folder names),
+Found and fixed on the way: without frame dumps the watcher could not see a Kyty present (`--until` always ended
+TIMEOUT although the title rendered); `nps5 run` now asks the Kyty library for frame dumps when a target is set.
+
+Not verified: `host/` and `tools/` scripts in this layout (they still assume the maintainers' private folder names),
 `go test ./pkg/...` in full from the clean clone (it passes in the maintainers' tree in about 6 minutes; one
-timing-sensitive test, `TestHostAccessHooks`, failed once under load and passed three times alone), a warm-cache
-or longer run (the boot above stops ten seconds after the first present).
+timing-sensitive test, `TestHostAccessHooks`, failed once under load and passed three times alone), `vulkaninfo` with the
+built ICD (opens a GPU device), a warm-cache or longer run, and the binary patches (`dr`, `nt`) on a self-translated binary.
