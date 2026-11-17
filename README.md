@@ -103,13 +103,15 @@ Questions and bugs: open an issue or a discussion on this repository.
 
 ## Share your shader list
 
+> **No game content is ever shared.** A shader list holds *references* only: hashes that identify a shader and the pipeline state it was drawn with. It contains no shader code, no game files, no textures or audio, and nothing that can rebuild any part of the game. Every list is checked against your own copy of the game to prove that no 64-byte piece of its code is inside, before you can send it.
+
 Every first visit to a scene compiles pipelines and stutters; the shipped list (`games/<title id>/pipelines.kyplst`) lets `nps5 cache prepare` build them before you play. It only knows the scenes somebody has visited, so **your play helps everyone**: the pipelines you hit that the list lacks become the next version's list, and the next player's first visit does not stutter.
 
 ```sh
 scripts/nps5 cache share PPSA21564        # after you played with nps5 run; add --pr to open the pull request for you
 ```
 
-It reads the pipeline journals your runs left in the scratch folder, compares them with the shipped list for **your game version**, says how many shaders (vertex / pixel / compute), permutations and pipelines are new, and writes only those keys to `games/PPSA21564/contrib/<date>-<hash>.kyplst`. If nothing is new it says thanks and writes nothing. Then it prints the exact steps (fork, branch, `gh pr create`, or "attach the two files to a **Shader list** issue" if you do not use git).
+It reads the pipeline journals your runs left in the scratch folder, compares them with the shipped list for **your game version**, says how many shaders (vertex / pixel / compute), permutations and pipelines are new, and writes your list (references only) to `games/PPSA21564/contrib/<date>-<hash>.kyplst`. If nothing is new it says thanks and writes nothing. Then it prints the exact steps (fork, branch, `gh pr create`, or "attach the two files to a **Shader list** issue" if you do not use git).
 
 **Privacy.** The file holds keys, hashes and pipeline state only: no shader code, no game files, no user name, paths or machine serial (the header has the title, the app version, the nps5 commit and the machine class such as `m4pro-24g`). `nps5 cache share` proves that against your own copy of the game (`.verified` record) and runs the repository's list rules before it offers the file. Lists are per game version; a different version of the game gets its own list. Details: [games/README.md](games/README.md#share-your-list).
 
