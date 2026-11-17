@@ -830,9 +830,11 @@ KK_PIPELINE_ARCHIVE	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_COMPACT	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_DEBUG	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_DIR	kosmickrisp	folder of the segmented Metal 4 pipeline archive (flushed periodically, at exit and on SIGTERM); game data, keep under NPS5_SCRATCH	bridge/mtl_compiler.m
+KK_PIPELINE_ARCHIVE_DIR	kyty	KosmicKrisp's pipeline archive folder; a prepare only waits for the archive writer when it is set	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KK_PIPELINE_ARCHIVE_DIR	nativeps5		scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_FLUSH_N	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_FLUSH_S	kosmickrisp		bridge/mtl_compiler.m
+KK_PIPELINE_ARCHIVE_FLUSH_S	kyty	KosmicKrisp's archive flush period, read by a prepare to wait for the last segment before it ends	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KK_PIPELINE_ARCHIVE_READAHEAD	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_SIGTERM	kosmickrisp		bridge/mtl_compiler.m
 KK_QUEUE_ERROR_EXIT	kosmickrisp	exit 74 after a Metal queue 'access revoked' error, once every waiter's event has been raised	vulkan/kk_safety.c
@@ -1222,6 +1224,8 @@ KYTY_HANG_TRACE_OCCLUSION_DRAWS	kyty		src/graphics/host_gpu/renderer/renderDraw.
 KYTY_HANG_TRACE_TIMESTAMP_RINGS	kyty		src/graphics/host_gpu/renderer/eopTimestamps.cpp
 KYTY_HANG_WATCHDOG	kyty		src/common/hangWatchdog.cpp
 KYTY_HANG_WATCHDOG_MS	kyty		src/common/hangWatchdog.cpp
+KYTY_HELPER_PREWARM	kyty	`1` builds the renderer's own tile/detile, D16 and colour-transform pipelines at start-up, so a prepare archives them (on in the preset)	src/graphics/host_gpu/renderer/renderContext.cpp
+KYTY_HELPER_PREWARM	nativeps5	`1` builds the renderer's own tile/detile, D16 and colour-transform pipelines at start-up, so a prepare archives them (on in the preset)	scripts/nps5lib/cache.py
 KYTY_HIDPI	kyty	`0` reverts the HiDPI drawable (frame dumps then have the old size)	src/graphics/presentation/window/window.cpp
 KYTY_HOSTED_READ_LOCK	kyty	`1` restores the reader-writer lock on hosted guest reads (87-146 us per draw instead of 9-12)	src/kernel/memory.cpp
 KYTY_HOSTED_SELF_LOADS	kyty		src/hybrid/kytyGpuBridge.cpp
@@ -1385,6 +1389,7 @@ KYTY_PIPELINE_CACHE_SAVE_MIN_NEW	kyty		src/graphics/host_gpu/renderer/pipeline/p
 KYTY_PIPELINE_CACHE_SAVE_ON_TERM	kyty	`1` saves the pipeline cache on SIGTERM so a timed run keeps what it compiled	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_QUIET_S	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_COLD_SALT	kyty		src/graphics/host_gpu/vulkanCommon.cpp
+KYTY_PIPELINE_DELTA_OUT	kyty	file that receives the keys a replay built that the driver cache did not know before (prepare tooling)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_DYNAMIC_STATE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_FAST_FIRST	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineFastFirst.h
 KYTY_PIPELINE_FAST_FIRST	nativeps5		titles/kyty-preset.env
@@ -1411,6 +1416,7 @@ KYTY_PIPELINE_KNOWN	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.
 KYTY_PIPELINE_KNOWN	nativeps5		titles/kyty-preset.env
 KYTY_PIPELINE_KNOWN_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_KNOWN_PATH	nativeps5		scripts/nps5lib/cache.py
+KYTY_PIPELINE_LAST_SCENE_PATH	kyty	file that remembers the last scene of a session (default next to the pipeline journal)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIBRARY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineLibrary.cpp
 KYTY_PIPELINE_LIBRARY_OPTIMIZE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIBRARY_PROBE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineLibrary.cpp
@@ -1435,6 +1441,11 @@ KYTY_PIPELINE_PREFETCH_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pip
 KYTY_PIPELINE_PREWARM_COMPUTE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_PREWARM_COMPUTE	nativeps5		titles/kyty-preset.env
 KYTY_PIPELINE_PREWARM_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_REPLAY_ALL	kyty	`1` launch phase: every pipeline of the list and the journal is created again before the game's first draw, behind the loading card (on in the preset)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_REPLAY_ALL	nativeps5	`1` launch phase: every pipeline of the list and the journal is created again before the game's first draw, behind the loading card (on in the preset)	scripts/nps5lib/cache.py
+KYTY_PIPELINE_REPLAY_ALL_HOLD	kyty	`0` runs the launch phase in the background instead of holding the game's first draw	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_REPLAY_ALL_HOLD_MAX_S	kyty	longest time the launch phase may hold the game, seconds (default 900)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_REPLAY_KEYS	kyty	file of pipeline keys: the replay builds only those (prepare tooling)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_SKIP	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_SKIP	nativeps5		titles/kyty-preset.env
 KYTY_PIPELINE_SKIP_RECURRENT	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
@@ -1564,6 +1575,10 @@ KYTY_SHADER_PRECOMPILE_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_SHADER_PRECOMPILE_REPLAY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SHADER_PRECOMPILE_THREADS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SHADER_PRECOMPILE_WAIT	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SHADER_PREPARE	kyty	`all` (default) or `scene`: what the launch phase builds before the game starts; set from the runtime's shader_prepare setting	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SHADER_PREPARE	ps5recomp	`all` (default) or `scene`: what the launch phase builds before the game starts; set from the runtime's shader_prepare setting	pkg/runtime/modules/libSceSystemService/ps4_settings.m
+KYTY_SHADER_PREPARE_ALWAYS	kyty	scenes whose pipelines always belong to the scene hold: names, a trailing * is a prefix (profile key shader_prepare_always)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SHADER_PREPARE_ALWAYS	nativeps5	scenes whose pipelines always belong to the scene hold: names, a trailing * is a prefix (profile key shader_prepare_always)	games/game.py
 KYTY_SHADER_VALIDATION_ASYNC	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SHADER_WRITE_RETICK	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_SHADER_WRITE_RETICK	nativeps5		titles/kyty-preset.env
@@ -1780,6 +1795,8 @@ NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
 NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_CALL_IC	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_CHECKED_PTR	ps5recomp		pkg/cli/cli.go
+NPS5_COMPILE_THREADS	kyty	number of compile workers (prepare, launch phase, metallib build); default logical cores - 4, at least 2	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+NPS5_COMPILE_THREADS	nativeps5	number of compile workers (prepare, launch phase, metallib build); default logical cores - 4, at least 2	scripts/nps5lib/cache.py
 NPS5_CONF	nativeps5		scripts/nps5-env.sh
 NPS5_CRASH_MEM	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_DIAG_FULL_PATHS	ps5recomp		pkg/runtime/core/nps5_diag.c
@@ -1912,11 +1929,15 @@ NPS5_SAVEDATA_DIR	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SAVEDATA_TRACE	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SCENE_OPEN_KEY	nativeps5		games/game.py
 NPS5_SCENE_OPEN_KEY	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_SCENE_TAG_SKIP	nativeps5	scene name prefixes that never become the current scene (default ui_; profile key scene_tag_skip)	games/game.py
+NPS5_SCENE_TAG_SKIP	ps5recomp	scene name prefixes that never become the current scene (default ui_; profile key scene_tag_skip)	pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_SCRATCH	nativeps5	folder outside every checkout for everything derived from a title: translated code, caches, runs, frame dumps	nps5.conf.example
 NPS5_SELF_MEM_LIMIT_MB	anyps5	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
 NPS5_SELF_MEM_LIMIT_MB	kyty	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	src/hybrid/kytyGpuBridge.cpp
 NPS5_SELF_MEM_LIMIT_MB	nativeps5	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	nps5.conf.example
 NPS5_SETTINGS_DIALOG	ps5recomp		pkg/cli/settingsdialog_test.go
+NPS5_SHADER_PREPARE	nativeps5	`all` or `scene`: overrides the player's shader preparation setting	games/game.py
+NPS5_SHADER_PREPARE	ps5recomp	`all` or `scene`: overrides the player's shader preparation setting	pkg/runtime/modules/libSceSystemService/ps4_settings.m
 NPS5_SHADOW_ENTRIES	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_SHADOW_STATS	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_STACK_KK	nativeps5		scripts/nps5lib/cache.py

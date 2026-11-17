@@ -87,6 +87,38 @@ permutation and pipeline is built through KosmicKrisp from your own dump, and th
 runs (ASTRO BOT: 1,259 of 1,260 built in 85 s on an M4 Pro). It fills the Vulkan driver cache, the program cache,
 the KosmicKrisp pipeline archive and a private OS Metal cache. With KosmicKrisp patch 0020 it runs twice: pass 1 collects every shader's MSL (`KK_LIBCACHE_DIR=<cache>/kk-libcache`), `scripts/kk-libcache-build.sh` builds it into Metal libraries, pass 2 prepares again from an empty cache with those libraries in place (a pipeline archived from a source-compiled library never hits when the shader is later loaded from a prebuilt one); runs then load libraries in 0.3 ms instead of compiling them (`--single-pass` skips pass 2).
 
+**Nothing compiles while you play.** A normal run on the Kyty back end starts with a launch phase behind the loading
+card ("PREPARING SHADERS X / T"): every pipeline of the list and of your own journal is created again before the game
+starts (`KYTY_PIPELINE_REPLAY_ALL=1`), together with the renderer's own tile/detile helper pipelines
+(`KYTY_HELPER_PREWARM=1`; they are in no list, so the prepare builds them too). On a prepared cache each one is a
+cache hit (ASTRO BOT: 1,526 pipelines in about 3 s); a pipeline the caches lost since (an OS update, an archive
+segment that was never written, a session closed before the last save) compiles there instead of at its first draw.
+The prepare waits for KosmicKrisp's archive writer before it ends, so the pipelines compiled last are kept. Compile
+workers (prepare, launch phase, the metallib build) number the logical cores minus 4, at least 2
+(`NPS5_COMPILE_THREADS=<n>` overrides), and run at utility QoS so the Mac, the sound and the game stay responsive.
+What still compiles in a session: shaders and pipelines of places nobody has recorded yet; they are in your journal
+afterwards (`nps5 cache share`), and compile at launch from then on. `nps5 cache check` runs with the launch phase.
+
+The game is held, not the window: the card counts "PREPARING SHADERS X / T" (a count, never a time) and the game's
+first draw waits until X == T (`KYTY_PIPELINE_REPLAY_ALL_HOLD=0` lets the phase run in the background instead).
+The settings dialog (hold Option at launch) has **Shader preparation at launch**: *All shaders before the game*
+(default, `shader_prepare=all`) or *Next scene first, the rest in the background* (`shader_prepare=scene`;
+`NPS5_SHADER_PREPARE` overrides). With *scene* the hold covers the pipelines recorded in the scene the last session
+ended in (remembered in `<cache>/<title id>.pipelines.last_scene`; a `-lvl` start names it itself), those recorded
+before any scene opened and the profile's `shader_prepare_always` scenes (menus, world map, hubs); the others are
+built behind the game on the same low-priority workers. Recorded pipelines carry the scene they were first needed in
+(`nps5_vfs_current_scene`, profile keys `scene_open_key` / `scene_tag_skip`). A start whose scene has no recorded
+pipeline falls back to *all*.
+
+The scene tags travel with the list: a recording (`nps5 cache record`) made with a runtime that names the current scene
+writes the tag into each journal record, `kyty_pipeline_list export` keeps it and `merge` unions the tags of all
+recordings; `nps5 cache merge` prints them ("scene tags: 94 pipeline tag(s) in 3 scene(s): ..."). A list without tags
+(recorded by an older runtime) still works; *scene* then prepares everything, like *all*.
+
+Six helper pipelines (the window's present and overlay blits, two compute kernels) only exist once a window is up, so a
+prepare cannot build them: the very first start after a prepare compiles them while the window opens (about half a
+second, before the first frame), later starts take them from the caches.
+
 ### Share your list
 
 `scripts/nps5 cache share <title id> [--from DIR ...] [--pr]` turns the pipeline journals of your own runs into a contribution:

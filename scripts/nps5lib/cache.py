@@ -138,11 +138,31 @@ def cache_env(tid, cdir, mid, with_libcache=True):
     return e
 
 
+def compile_jobs(environ):
+    """Job count of the metallib build: $NPS5_COMPILE_THREADS, else $NPS5_BUILD_JOBS, else the logical cores minus 4 (at least 2), so the
+    Mac stays usable while it compiles; Kyty sizes its prepare / launch-phase workers by the same rule and runs them at utility QoS."""
+    for k in ("NPS5_COMPILE_THREADS", "NPS5_BUILD_JOBS"):
+        if (environ.get(k) or "").isdigit() and int(environ[k]) > 0:
+            return int(environ[k])
+    return max(2, (os.cpu_count() or 8) - 4)
+
+
 def prepare_words(ctx, app0):
     o = cache_opts(ctx.p)
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_PREPARE", "1"),
             ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")), ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")),
-            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", o.get("limit_mb", "448")), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1")]
+            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", o.get("limit_mb", "448")), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
+            ("KYTY_HELPER_PREWARM", "1")]   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
+
+
+def launch_words(ctx, app0):
+    """The launch phase of a normal run on a prepared cache: every pipeline of the list (and of the player's own journal) is created
+    again before the game starts, behind the loading card (KYTY_PIPELINE_REPLAY_ALL), together with the renderer's helper pipelines
+    (KYTY_HELPER_PREWARM). On a prepared cache each one is a cache hit (about 3 s for 1,500 pipelines); whatever the caches lost since
+    compiles there, not at its first draw."""
+    o = cache_opts(ctx.p)
+    return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")),
+            ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")), ("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1")]
 
 
 def run_cmd(tid, tag, scene, secs, words, cls="func"):
@@ -256,6 +276,19 @@ def parse_info(text):
     return d
 
 
+def parse_scene_tags(text):
+    """kyty_pipeline_list info -> {scene: pipelines tagged with it} ('  level <name>: <n> pipelines' lines). A recording made by a
+    runtime that names the current scene (nps5_vfs_current_scene) tags each pipeline with the scene it was first needed in; export keeps
+    the tag and merge unions them. `shader_prepare=scene` needs them: a start whose scene has no tagged pipeline prepares everything."""
+    return {m.group(1): int(m.group(2)) for m in re.finditer(r"^\s*level (\S+): (\d+) pipelines?\s*$", text, re.M)}
+
+
+def scene_tag_line(tags):
+    if not tags:
+        return "scene tags: none (shader_prepare=scene prepares everything; record with the current runtime to get them)"
+    return "scene tags: %d pipeline tag(s) in %d scene(s): %s" % (sum(tags.values()), len(tags), ", ".join("%s %d" % kv for kv in sorted(tags.items())))
+
+
 def stage_summary(d):
     """'shaders 832 (vertex 479, pixel 230, compute 123), permutations 878, pipelines 1544' (the .verified record's wording)."""
     return "shaders %d (vertex %d, pixel %d, compute %d), permutations %d, pipelines %d" % tuple(
@@ -357,9 +390,11 @@ def cmd_merge(ctx, o, runner):
     r = runner([tool, "merge", "--out", cand] + lists, env=ctx.environ, capture=True)
     if r[0] != 0:
         raise CacheError("merge failed:\n%s" % r[1])
-    new = parse_info(runner([tool, "info", cand], env=ctx.environ, capture=True)[1])
+    cand_info = runner([tool, "info", cand], env=ctx.environ, capture=True)[1]
+    new = parse_info(cand_info)
     old = parse_info(runner([tool, "info", ctx.list_path], env=ctx.environ, capture=True)[1]) if os.path.isfile(ctx.list_path) else {}
-    print("merged %d list(s)%s -> %s\n  %s" % (len(lists), " (rebuild: committed list not included)" if o["rebuild"] else "", cand, count_diff(old, new)))
+    print("merged %d list(s)%s -> %s\n  %s\n  %s" % (len(lists), " (rebuild: committed list not included)" if o["rebuild"] else "", cand, count_diff(old, new),
+                                                   scene_tag_line(parse_scene_tags(cand_info))))
     if failed:
         # a list merged from fewer recordings than were given is smaller than intended, silently so with --rebuild
         print("merge: %d recording(s) could not be exported (%s): the candidate is incomplete and was NOT adopted" % (len(failed), ", ".join(failed)))
@@ -632,7 +667,7 @@ def cmd_prepare(ctx, o, runner):
         """KK's library cache: build the collected MSL into metallibs; returns the number of metallibs now present."""
         lc = libcache_builder(ctx)
         if lc and os.path.isdir(os.path.join(lcdir, "msl")):
-            if runner(["bash", lc, lcdir, str(ctx.environ.get("NPS5_BUILD_JOBS", "4"))], env=ctx.environ) != 0:
+            if runner(["bash", lc, lcdir, str(compile_jobs(ctx.environ))], env=ctx.environ) != 0:
                 print("prepare: warning: %s failed; the library cache is not (fully) built (pipelines are still prepared)" % lc)
         try:
             return len([f for f in os.listdir(os.path.join(lcdir, "lib")) if f.endswith(".metallib")])
@@ -687,6 +722,7 @@ def clone_dir(src, dst):
 
 def cmd_check(ctx, o, runner):
     st, lines = status(ctx)
+    app0 = app0_of(ctx, o["dry"])
     if st != "prepared" and not o["dry"]:
         raise CacheError("\n".join(lines) + "\ncache check needs a prepared cache for this stack: nps5 cache prepare %s" % ctx.tid)
     rows = ["scene\trc\tcompiled\tlibraries\tstalls>%dms\tstall_s\tworst_ms\tred" % STALL_MS]
@@ -694,7 +730,7 @@ def cmd_check(ctx, o, runner):
     bad = 0
     for s in scene_names(ctx, o["scene"]):
         d = os.path.join(ctx.root, "verify", ctx.key, s); mid = ctx.metal + ".v." + s
-        words = cache_env(ctx.tid, d, mid) + [("KYTY_PROGRESS_TITLE_LOG", "1"), ("KYTY_PIPELINE_STATS", "1")]
+        words = cache_env(ctx.tid, d, mid) + launch_words(ctx, app0) + [("KYTY_PROGRESS_TITLE_LOG", "1"), ("KYTY_PIPELINE_STATS", "1")]
         tag = "cache-check-" + s
         cmd = run_cmd(ctx.tid, tag, s, o["secs"] or 180, words)
         if o["dry"]:

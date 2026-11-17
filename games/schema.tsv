@@ -62,6 +62,9 @@ guest_bias	hex	no	one	-	-	run, kyty	host = guest + bias
 framerate_block	addrbuild	no	many	-	-	run	NPS5_FRAMERATE_BLOCK
 marker	marker	no	many	-	-	run, bench, regress	a named point of a run
 scene_open_key	text	no	one	-	-	runtime	folder whose children are scenes (NPS5_SCENE_OPEN_KEY); empty = off
+shader_prepare	text	no	one	-	-	runtime	all | scene: what the launch phase builds before the game starts (NPS5_SHADER_PREPARE; overrides the player's setting, so normally absent)
+shader_prepare_always	text	no	one	-	-	kyty	scenes whose pipelines always belong to the scene hold: names, a trailing * is a prefix (KYTY_SHADER_PREPARE_ALWAYS)
+scene_tag_skip	text	no	one	-	-	runtime	scene name prefixes that never become the current scene, e.g. overlays and menus (NPS5_SCENE_TAG_SKIP; default ui_)
 run_secs	runsecs	no	one	-	-	run	soft cap and ceiling when the scene gives none
 blank_fail_s	int	no	one	-	-	run	early-stop black threshold, seconds
 stall_fail_s	int	no	one	-	-	run	early-stop stall threshold, seconds

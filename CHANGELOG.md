@@ -51,6 +51,16 @@ commits, then the changes below as separate commits.
   boundaries inside rendering instances and WAIT_FLIP_DONE submits only when the queue suspends (pull request #107,
   `KYTY_PASS_SUBMIT_DEFER`, default on: world map p50 37.0 -> 36.0 ms, a level 42.1 -> 41.1 ms in paired runs).
 
+- No compiles at run time on a prepared cache: a launch phase behind the loading card creates every known pipeline
+  before the game starts (`KYTY_PIPELINE_REPLAY_ALL=1`, on in the preset) and builds the renderer's tile/detile
+  helper pipelines (`KYTY_HELPER_PREWARM=1`); a prepare now records those helpers and waits for KosmicKrisp's
+  archive writer before it ends (it used to lose the last ~30 pipelines it compiled); closing the window saves the
+  driver pipeline cache first. Compile workers = logical cores - 4 (min 2, `NPS5_COMPILE_THREADS`) at utility QoS.
+  The launch phase holds the game's first draw, not the window, so the card counts to X == T
+  (`KYTY_PIPELINE_REPLAY_ALL_HOLD=0`: in the background). Setting **Shader preparation at launch**: all (default) or
+  next scene first (`shader_prepare=all|scene`, `NPS5_SHADER_PREPARE`); recordings tag each pipeline with its scene
+  and the list carries the tags (`nps5 cache merge` prints them).
+
 ### Runtime and translator (`nativeps5-recomp`)
 - Lifter: 32-bit SHLD/SHRD by a CL count of 0 zero-extends the destination (PS4Recomp 27e12b0).
 - VFS: optional per-directory listing cache for case-insensitive lookups (`NPS5_VFS_DIRCACHE=1`, default off).

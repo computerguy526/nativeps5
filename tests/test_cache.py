@@ -122,7 +122,7 @@ class T(unittest.TestCase):
         rc, out, _ = self.run_main(["prepare", "PPSA00001", "--dry-run"])
         c = self.ctx()
         self.assertEqual(rc, 0)
-        for s in (c.key, c.metal, "KYTY_PIPELINE_LIST_PREPARE=1", "KYTY_PIPELINE_LIST_APP_VER=01.001.000", "--class func", "--tag cache-prepare"):
+        for s in (c.key, c.metal, "KYTY_PIPELINE_LIST_PREPARE=1", "KYTY_HELPER_PREWARM=1", "KYTY_PIPELINE_LIST_APP_VER=01.001.000", "--class func", "--tag cache-prepare"):
             self.assertIn(s, out)
         self.assertFalse(os.path.exists(c.dir))
 

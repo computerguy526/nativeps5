@@ -38,6 +38,9 @@ gpu_profile_ban	on
 framerate_block	0x93d4040 build=01.007
 # folder whose children are scenes: logs "[scene-open] <name> t=<s>" (and the legacy "[level-open]" alias) on first open
 scene_open_key	levels/
+# shader_prepare=scene (a player setting, default all): the title, menus, world map and hubs always belong to the scene hold
+shader_prepare_always	worldmap,hub_*,ui_*,title*,ps_logo*,intro*,transition*
+scene_tag_skip	ui_
 marker	worldmap	open:levels/worldmap/
 run_secs	default=90	max=180
 blank_fail_s	90

@@ -206,6 +206,13 @@ class T(unittest.TestCase):
         rc, out = self.run_main(["merge", "PPSA00001", "--contrib"] + files + ["--write"])
         self.assertEqual(rc, 2); self.assertIn("other bytes", out); self.assertEqual(get(self.shipped), before)
 
+    def test_parse_scene_tags(self):
+        text = "  permutations 878, pipelines 1544 (38 mesh)\n  level hoover_beach: 212 pipelines\n  level worldmap: 1 pipelines\n  section 2: 4 raw bytes\n"
+        self.assertEqual(cache.parse_scene_tags(text), {"hoover_beach": 212, "worldmap": 1})
+        self.assertEqual(cache.parse_scene_tags("  permutations 1, pipelines 2\n"), {})
+        self.assertIn("213 pipeline tag(s) in 2 scene(s): hoover_beach 212, worldmap 1", cache.scene_tag_line(cache.parse_scene_tags(text)))
+        self.assertIn("none", cache.scene_tag_line({}))
+
     def test_parse_info_title_and_version(self):
         d = cache.parse_info("  title PPSA21564, version 01.007.000, producer x\n  shaders 832 (vertex 479, pixel 230, compute 123; 4 merged)\n  permutations 878, pipelines 1544 (38 mesh)")
         self.assertEqual((d["title"], d["version"], d["vertex"], d["pixel"], d["compute"], d["pipelines"]), ("PPSA21564", "01.007.000", 479, 230, 123, 1544))

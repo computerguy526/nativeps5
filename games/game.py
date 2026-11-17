@@ -575,6 +575,11 @@ def compose_env(p, gpu=None, scene=None, build=None, cls=None, hw=None):
     if r: put("NPS5_TITLE_RESOLUTION", r, "profile")
     so = p.one("scene_open_key")
     if so: put("NPS5_SCENE_OPEN_KEY", so, "profile")
+    # launch-time shader preparation (docs: games/README.md "Nothing compiles while you play")
+    for key, word in (("shader_prepare", "NPS5_SHADER_PREPARE"), ("shader_prepare_always", "KYTY_SHADER_PREPARE_ALWAYS"),
+                      ("scene_tag_skip", "NPS5_SCENE_TAG_SKIP")):
+        v = p.one(key)
+        if v: put(word, v, "profile")
     for c in p.get("framerate_block"):
         w = " ".join(c).split(); bc = [x[6:] for x in w[1:] if x.startswith("build=")]
         if not bc or cond_holds([("build", bc[0])], ctx):
