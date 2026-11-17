@@ -101,6 +101,24 @@ class T(unittest.TestCase):
         self.refused(["--scene", "nope"], 2); self.refused(["--class", "fast"], 2); self.refused(["--gpu", "x"], 2)
         self.refused(["--arm", "bad"], 2); self.refused(["--env", "NOEQUALS"], 2); self.refused(["--secs", "x"], 2)
 
+    def test_play_session(self):
+        # the README's "how to play" step: a long interactive run is refused without --play, allowed with it
+        self.assertIn("--play", self.refused(["--secs", "3600"], env=dict(NPS5_RUN_REASON="playing")))
+        p = self.plan(["--play"])
+        self.assertTrue(p.play); self.assertEqual(p.secs, run.PLAY_CAP_S); self.assertIsNone(p.until)
+        self.assertNotIn("NPS5_AUDIO_NULL", p.env)                                     # sound on
+        self.assertEqual(p.env["PS4_NO_DIALOGS"], "1"); self.assertEqual(p.env["NPS5_TITLE_RUN"], "1")
+        self.assertEqual(self.plan(["--play", "--secs", "3600"]).secs, 3600)
+        self.assertIsNone(self.plan(["--play", "--scene", "scn"]).until)               # the scene's target does not end a session
+        self.refused(["--play", "--secs", "7201"]); self.refused(["--play", "--secs", "0"], 2)
+        self.refused(["--play", "--until", "marker:m"], 2); self.refused(["--play", "--class", "perf"], 2)
+        # every other rule stays
+        self.refused(["--play", "--env", "BAD_WORD=1"]); self.refused(["--play", "--env", "NPS5_SELF_MEM_LIMIT_MB=18945"])
+        self.refused(["--play", "--env", "APS5_PROFILE_GPU=1"])
+        # without --play nothing changed
+        q = self.plan([]); self.assertFalse(q.play); self.assertEqual(q.env["NPS5_AUDIO_NULL"], "1")
+        self.assertIsNone(run.watch_run(p, type("P", (), {"poll": lambda s: None, "pid": 1})(), "/dev/null", {}))
+
     # ---- review findings
     def test_zero_or_negative_seconds_never_reach_the_timeout_tool(self):
         self.refused(["--secs", "0"], 2); self.refused(["--secs", "-5"], 2)          # gtimeout 0 means no limit at all

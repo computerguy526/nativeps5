@@ -96,7 +96,7 @@ exhaustion. `scripts/run-title.sh` enforces the ones it can.
   captures the user's screen. Pictures come only from the program's own frame dumps (`APS5_DUMP_FRAMES`,
   `KYTY_DUMP_FRAMES`), sparse (every 600th frame or fewer unless a short window needs more), written to
   `NPS5_SCRATCH`.
-- **Short runs.** 90 s by default; longer (up to 180 s) only with `NPS5_RUN_REASON` saying why. Launch title runs
+- **Short runs.** 90 s by default; longer (up to 180 s) only with `NPS5_RUN_REASON` saying why. `nps5 run --play` (up to two hours, sound on, no early stop) is for a person playing at the keyboard; agents and scripts never use it. Launch title runs
   in the background and wait for them; a tool timeout kills a foreground run mid-frame.
 - **Kill only what you started.** Record the PID of the native child, not only its wrapper, and kill that PID.
   Never `pkill`, never kill by name, never `SIGSTOP`.

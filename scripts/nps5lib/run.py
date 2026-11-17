@@ -3,11 +3,14 @@
 
   nps5 run <id> [--scene NAME] [--until SPEC[+N]] [--secs N] [--class func|perf] [--tag T]
                [--gpu kyty|anyps5] [--bin PATH] [--patch NAMES] [--arm LABEL:KEY=VAL,...]
-               [--env KEY=VAL]... [--workdir NAME] [--save NAME] [--dry-run]
+               [--env KEY=VAL]... [--workdir NAME] [--save NAME] [--play] [--dry-run]
 
 Environment, lowest to highest: safety base < profile (games/<id>/game.tsv: preset, rows, schema keys, scene rows)
 < titles/<id>.env ENV < scene pad < --arm < --env. The final set is then checked (env_forbidden, GPU profiling
 ban, memory limit never above the machine's, run length cap, one title at a time, no second GPU process).
+--play  a person playing at the keyboard, not a test: sound on, no --until target and no early stop by the watcher, up
+to 7200 s (the default) without NPS5_RUN_REASON. Every other safety rule stays. Not for scripts or agents: the 180 s cap
+is what bounds an unattended run.
 --arm LABEL:K=V,...  K=V sets an environment word; the reserved keys bin= patch= gpu= libs= (or lib=) kk= kyty=
 workdir= cache= save= select pieces instead. --dry-run prints the final environment and the command and stops.
 Every run writes <runs>/<id>/<tag>/run.json (see RUN_JSON_KEYS). Exit codes: 0 ok, 2 usage, 75 busy (lock or GPU
@@ -24,6 +27,7 @@ SCHEMA = 1
 RESERVED = ("bin", "patch", "gpu", "libs", "lib", "kk", "kyty", "workdir", "cache", "save")
 CLASSES = ("func", "perf")
 RUN_CAP_S, RUN_NO_REASON_S, GPU_PROFILE_MAX_S = 180, 90, 40
+PLAY_CAP_S = 7200                                 # --play: an interactive session
 NAME_RE = r"[A-Za-z0-9_][A-Za-z0-9_.+:-]*"       # a tag, a save name, a relative work dir: one path component, never .. or a path
 RUN_JSON_KEYS = ("schema", "title", "tag", "class", "gpu", "scene", "until", "secs", "arm", "build", "lineage", "patches",
                  "binary", "components", "env", "machine", "command", "timings", "rc", "verdict", "logs", "warnings")
@@ -174,9 +178,12 @@ def check_final(g, p, plan, secs, environ, gpu):
             raise Refuse("NPS5_SELF_MEM_LIMIT_MB=%s is above %d, the most this Mac allows (%s)" % (lim, machine_max, plan.layers["NPS5_SELF_MEM_LIMIT_MB"]))
     if "NPS5_TITLE_RUN" in plan.env and plan.env["NPS5_TITLE_RUN"] != "1":
         raise Refuse("NPS5_TITLE_RUN is set by the runner")
-    if secs > RUN_CAP_S:
-        raise Refuse("%d s is over the %d s cap" % (secs, RUN_CAP_S))
-    if secs > RUN_NO_REASON_S and not environ.get("NPS5_RUN_REASON"):
+    if getattr(plan, "play", False):
+        if secs > PLAY_CAP_S:
+            raise Refuse("%d s is over the %d s cap of --play" % (secs, PLAY_CAP_S))
+    elif secs > RUN_CAP_S:
+        raise Refuse("%d s is over the %d s cap (a person playing: --play)" % (secs, RUN_CAP_S))
+    elif secs > RUN_NO_REASON_S and not environ.get("NPS5_RUN_REASON"):
         raise Refuse("runs over %d s need NPS5_RUN_REASON=<why>" % RUN_NO_REASON_S)
 
 
@@ -324,7 +331,15 @@ def compose(tid, opts, environ=None, g=None):
     for what, v in (("--tag", tag), ("--save", opts.get("save") or arm["pieces"].get("save")), ("scene save", (row or {}).get("save") or None)):
         if v is not None and v != "-" and not re.fullmatch(NAME_RE, v):
             raise Refuse("%s %r must be a plain name (letters, digits, _ . + : -), not a path" % (what, v), 2)
+    play = bool(opts.get("play"))
+    plan.play = play
+    if play and opts.get("until"):
+        raise Refuse("--play has no --until target (it is a session, not a test)", 2)
+    if play and cls != "func":
+        raise Refuse("--play is not a measurement: --class perf is refused", 2)
     secs = opts.get("secs")
+    if secs is None and play:
+        secs = str(PLAY_CAP_S)
     if secs is None:
         m = re.match(r"\d+", (row or {}).get("secs", "") or "")          # scenes.tsv: <s> or <s>/<max>
         if not m:
@@ -334,6 +349,8 @@ def compose(tid, opts, environ=None, g=None):
     if secs < 1:
         raise Refuse("--secs must be at least 1 (0 would start the title without a time limit)", 2)
     until = opts.get("until") or ((row or {}).get("until") if (row or {}).get("until", "-") != "-" else None)
+    if play:
+        until = None                                 # a scene's own target does not end a session
 
     if until:
         w = _watch()
@@ -350,7 +367,10 @@ def compose(tid, opts, environ=None, g=None):
     wd = wd or titles.get("WORKDIR") or os.path.join(scratch, "work", tid)
     run_dir = os.path.join(scratch, "runs", tid, tag)
     for w in BASE_WORDS:
-        k, _, v = w.partition("="); plan.put(k, v, "base")
+        k, _, v = w.partition("=")
+        if play and k == "NPS5_AUDIO_NULL":
+            continue                                 # a session has sound
+        plan.put(k, v, "base")
     plan.put("HOME", os.path.join(wd, "home"), "base"); plan.put("TMPDIR", os.path.join(wd, "home"), "base")
     plan.put("PS4RECOMP_DATA_DIR", os.path.join(wd, "home", "data"), "base")
     plan.put("PS4RECOMP_CACHE_DIR", os.path.join(wd, "home", "cache"), "base")
@@ -785,6 +805,8 @@ def parse_args(argv):
             i += 1
         elif a == "--dry-run":
             opts["dry"] = True
+        elif a == "--play":
+            opts["play"] = True
         elif a.startswith("--"):
             raise Refuse("unknown option %s" % a, 2)
         else:
@@ -798,8 +820,8 @@ def parse_args(argv):
 def watch_run(plan, pr, err_path, environ):
     """Follow the child with the watcher (nps5lib/watch.py): stops it cleanly on the --until target (DONE_UNTIL), a black screen
     (EARLY_BLACK) or a stall (EARLY_STALL). None when disabled (NPS5_WATCH=0) or the child has no pid to poll."""
-    if environ.get("NPS5_WATCH", "1") == "0" or not hasattr(pr, "poll"):
-        return None
+    if environ.get("NPS5_WATCH", "1") == "0" or not hasattr(pr, "poll") or getattr(plan, "play", False):
+        return None                                  # --play: a paused game or a dark scene is not a failed test
     w = _watch()
     src = w.Sources(err_path, plan.run_dir)
     def cpu():

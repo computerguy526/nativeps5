@@ -65,7 +65,7 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
 
    ```sh
    ../ps5recomp/bin/nps5 build "$NPS5_DUMPS_DIR/<your dump folder>" -o "$NPS5_SCRATCH/apps" -j 4
-   cp titles/example.env titles/PPSA21564.env      # set BIN (your translated program), APP0 (your dump), GPU=kyty
+   cp titles/example.env titles/PPSA21564.env      # set BIN (the `native` program nps5 build printed), APP0 (your dump), GPU=kyty
    ```
 
 6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's 1,260 pipelines once, about 90 seconds on an M4 Pro, so the first visit to a scene does not stutter:
@@ -75,10 +75,10 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    scripts/nps5 cache status PPSA21564    # says whether the caches match the current build
    ```
 
-7. **Run.** Keep `ENV="NPS5_PERF=2"` in `titles/PPSA21564.env`. A binary you translated yourself needs `--patch dr`. A run without `--scene` starts the game normally; a run is capped at 90 seconds unless you give a reason:
+7. **Run.** Keep `ENV="NPS5_PERF=2"` in `titles/PPSA21564.env`. A binary you translated yourself needs `--patch dr`. A run without `--scene` starts the game normally. `nps5 run` is a test runner: a run is silent, capped at 90 seconds (180 with `NPS5_RUN_REASON=<why>`) and stopped early on a black or stalled picture. To play, add `--play`: sound on, no early stop, up to two hours:
 
    ```sh
-   NPS5_RUN_REASON="playing" scripts/nps5 run PPSA21564 --patch dr --secs 3600
+   scripts/nps5 run PPSA21564 --patch dr --play
    ```
 
    `--scene worldmap` skips the intro; `--dry-run` prints the environment and command and starts nothing. The profile's canonical settings are in [games/PPSA21564/README.md](games/PPSA21564/README.md). It also lists the optional binary patches, including `nt`, which always takes the non-tiled lighting path and skips the tiled-lighting compute kernels; that changes the picture and has not been reviewed.
