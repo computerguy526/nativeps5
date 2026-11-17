@@ -1351,7 +1351,7 @@ KYTY_PACE_LOG	kyty		src/common/paceLog.cpp
 KYTY_PAD_RELAY_US	kyty	pad relay interval, default 4000; 1000 made a scripted stick input ineffective	src/hybrid/kytyGpuBridge.cpp
 KYTY_PAD_STATE_COALESCE	kyty		src/libs/controller.cpp
 KYTY_PAD_STATE_COALESCE	nativeps5		titles/kyty-preset.env
-KYTY_PASS_SUBMIT_DEFER	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_PASS_SUBMIT_DEFER	kyty	0 = submit at every optional boundary again (default on: no optional submission boundary inside a rendering instance)	src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_PENDING_OPS_NOWAIT	kyty		src/graphics/host_gpu/renderer/commandScheduler.cpp
 KYTY_PENDING_REFRESH_US	kyty		src/graphics/host_gpu/renderer/commandScheduler.cpp
 KYTY_PENDING_REFRESH_US	nativeps5		titles/kyty-preset.env
@@ -1766,15 +1766,15 @@ NPS5_FLUSH_STATS	anyps5		core/shader/recompiler/Translation/src/TranslationConte
 NPS5_FORK_BASE	nativeps5		scripts/fetch-components.sh
 NPS5_FRAMERATE_BLOCK	nativeps5		games/game.py
 NPS5_FRAMERATE_BLOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_FRAMERATE_EMA	ps5recomp	weight of a new frame in the frame-rate average (default 0.02)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_FRAMERATE_HYST_MS	ps5recomp	the frame-rate block is rewritten only after the average stayed apart this long (default 1000 ms)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_FRAMERATE_HYST_PCT	ps5recomp	the frame-rate block is rewritten only when the average differs by this percentage (default 5)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_EMA	ps5recomp	weight of a new frame in the frame-rate average (default 0.02; 0 < v <= 1, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_HYST_MS	ps5recomp	the frame-rate block is rewritten only after the average stayed apart this long (default 1000 ms; 0..60000, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_HYST_PCT	ps5recomp	the frame-rate block is rewritten only when the average differs by this percentage (default 5; 0..50, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_LEGACY	ps5recomp	1 = old frame-rate block behaviour (no freeze during video/loading, short average)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MAX	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MIN	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_NO_FREEZE_AV	ps5recomp	1 = do not freeze the frame-rate block while a video plays	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_NO_FREEZE_LOAD	ps5recomp	1 = do not freeze the frame-rate block while a level loads	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_FRAMERATE_WARM	ps5recomp	frames of fast averaging after the block is verified (default 60)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_WARM	ps5recomp	frames without a rewrite after a freeze ends (default 60; 0..36000, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FUNC_HOLD_LOAD	nativeps5		scripts/nps5-env.sh
 NPS5_GAMES_DIR	nativeps5		games/game.py
 NPS5_GAMES_FIRST	nativeps5		games/game.py

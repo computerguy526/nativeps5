@@ -30,6 +30,9 @@ commits, then the changes below as separate commits.
   crash on top of a running fault handler no longer overflows them; the pc map dump has its own time bound.
 - Frame-rate block (`NPS5_FRAMERATE_BLOCK`): frozen while a video plays and while a level loads, longer average
   and a 5 % / 1 s hysteresis (`NPS5_FRAMERATE_LEGACY=1` = the old behaviour).
+- Review fixes: only the thread that reports a crash arms the process alarm (a second failing thread cut the pc
+  map dump's own bound short); the frame-rate tuning switches (`NPS5_FRAMERATE_EMA`, `_HYST_PCT`, `_HYST_MS`,
+  `_WARM`) are range-checked; the directory listing cache frees an oversized listing.
 - The check list also runs the host access hook test (a file read into guest memory is repeated when a watched
   page was closed again before the kernel copied; without it ASTRO BOT's first hub crashed while loading).
 - Review fixes (APR command buffers, raw host writes refused, crash reports without home paths, patch points bound
@@ -41,6 +44,8 @@ commits, then the changes below as separate commits.
 - `sceAudioPropagationSourceCalculateAudioPaths` succeeds with zero paths (a game stopped on 0x8A700001).
 
 ### This repository
+- `nps5 run --play`: a session for a person at the keyboard (sound on, no early stop by the watcher, up to two
+  hours); every other safety rule stays. Plain `nps5 run` remains the short, silent test run.
 - KosmicKrisp patch series 0001-0020 (review fixes 0016-0019, persistent library cache 0020); `nps5 cache
   prepare` is two-pass so the pipeline archive is keyed on the offline-built libraries.
 - `scripts/check.sh` reads git objects, checks each commit of a range, closes the evasions a review found.

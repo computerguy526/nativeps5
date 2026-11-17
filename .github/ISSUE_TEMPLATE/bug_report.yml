@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Search open and closed issues for the error text first, and comment there if it is already reported.
-        A new title goes into the [Game bring-up](https://github.com/computerguy526/nativeps5/issues/new?template=game_bringup.yml) form, a slow scene into the [Performance](?template=performance.yml) form.
+        A new title goes into the [Game bring-up](https://github.com/computerguy526/nativeps5/issues/new?template=game_bringup.yml) form, a slow scene into the [Performance](https://github.com/computerguy526/nativeps5/issues/new?template=performance.yml) form.
         Read [CONTRIBUTING.md](https://github.com/computerguy526/nativeps5/blob/main/CONTRIBUTING.md) ("Never game data") before you attach anything. Paste text; do not attach files from a game.
   - type: input
     id: summary
