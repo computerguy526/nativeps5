@@ -66,6 +66,9 @@ env	KYTY_VRAM_BUDGET_MB=6144	gpu=kyty	24 GB Mac (measured; 7168 reaches the memo
 env	KYTY_VRAM_BUDGET_MB=4096	gpu=kyty,ram<=16	untested: 16 GB Mac, a quarter of RAM
 env	KYTY_TEX_MIP_SKIP=2	gpu=kyty,ram<=16	untested: 16 GB Mac, large sampled textures start two levels down (needs the resident trim above)
 env	NPS5_KYTY_TRACE=0	gpu=kyty	no trace
+env	KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48	gpu=kyty	hoover_beach read-fault stalls (~340 ms) 3-33/min -> 0-1.3/min (11 runs, 2026-11-17)
+env	KYTY_OCCLUSION_QUERY_DRAW_SKIP=1	gpu=kyty	skip query-only draws while occlusion results are synthetic
+env	NPS5_VFS_DIRCACHE=1	-	per-directory listing cache for case-insensitive file lookups
 env	NPS5_KYTY_STATS=10	gpu=kyty	stats line every 10 s
 env	KYTY_PS_PER_VERTEX=unpack	gpu=kyty	per-vertex unpack
 env	KYTY_READBACK_EAGER_PAGES=256	gpu=kyty	hot set larger than the GPU-written pages the fluid workers sample

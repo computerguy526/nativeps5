@@ -5,6 +5,16 @@ pinned commits are in [components.lock](components.lock).
 
 ## Unreleased
 
+- ASTRO BOT `upscaling` setting (`off` default, `metalfx900`, `metalfx720`): renders the scene at 900p/720p and scales
+  it with Apple MetalFX (spatial) inside KosmicKrisp (patches 0021-0022). Experimental: both lower sizes show block
+  artefacts on moving objects (some game passes keep a 1080p size), so the default stays native 1080p.
+- ASTRO BOT profile: `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` (removes the ~340 ms `hoover_beach` stalls),
+  `KYTY_OCCLUSION_QUERY_DRAW_SKIP=1` and `NPS5_VFS_DIRCACHE=1` are on.
+- Flower/turtle flicker fixed: early depth/stencil tests for instrumented `GET_LOD_STATS` pixel shaders
+  (`KYTY_LOD_STATS_EARLY_TESTS`, default on; needs a fresh shader-cache prepare).
+- Controller: haptics (DualSense HD vibration through its audio device, rumble on other pads; `NPS5_HAPTICS=0` off)
+  and motion sensors (gyro/accelerometer reach the game); the video player loops without the old flush race;
+  shared log line convention (`NPS5_LOG=subsys:level`).
 - `nps5 bug-report`: one zip of redacted text (trimmed log, doctor, commits, settings, versions, crash report) for an issue, with an allow-list, a printed file list and `--dry-run`. `nps5 log` reads a noisy log (condensed, rate limited, by level) and `nps5 run` prints and saves a SUMMARY block. The `[subsystem] LEVEL` line convention is in `docs/reference/logging.md`. The issue form asks for the zip.
 
 ## First public release (2026-11-17)

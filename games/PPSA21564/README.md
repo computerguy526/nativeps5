@@ -100,7 +100,7 @@ matched for all sites last time) and add a lineage row.
 | `mode` | forces the single 1080p scene-parameter set (mode argument at guest `0x77bcecc`) | title 43 -> 34 ms (2 of 2); world map 45 -> 97 ms (n=1) | Reviewed. Not a default: title benchmarking only |
 | `nt` | always takes the non-tiled lighting renderer (guest `0x77eb993`), which skips the tiled-lighting compute megakernels | comparison was running when this was written | Unreviewed. Changes the lighting, so the picture is the user's decision |
 | `gi` | stores 0 for the GI probe flag (guest `0x751d0b3`) | not measured on the current stack | Unreviewed; listed so nobody rediscovers it |
-| `lowres WxH` | dynamic-resolution level 0 at 1600x900 or 1280x720; the game's own temporal upscaler brings it to 2432x1368 | world map 35.4 ms at 720p, steady picture (n=1) | Reviewed for 720p. Works only with **both** size sites (guest functions `0x77be670` and `0x74cef60`); one site alone flickers |
+| `lowres WxH` | dynamic-resolution level 0 at 1600x900 or 1280x720; the game's own temporal upscaler brings it to 2432x1368 | world map 35.4 ms at 720p, steady picture (n=1) | Superseded by the run-time `upscaling` setting (below). Works only with **both** size sites (guest functions `0x77be670` and `0x74cef60`); one site alone flickers. At 720p and 900p the intro cutscene and the crash site show blocky squares and jagged edges on moving objects and dust (with and without MetalFX): the game never renders below 1080p by itself and some passes keep a 1080p-derived size. Not a default |
 
 Rules for a new patch: measure it on the title, the world map and at least one level before proposing it as a
 default; give the guest address, the instruction before and after, the game build, and its review state; assert
@@ -109,6 +109,16 @@ repository; never add more than the patched instructions, and never ship a patch
 
 The dynamic-resolution controller is guest function `0x7818870`: down when the summed GPU timers exceed 16.67 ms,
 up after 31 updates with room, levels 1080p / 1368p / 1872p / 2160p, timers read three frames back.
+
+## Settings
+
+Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALOG=1`, the settings file, or
+`--env`):
+
+| Setting | Options | Default | Notes |
+|---|---|---|---|
+| `fast_lighting` (`NPS5_ASTRO_FAST_LIGHTING`) | on, off | on | on = the non-tiled lighting path (the `nt` patch as a setting) |
+| `upscaling` (`NPS5_ASTRO_UPSCALING`) | `off`, `metalfx900`, `metalfx720` | `off` | `metalfx900`/`metalfx720` render the scene at 900p/720p and scale it with Apple MetalFX (spatial). **Experimental:** blocky squares and jagged edges on moving objects and dust at both sizes (see `lowres` above); needs the `dr` patch |
 
 ## Known issues
 
@@ -124,9 +134,9 @@ up after 31 updates with room, levels 1080p / 1368p / 1872p / 2160p, timers read
 | Title frame time is bimodal with record-time clocks | title | the dynamic-resolution feedback loop | Gone with `cbtime`; do not use 36-40 fps figures from old notes as a baseline |
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
 | About 9 % of world-map runs end in a guest bus error (SIGBUS) | world map | not diagnosed | Open, parked at the first release |
-| Flower and turtle effects flicker | some places in levels | not fully diagnosed; a candidate fix (LOD handling) exists and is not in the first release | Open |
+| Flower and turtle effects flicker | some places in levels | late depth test after instrumented (`GET_LOD_STATS`) pixel shaders misses the pre-pass depth | Fixed: early depth/stencil tests for those shaders (`KYTY_LOD_STATS_EARLY_TESTS`, default on; `hoover_beach` burst frames gone). Needs a fresh shader-cache prepare |
 | Closing the window exits at once, without the renderer teardown and the on-exit cache flush | any run | the window-close path | Pipelines compiled since the last periodic cache save are lost |
-| `hoover_beach` has a fluid-simulation read-fault storm in about half the runs | `hoover_beach` | page-fault handling for the game's fluid simulation | A switch exists (`KYTY_READ_FAULT_PUBLISHED_FRAME_BURST`) and is off by default |
+| `hoover_beach` has a fluid-simulation read-fault storm in about half the runs | `hoover_beach` | page-fault handling for the game's fluid simulation | `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` is on in the profile (game.tsv): the ~340 ms stalls went from 3-33 per minute to 0-1.3 |
 
 ## How to reach a scene
 
@@ -162,7 +172,7 @@ Mechanisms first seen here, written up once in the reference:
 1. CPU cost per draw in the back end (the 12-13 fps levels).
 2. Barriers in the driver: built, gate passes, no frame-time number.
 3. The first level's serial megakernel commit: knock-out, then register pressure or the non-tiled path.
-4. MetalFX in place of the game's temporal upscaler at a lower internal resolution: hook built, matcher not
-   engaging on this build.
+4. MetalFX at a lower internal resolution: works (the `upscaling` setting), but 720p/900p show block artefacts
+   because some passes keep a 1080p-derived size; find those sizes, then make 720p the default.
 5. Memory headroom in levels: mip skip, retiring stale 4K targets.
 6. The two picture issues above.
