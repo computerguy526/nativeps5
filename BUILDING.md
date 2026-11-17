@@ -180,7 +180,7 @@ reference until it is adapted to this layout.
 
 From fresh clones of the four repositories in an empty directory, with a scrubbed environment (`env -i`, PATH =
 Homebrew + system, an empty HOME, so cold Go and pip caches), at nice 10 with 4 jobs, while other work ran on the
-machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components: recomp 26faf6d (the lock is now 93e9f7c: crash-report fixes, frame-rate block freeze, review fixes, tests), Kyty 433734b (the lock is now 8ac0796: a test-only switch, documentation),
+machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components: recomp 26faf6d (the lock is now b0e579b: crash-report fixes, frame-rate block freeze, video pacing, review fixes, tests), Kyty 433734b (the lock is now 8ac0796: a test-only switch, documentation),
 AnyPS5 4696b46 (the lock is now 585a803: documentation)); the repositories were cloned from local copies because the GitHub URLs did not exist yet.
 
 | Step | Result | Time |

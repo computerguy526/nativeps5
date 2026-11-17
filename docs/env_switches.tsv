@@ -1744,8 +1744,13 @@ NPS5_ASTRO_REALTIME	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_AUDIO_CAPTURE	ps5recomp		pkg/runtime/modules/libSceAudioOut/nps5_audio_capture.c
 NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	tests/compare_env.sh
 NPS5_AUDIO_NULL	ps5recomp	`1` silent audio device; the default in run-title.sh	pkg/runtime/modules/libSceAudioOut/ps4_audioout.c
+NPS5_AVPLAYER_DEC_THREADS	ps5recomp	video decode threads (default 4; 1 = one thread; 2..16)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_HOLD	ps5recomp	fetched video buffers kept away from the decoder (default 2, capped by the number of frame buffers)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_LOG	ps5recomp	`1` logs each video stream and its first three frames (sizes, pitch, crops, guest address)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_PITCH_ALIGN	ps5recomp	`=<n>` row pitch alignment of video frames from the AvPlayer HLE; default 256 for PS5 images (64 smeared 880-wide clips, docs/reference/rendering.md)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_SYNC_LEGACY	ps5recomp	1 = old video delivery (one frame per poll, no pacing in sync mode NONE, one decode thread)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_SYNC_TOL_MS	ps5recomp	how early a video frame may be shown (default 8 ms)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_VTRACE	ps5recomp	1 = log every video frame and a timing summary	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_BREW_PREFIX	nativeps5		scripts/build.sh
 NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
 NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py

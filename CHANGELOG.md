@@ -30,6 +30,10 @@ commits, then the changes below as separate commits.
   crash on top of a running fault handler no longer overflows them; the pc map dump has its own time bound.
 - Frame-rate block (`NPS5_FRAMERATE_BLOCK`): frozen while a video plays and while a level loads, longer average
   and a 5 % / 1 s hysteresis (`NPS5_FRAMERATE_LEGACY=1` = the old behaviour).
+- Video (sceAvPlayer): frames are shown by their timestamps in every sync mode (a title that sets "no sync" played
+  its clip as fast as it decoded), late frames are skipped, the last fetched buffers are kept away from the decoder
+  while the game still copies them, 4 decode threads, a looping clip does not wait for its old timestamps
+  (`NPS5_AVPLAYER_SYNC_LEGACY=1` = the old behaviour).
 - Review fixes: only the thread that reports a crash arms the process alarm (a second failing thread cut the pc
   map dump's own bound short); the frame-rate tuning switches (`NPS5_FRAMERATE_EMA`, `_HYST_PCT`, `_HYST_MS`,
   `_WARM`) are range-checked; the directory listing cache frees an oversized listing.
