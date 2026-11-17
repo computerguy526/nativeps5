@@ -1,0 +1,291 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 16:00:00 +0000
+Subject: [PATCH] kosmickrisp: persistent library cache (KK_LIBCACHE_DIR)
+
+KK_LIBCACHE_DIR=<d> sets KK_METALLIB_DIR=<d>/lib (prebuilt metallibs, loaded
+instead of compiling the MSL) and KK_MSL_COLLECT_DIR=<d>/msl (every MSL a
+library is built from is written there) unless those variables are set
+themselves. tools/kk-metallib/build_metallib.sh (scripts/kk-libcache-build.sh)
+turns <d>/msl into <d>/lib offline, so a prepared cache loads its libraries in
+0.3 ms instead of compiling them live.
+
+Libraries are also deduplicated in memory by their key (KK_LIB_DEDUPE=0 turns
+that off). The periodic pipeline-archive flush waits for the segment lock after
+about a second of failed tries instead of skipping for ever, so eight builders
+in flight no longer starve it (a prepare wrote 0 segments).
+
+A pipeline archived from a source-compiled library never hits when the same
+shader is later loaded from a metallib: prepare in two passes (nps5 cache
+prepare does).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/kk_libkey.h    |  37 ++++++++++
+ src/kosmickrisp/bridge/mtl_compiler.m | 125 +++++++++++++++++++++++++++++-----
+ 2 files changed, 144 insertions(+), 18 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/kk_libkey.h b/src/kosmickrisp/bridge/kk_libkey.h
+new file mode 100644
+index 0000000..e85f511
+--- /dev/null
++++ b/src/kosmickrisp/bridge/kk_libkey.h
+@@ -0,0 +1,37 @@
++/* Copyright nativeps5. SPDX-License-Identifier: MIT
++ *
++ * Content key of a Metal library built from MSL: SHA-256 over the build stamp
++ * (KosmicKrisp build + macOS build), the GPU name, the compile options and the
++ * MSL text, first 16 bytes as 32 hex digits. Kept separate (no Metal headers)
++ * so a unit test can include it. */
++#ifndef KK_LIBKEY_H
++#define KK_LIBKEY_H
++#include <stdio.h>
++#include <string.h>
++#include <CommonCrypto/CommonDigest.h>
++
++static inline void
++kk_libkey_compute(const char *stamp, const char *gpu, const char *src, int msl_version,
++                  int math_mode, int math_fp_fns, char out[33])
++{
++   CC_SHA256_CTX c;
++   unsigned char d[CC_SHA256_DIGEST_LENGTH];
++   char opt[64];
++   CC_SHA256_Init(&c);
++   CC_SHA256_Update(&c, stamp, (CC_LONG)strlen(stamp));
++   CC_SHA256_Update(&c, gpu, (CC_LONG)strlen(gpu));
++   snprintf(opt, sizeof(opt), ";msl=%x;math=%d;fp=%d;", msl_version, math_mode, math_fp_fns);
++   CC_SHA256_Update(&c, opt, (CC_LONG)strlen(opt));
++   /* the text can exceed 4 GiB-safe CC_LONG only in theory; hash in chunks */
++   size_t n = strlen(src);
++   while (n) {
++      CC_LONG k = n > (1u << 30) ? (1u << 30) : (CC_LONG)n;
++      CC_SHA256_Update(&c, src, k);
++      src += k;
++      n -= k;
++   }
++   CC_SHA256_Final(d, &c);
++   for (int i = 0; i < 16; i++)
++      snprintf(out + i * 2, 3, "%02x", d[i]);
++}
++#endif
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 01d7ae5..46d899d 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -24,6 +24,7 @@
+ #include <unistd.h>
+ #include <CommonCrypto/CommonDigest.h>
+ #include "git_sha1.h"
++#include "kk_libkey.h"
+ 
+ /* Persistent compiled pipelines (nativeps5).
+  *
+@@ -106,6 +107,7 @@ static _Atomic uint64_t kk_st_lib, kk_st_lib_slow, kk_st_lib_us, kk_st_hit, kk_s
+    kk_st_miss, kk_st_miss_slow, kk_st_miss_us, kk_st_pending, kk_st_first_pending_ms,
+    kk_st_segments, kk_st_seg_bytes, kk_st_loaded_bytes;
+ static uint32_t kk_seg_seq;
++static _Atomic uint64_t kk_st_dedupe, kk_st_mlhit;
+ 
+ static double
+ kk_now_ms(void)
+@@ -118,12 +120,13 @@ kk_stats_line(const char *why)
+ {
+    fprintf(stderr,
+            "[kk-archive] stats (%s): libraries %llu (%llu slow, %.0f ms), pipelines archive-hit %llu (%.0f ms) "
+-           "compiled %llu (%llu slow, %.0f ms), pending %llu, segments written %llu (%.1f MiB), loaded %.1f MiB, flush retries %llu\n",
++           "compiled %llu (%llu slow, %.0f ms), pending %llu, segments written %llu (%.1f MiB), loaded %.1f MiB, flush retries %llu, library dedupe-hit %llu metallib-hit %llu\n",
+            why, (unsigned long long)kk_st_lib, (unsigned long long)kk_st_lib_slow, kk_st_lib_us / 1e3,
+            (unsigned long long)kk_st_hit, kk_st_hit_us / 1e3, (unsigned long long)kk_st_miss,
+            (unsigned long long)kk_st_miss_slow, kk_st_miss_us / 1e3, (unsigned long long)kk_st_pending,
+            (unsigned long long)kk_st_segments, kk_st_seg_bytes / 1048576.0, kk_st_loaded_bytes / 1048576.0,
+-           (unsigned long long)kk_st_flush_deferred);
++           (unsigned long long)kk_st_flush_deferred, (unsigned long long)kk_st_dedupe,
++           (unsigned long long)kk_st_mlhit);
+ }
+ 
+ static void
+@@ -335,6 +338,7 @@ kk_flusher_main(void *arg)
+       }
+    }
+    bool retry = false;
++   uint32_t kk_defer_run = 0;
+    for (;;) {
+       struct pollfd pfd = {.fd = kk_wake_pipe[0], .events = POLLIN};
+       int r = poll(&pfd, 1, retry ? 50 : 1000);
+@@ -355,7 +359,14 @@ kk_flusher_main(void *arg)
+       uint64_t pending = kk_st_pending, first = kk_st_first_pending_ms;
+       if (kk_seg_mode && !kk_compact && pending &&
+           (pending >= kk_flush_n || (first && now - (double)first >= kk_flush_s * 1e3)))
+-         retry = !kk_flush_segment("periodic", false);
++      {
++         /* A flush that keeps losing the trylock to back-to-back compiles (a PREPARE
++          * replay keeps 8 builders in flight; kk-libc pass 2 wrote 0 segments) waits
++          * for the lock after ~1 s of retries; the pending pipelines are never lost. */
++         bool blocking = kk_defer_run >= 20;
++         retry = !kk_flush_segment("periodic", blocking);
++         kk_defer_run = retry ? kk_defer_run + 1 : 0;
++      }
+       else
+          retry = false;
+       if (kk_stats_s > 0.0 && now - last_stats >= kk_stats_s * 1e3) {
+@@ -580,6 +591,21 @@ kk_metallib_init(void)
+ {
+    kk_metallib_dir = getenv("KK_METALLIB_DIR");
+    kk_collect_dir = getenv("KK_MSL_COLLECT_DIR");
++   /* KK_LIBCACHE_DIR=<d>: <d>/lib is the metallib dir, <d>/msl the collect
++    * dir (each only when its own variable is unset). tools/kk-metallib/
++    * kk_libcache_build.sh <d> turns <d>/msl into <d>/lib. */
++   const char *lc = getenv("KK_LIBCACHE_DIR");
++   if (lc && lc[0]) {
++      static char lib[1100], msl[1100];
++      if (!kk_metallib_dir || !kk_metallib_dir[0]) {
++         snprintf(lib, sizeof(lib), "%s/lib", lc);
++         kk_metallib_dir = lib;
++      }
++      if (!kk_collect_dir || !kk_collect_dir[0]) {
++         snprintf(msl, sizeof(msl), "%s/msl", lc);
++         kk_collect_dir = msl;
++      }
++   }
+    if (kk_metallib_dir && !kk_metallib_dir[0])
+       kk_metallib_dir = NULL;
+    if (kk_collect_dir && !kk_collect_dir[0])
+@@ -595,19 +621,7 @@ static void
+ kk_metallib_key(id<MTL4Compiler> comp, const char *src, int msl_version,
+                 int math_mode, int math_fp_fns, char out[33])
+ {
+-   CC_SHA256_CTX c;
+-   unsigned char d[CC_SHA256_DIGEST_LENGTH];
+-   char opt[64];
+-   CC_SHA256_Init(&c);
+-   CC_SHA256_Update(&c, kk_stamp, (CC_LONG)strlen(kk_stamp));
+-   const char *gpu = [[comp device].name UTF8String];
+-   CC_SHA256_Update(&c, gpu, (CC_LONG)strlen(gpu));
+-   snprintf(opt, sizeof(opt), ";msl=%x;math=%d;fp=%d;", msl_version, math_mode, math_fp_fns);
+-   CC_SHA256_Update(&c, opt, (CC_LONG)strlen(opt));
+-   CC_SHA256_Update(&c, src, (CC_LONG)strlen(src));
+-   CC_SHA256_Final(d, &c);
+-   for (int i = 0; i < 16; i++)
+-      snprintf(out + i * 2, 3, "%02x", d[i]);
++   kk_libkey_compute(kk_stamp, [[comp device].name UTF8String], src, msl_version, math_mode, math_fp_fns, out);
+ }
+ 
+ static void
+@@ -618,6 +632,15 @@ kk_collect_msl(const char *key, const char *src, int msl_version, int math_mode,
+    struct stat st;
+    if (stat(path, &st) == 0)
+       return;
++   {
++      char par[1100];
++      snprintf(par, sizeof(par), "%s", kk_collect_dir);
++      char *sl = strrchr(par, '/');
++      if (sl) {
++         *sl = 0;
++         mkdir(par, 0755);
++      }
++   }
+    mkdir(kk_collect_dir, 0755);
+    snprintf(tmp, sizeof(tmp), "%s.tmp%d", path, getpid());
+    FILE *f = fopen(tmp, "wb");
+@@ -662,6 +685,50 @@ mtl_new_compiler(mtl_device *device)
+    }
+ }
+ 
++/* In-process library cache: the same (MSL, options) text is built again for
++ * every pipeline state that shares a shader (43% of live compiles in a level
++ * repeat a text already built in the process, and the OS Metal cache does not
++ * serve them). KK_LIB_DEDUPE=0 disables. Libraries are immutable; every caller
++ * gets its own retain and releases it as before. */
++#define KK_LIBMEM_CAP 8192
++struct kk_libmem_ent {
++   char key[33];
++   id<MTLLibrary> lib;
++};
++static struct kk_libmem_ent *kk_libmem;
++static uint32_t kk_libmem_n;
++static pthread_mutex_t kk_libmem_lock = PTHREAD_MUTEX_INITIALIZER;
++
++static id<MTLLibrary>
++kk_libmem_get(const char key[33])
++{
++   id<MTLLibrary> r = nil;
++   pthread_mutex_lock(&kk_libmem_lock);
++   for (uint32_t i = 0; i < kk_libmem_n; i++) {
++      if (memcmp(kk_libmem[i].key, key, 33) == 0) {
++         r = [kk_libmem[i].lib retain];
++         kk_st_dedupe++;
++         break;
++      }
++   }
++   pthread_mutex_unlock(&kk_libmem_lock);
++   return r;
++}
++
++static void
++kk_libmem_put(const char key[33], id<MTLLibrary> lib)
++{
++   pthread_mutex_lock(&kk_libmem_lock);
++   if (!kk_libmem)
++      kk_libmem = calloc(KK_LIBMEM_CAP, sizeof(*kk_libmem));
++   if (kk_libmem && kk_libmem_n < KK_LIBMEM_CAP) {
++      memcpy(kk_libmem[kk_libmem_n].key, key, 33);
++      kk_libmem[kk_libmem_n].lib = [lib retain];
++      kk_libmem_n++;
++   }
++   pthread_mutex_unlock(&kk_libmem_lock);
++}
++
+ /* Library */
+ mtl_library *
+ mtl_new_library(mtl_compiler *compiler, const char *src,
+@@ -684,9 +751,26 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+          if (kk_math_mode_override >= 0)
+             math_mode = (enum mtl_math_mode)kk_math_mode_override;
+       }
+-      if (kk_metallib_dir || kk_collect_dir) {
+-         char key[33];
++      static int kk_dedupe = -1;
++      if (kk_dedupe < 0) {
++         const char *dd = getenv("KK_LIB_DEDUPE");
++         kk_dedupe = !(dd && dd[0] == '0');
++      }
++      char key[33];
++      bool have_key = false;
++      if (kk_dedupe || kk_metallib_dir || kk_collect_dir) {
+          kk_metallib_key(comp, src, (int)msl_version, (int)math_mode, (int)math_fp_fns, key);
++         have_key = true;
++      }
++      if (kk_dedupe) {
++         id<MTLLibrary> memlib = kk_libmem_get(key);
++         if (memlib) {
++            if (kk_metallib_debug)
++               fprintf(stderr, "[kk-metallib] dedupe %s (hits %u)\n", key, (unsigned)kk_st_dedupe);
++            return memlib;
++         }
++      }
++      if (kk_metallib_dir || kk_collect_dir) {
+          if (kk_metallib_dir) {
+             char path[1024];
+             snprintf(path, sizeof(path), "%s/%s.metallib", kk_metallib_dir, key);
+@@ -697,9 +781,12 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+                                                                     error:&lerr];
+                if (prebuilt) {
+                   kk_ml_hits++;
++                  kk_st_mlhit++;
+                   if (kk_metallib_debug)
+                      fprintf(stderr, "[kk-metallib] hit %s %.2f ms (%zu B msl, hits %u misses %u)\n", key,
+                              kk_now_ms() - t0, strlen(src), kk_ml_hits, kk_ml_misses);
++                  if (kk_dedupe)
++                     kk_libmem_put(key, prebuilt);
+                   return prebuilt;
+                }
+                fprintf(stderr, "[kk-metallib] rejected %s: %s\n", path, [lerr.localizedDescription UTF8String]);
+@@ -735,6 +822,8 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+ 
+       if (lib == nil) {
+          fprintf(stderr, "Failed to create MTLLibrary: %s\n", [error.localizedDescription UTF8String]);
++      } else if (kk_dedupe && have_key && !(bust && bust[0])) {
++         kk_libmem_put(key, lib);
+       }
+ 
+       return lib;

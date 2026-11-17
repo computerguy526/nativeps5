@@ -82,7 +82,7 @@ binary. The back end reads a shader's code from your copy of the game and uses i
 same call) starts the title once in prepare mode: every
 permutation and pipeline is built through KosmicKrisp from your own dump, and the process exits before the game
 runs (ASTRO BOT: 1,259 of 1,260 built in 85 s on an M4 Pro). It fills the Vulkan driver cache, the program cache,
-the KosmicKrisp pipeline archive and a private OS Metal cache.
+the KosmicKrisp pipeline archive and a private OS Metal cache. With KosmicKrisp patch 0020 it runs twice: pass 1 collects every shader's MSL (`KK_LIBCACHE_DIR=<cache>/kk-libcache`), `scripts/kk-libcache-build.sh` builds it into Metal libraries, pass 2 prepares again from an empty cache with those libraries in place (a pipeline archived from a source-compiled library never hits when the shader is later loaded from a prebuilt one); runs then load libraries in 0.3 ms instead of compiling them (`--single-pass` skips pass 2).
 
 **What stays out, always** (git-ignored, generated per checkout, under `NPS5_SCRATCH`): those compiled caches and
 archives, Metal binaries, driver caches, shader and pipeline *journals* (they carry code), MSL / SPIR-V / AIR

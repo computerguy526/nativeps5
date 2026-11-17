@@ -140,6 +140,42 @@ class T(unittest.TestCase):
         self.assertEqual(cache.status(self.ctx())[0], "prepared")
         self.assertEqual(len(calls), 1)
 
+    def test_prepare_is_two_pass_with_the_library_cache(self):
+        c = self.ctx(); os.makedirs(c.dir)
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)           # any existing file: the runner below plays the builder
+        lcd = os.path.join(c.dir, "kk-libcache"); calls = []; seen_at_pass2 = {}
+        def runner(cmd, env=None, capture=False):
+            if capture: return 0, "  shaders 1\n  permutations 2, pipelines 3\n"
+            if cmd[0] == "bash":                                                 # the builder: msl -> metallib
+                os.makedirs(lcd + "/lib", exist_ok=True); open(lcd + "/lib/k1.metallib", "w").write("m"); calls.append("build"); return 0
+            calls.append("run")
+            if calls.count("run") == 1:
+                os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write("src")
+                open(os.path.join(c.dir, "from-pass-1.bin"), "w").write("x")     # a pass-1 archive entry: must not survive
+            else:
+                seen_at_pass2.update(lib=os.path.isfile(lcd + "/lib/k1.metallib"), old=os.path.exists(os.path.join(c.dir, "from-pass-1.bin")))
+            return 0
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(calls, ["run", "build", "run", "build"])
+        self.assertEqual(seen_at_pass2, {"lib": True, "old": False})
+        kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv"))
+        self.assertEqual((kv["passes"], kv["metallibs"]), ("2", "1"))
+
+    def test_prepare_single_pass_flag_and_nothing_collected(self):
+        c = self.ctx(); self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__); lcd = os.path.join(c.dir, "kk-libcache"); calls = []
+        def runner(cmd, env=None, capture=False):
+            if capture: return 0, ""
+            calls.append(cmd[0])
+            if cmd[0] == "bash": os.makedirs(lcd + "/lib", exist_ok=True); open(lcd + "/lib/k1.metallib", "w").write("m")
+            else: os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write("src")
+            return 0
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--single-pass"], runner)[0], 0)
+        self.assertEqual(len([x for x in calls if x != "bash"]), 1)
+        calls.clear(); self.env["NPS5_KK_LIBCACHE_BUILD"] = "/nonexistent/builder.sh"           # no builder: one pass, as before
+        self.assertEqual(self.run_main(["prepare", "PPSA00001"], runner)[0], 0)
+        self.assertEqual(len(calls), 1)
+
     def test_prepare_failure_stays_unprepared(self):
         def runner(cmd, env=None, capture=False):
             return (0, "") if capture else 3

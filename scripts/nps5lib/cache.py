@@ -4,8 +4,9 @@
   nps5 cache record  <id> [--scene NAME ...] [--secs N] [--dry-run]   one first visit per scene into an EMPTY cache arm
   nps5 cache merge   <id> [--from DIR ...] [--rebuild] [--write]      export one list per recording, merge with the committed list
   nps5 cache verify-list <id> [--list FILE] [--shaders JOURNAL ...]   no game code in the list; writes <list>.verified
-  nps5 cache prepare <id> [--secs N] [--dry-run]                      USERS RUN THIS ONCE: fresh cache + fresh Metal cache id, builds
-                                                                      every listed pipeline in one start that exits before the game runs
+  nps5 cache prepare <id> [--secs N] [--single-pass] [--dry-run]      USERS RUN THIS ONCE: fresh cache + fresh Metal cache id, builds
+                                                                      every listed pipeline in a start that exits before the game runs;
+                                                                      two starts with KK's library cache (see below), --single-pass = one
   nps5 cache check   <id> [--scene NAME ...] [--secs N] [--dry-run]   first-visit runs on a clone of the prepared cache: live compiles, stalls
   nps5 cache status  <id>                                              fresh | partial | prepared | stale (exit 0 only when prepared)
 
@@ -16,8 +17,10 @@ series is applied on the pinned commit without committing). cache dir = <scratch
 com.nativeps5.<gpu>.<id>.<stack key>. A new list, a new KK / Kyty / ps5recomp commit or another GPU family / OS build gives a new
 key, so a stale cache is never reused silently. Compiled caches are never committed; only games/<id>/pipelines.kyplst and
 its .verified are. The runs go through `nps5 run` (title queue, memory limit, one GPU process); nothing here starts a game itself.
-KK_LIBCACHE_DIR (KK's library cache) is set to <cache dir>/kk-libcache; after `prepare`, $NPS5_KK_LIBCACHE_BUILD <dir> <jobs> (KK's
-kk_libcache_build.sh) turns the collected MSL into metallibs when that script exists.
+KK_LIBCACHE_DIR (KK's library cache) is set to <cache dir>/kk-libcache. `prepare` is TWO-PASS: pass 1 collects the MSL of every shader,
+$NPS5_KK_LIBCACHE_BUILD (default scripts/kk-libcache-build.sh) <dir> <jobs> builds it into metallibs, pass 2 starts again from an empty
+cache and a fresh Metal cache id with the metallibs in place. (KK's Metal archive keys a pipeline on its library: a pipeline built from
+a source-compiled library never hits when the same shader is later loaded from a metallib, so only pass 2's archive is kept.)
 Tool: $NPS5_KYPLST_TOOL, else <kyty>/build-arm64/kyty_pipeline_list. Exit codes: 0 ok, 1 failed / stale, 2 usage."""
 import hashlib, os, re, shlex, shutil, subprocess, sys, time
 
@@ -371,16 +374,45 @@ def cmd_prepare(ctx, o, runner):
         print("[dry-run] stack key %s\n  cache dir %s\n  metal id  %s\n  would remove %s and %s, then:\n  %s" % (
             ctx.key, ctx.dir, ctx.metal, ctx.dir, os_metal_dir(ctx.metal) or "<OS metal cache>", " ".join(shlex.quote(c) for c in cmd)))
         return 0
-    rmtree_inside(ctx.dir, ctx.root); os.makedirs(ctx.dir)
     om = os_metal_dir(ctx.metal)
-    if om and os.path.isdir(om):
-        shutil.rmtree(om, ignore_errors=True)
+    lcdir = os.path.join(ctx.dir, "kk-libcache")
+
+    def fresh_dir(keep_libcache=False):
+        keep = ctx.dir + ".libkeep"
+        if keep_libcache and os.path.isdir(lcdir):
+            shutil.rmtree(keep, ignore_errors=True); os.replace(lcdir, keep)
+        rmtree_inside(ctx.dir, ctx.root); os.makedirs(ctx.dir)
+        if os.path.isdir(keep):
+            os.replace(keep, lcdir)
+        if om and os.path.isdir(om):
+            shutil.rmtree(om, ignore_errors=True)
+
+    def build_libs():
+        """KK's library cache: build the collected MSL into metallibs; returns the number of metallibs now present."""
+        lc = libcache_builder(ctx)
+        if lc and os.path.isdir(os.path.join(lcdir, "msl")):
+            if runner(["bash", lc, lcdir, str(ctx.environ.get("NPS5_BUILD_JOBS", "4"))], env=ctx.environ) != 0:
+                print("prepare: warning: %s failed; the library cache is not (fully) built (pipelines are still prepared)" % lc)
+        try:
+            return len([f for f in os.listdir(os.path.join(lcdir, "lib")) if f.endswith(".metallib")])
+        except OSError:
+            return 0
+
     t0 = time.time()
+    # Two passes. KK keys a compiled pipeline in its Metal archive on the library it was built from, and a library compiled from
+    # source never matches the same shader loaded from an offline-built metallib. Pass 1 collects the MSL (source libraries) and the
+    # builder makes the metallibs; pass 2 starts a fresh cache and a fresh Metal cache id WITH the metallibs in place, so its archive
+    # is the one later runs hit. Only pass 2's archive is kept. No builder, or nothing collected = a single pass, as before.
+    fresh_dir()
     rc = _call(cmd, ctx, runner)
-    lc = ctx.environ.get("NPS5_KK_LIBCACHE_BUILD")
-    if rc == 0 and lc and os.path.isfile(lc) and os.path.isdir(os.path.join(ctx.dir, "kk-libcache", "msl")):
-        if runner(["bash", lc, os.path.join(ctx.dir, "kk-libcache"), str(ctx.environ.get("NPS5_BUILD_JOBS", "4"))], env=ctx.environ) != 0:
-            print("prepare: warning: %s failed; the library cache is not built (pipelines are still prepared)" % lc)
+    nlib = build_libs() if rc == 0 else 0
+    passes = 1
+    if rc == 0 and nlib > 0 and not o.get("single"):
+        print("prepare: pass 1 done (%d metallibs); pass 2 re-prepares with them" % nlib)
+        fresh_dir(keep_libcache=True)
+        rc = _call(cmd, ctx, runner); passes = 2
+        if rc == 0:
+            nlib = build_libs()
     info = {}
     try:
         info = parse_info(runner([tool_path(ctx), "info", ctx.list_path], env=ctx.environ, capture=True)[1])
@@ -390,11 +422,17 @@ def cmd_prepare(ctx, o, runner):
     with open(pt + ".tmp", "w") as f:
         f.write("# written by nps5 cache prepare; read by nps5 cache status (a key mismatch means stale)\n")
         for k, v in [("key", ctx.key), ("gpu", ctx.gpu), ("metal_id", ctx.metal), ("date", time.strftime("%Y-%m-%d", time.gmtime())),
-                     ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?"))] + list(ctx.identity().items()):
+                     ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?")), ("passes", passes), ("metallibs", nlib)] + list(ctx.identity().items()):
             f.write("%s=%s\n" % (k, v))
     os.replace(pt + ".tmp", pt)            # whole or absent: status never reads a half-written record
     print("prepare: rc=%s, %s" % (rc, ctx.dir))
     return 0 if rc == 0 else 1
+
+
+def libcache_builder(ctx):
+    """The script that builds <KK_LIBCACHE_DIR>/msl into /lib: $NPS5_KK_LIBCACHE_BUILD, else scripts/kk-libcache-build.sh of this repo."""
+    lc = ctx.environ.get("NPS5_KK_LIBCACHE_BUILD") or os.path.join(REPO, "scripts", "kk-libcache-build.sh")
+    return lc if os.path.isfile(lc) else None
 
 
 def clone_dir(src, dst):
@@ -467,7 +505,7 @@ def default_runner(cmd, env=None, capture=False):
 
 
 def parse(argv):
-    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, list=None, shaders=[], **{"from": []})
+    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, list=None, shaders=[], **{"from": []})
     pos, i = [], 0
     VAL = {"--scene": "scene", "--from": "from", "--shaders": "shaders", "--secs": "secs", "--list": "list"}
     while i < len(argv):
@@ -479,8 +517,8 @@ def parse(argv):
             if isinstance(o[k], list): o[k].append(v)
             else: o[k] = v
             i += 1
-        elif a in ("--dry-run", "--rebuild", "--write"):
-            o[{"--dry-run": "dry"}.get(a, a[2:])] = True
+        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass"):
+            o[{"--dry-run": "dry", "--single-pass": "single"}.get(a, a[2:])] = True
         elif a.startswith("--"):
             raise CacheError("unknown option %s" % a, 2)
         else:

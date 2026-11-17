@@ -184,7 +184,7 @@ AnyPS5 bff91d13); the repositories were cloned from local copies because the Git
 | `scripts/check.sh --tree --tests` in this repository; `--tree` in the three components | clean | clean, 0 failures (the entry repository also runs its tests) |
 | pre-commit hook with a planted ELF named `notes.txt` | commit refused | - |
 | 2: `scripts/build.sh recomp` (Go 1.25 downloaded the 1.27.1 toolchain), `go test ./pkg/diag/ ./pkg/elfloader/ ./pkg/disasm/`, `nps5 doctor` | ok (sample-ELF tests skip) | 40 s (about 4 min on the first pass, with colder caches) |
-| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 19 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 52 s (about 4 min on the first pass) |
+| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 20 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 52 s (about 4 min on the first pass) |
 | 3: `vulkaninfo` with the built ICD | NOT RUN (opens a GPU device; the test was CPU only) | - |
 | 5: `scripts/build.sh anyps5`: seven submodules, configure, build of five targets | ok after one fix (the glslang submodule) | 189 s |
 | 4: `scripts/build.sh kyty`: submodules, configure, compile (795 steps), link | ok after one fix (a codegen fingerprint check that only a full CMake build runs) | 34 min (2039 s) while other builds and runs shared the machine |
