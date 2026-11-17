@@ -42,8 +42,28 @@ class RuleTests(unittest.TestCase):
     def test_green(self):
         r = self.j(rj()); self.assertEqual((r["status"], r["reasons"]), ("green", [])); self.assertIn("p95", r["metrics"])
 
-    def test_done_fixed_is_green_too(self):
-        self.assertEqual(self.j(rj("DONE_FIXED"))["status"], "green")
+    def test_only_a_reached_target_is_green(self):
+        for v in ("DONE_FIXED", "ENDED_EARLY"):                   # ran its seconds / quit by itself: the target was never observed
+            r = self.j(rj(v)); self.assertEqual(r["status"], "red", v); self.assertIn("reach", r["reasons"][0])
+
+    def test_unfinished_runner_is_an_error(self):
+        for v in ("RUNNING", "ERROR", "INTERRUPTED"):
+            self.assertEqual(self.j(rj(v))["status"], "error", v)
+
+    def test_rules_without_input_are_named_and_block_recording(self):
+        r = self.j(rj())                                           # no peak footprint in run.json
+        self.assertEqual(r["status"], "green"); self.assertEqual(r["unchecked"], ["memory (no peak footprint in run.json)"])
+        r2 = regress.judge_route(ROUTE, rj(peak=9000), None, "", GOOD_PIC)
+        self.assertEqual(r2["unchecked"], ["stall (no frame times)"])
+        self.assertEqual(self.j(rj(peak=9000))["unchecked"], [])
+        self.assertIn("could not be checked", regress.may_record(False, "m4pro-24g", "PASS", [r], 1))
+        self.assertIsNone(regress.may_record(False, "m4pro-24g", "PASS", [self.j(rj(peak=9000))], 1))
+        self.assertIn("not checked", regress.render(dict(id="x", status="PASS", routes=[r], notes=[])))
+
+    def test_baseline_of_zero_and_bad_options(self):
+        self.assertEqual(regress.compare_baseline(dict(p95=16.0), dict(p95=0), 10)[0], "same")
+        for bad in (["check", "--tolerance", "nan"], ["check", "--tolerance", "-1"], ["check", "--baseline", "../x"], ["check", "--baseline", ""]):
+            with self.assertRaises(regress.RegressError, msg=str(bad)): regress.parse(bad)
 
     def test_red_verdicts(self):
         for v, rc in (("CRASH", 139), ("FAIL_RC3", 3), ("EARLY_BLACK", 1), ("EARLY_STALL", 1), ("DUMP_MODIFIED", 99)):
@@ -155,6 +175,21 @@ class ValidatedTests(unittest.TestCase):
         with self.assertRaises(regress.RegressError): regress.validated_row("quick", [rj(), rj(comps=other)], "c", "1", "d")
         with self.assertRaises(regress.RegressError): regress.validated_row("quick", [rj(comps=dict(COMP, kyty=None))], "c", "1", "d")
 
+    def test_anyps5_title_records_its_own_back_end(self):
+        a = rj(comps=dict(COMP, kyty=None, anyps5="ddddddd444")); a["gpu"] = "anyps5"      # an AnyPS5 title has no Kyty commit at all
+        row = regress.validated_row("full", [a], "m4pro-24g", "26.6.2", "2026-11-17")
+        self.assertTrue(row.startswith("full\tanyps5=ddddddd444 kk=bbbbbbb222 ps5recomp=ccccccc333 "), row)
+        b = rj(); b["gpu"] = "anyps5"
+        with self.assertRaises(regress.RegressError): regress.validated_row("full", [a, rj()], "c", "1", "d")     # mixed back ends
+        with self.assertRaises(regress.RegressError): regress.validated_row("full", [b], "c", "1", "d")           # anyps5 commit unknown
+
+    def test_changed_checkouts_are_not_recorded_as_a_commit(self):
+        for k in ("kyty", "ps5recomp"):
+            with self.assertRaises(regress.RegressError) as c: regress.validated_row("quick", [rj(comps=dict(COMP, **{k: "aaaaaaa111+1234abcd"}))], "c", "1", "d")
+            self.assertIn("uncommitted", str(c.exception))
+        row = regress.validated_row("quick", [rj(comps=dict(COMP, kk="0123456789+89abcdef"))], "c", "1", "d")   # the public KosmicKrisp: pin + applied series
+        self.assertIn(" kk=0123456789+89abcdef ", row)
+
     def test_update_replaces_same_mode_and_class_keeps_the_rest(self):
         open(self.p, "w").write("# header\nfull\tkyty=1 class=m4pro-24g date=old\nfull\tkyty=2 class=m1-16g date=other\nquick\tkyty=3 class=m4pro-24g date=q\n")
         regress.update_validated(self.p, "full\tkyty=9 class=m4pro-24g date=new")
@@ -189,7 +224,7 @@ class GameFlowTests(unittest.TestCase):
         sc = self.scenario.get(name, {})
         if sc.get("norun"): return 78
         d = os.path.join(self.tmp, "runs", "PPSA00001", tag); os.makedirs(os.path.join(d, "frames"))
-        json.dump(rj(sc.get("verdict", "DONE_UNTIL"), sc.get("rc", 0), cls=sc.get("cls", "m4pro-24g")), open(d + "/run.json", "w"))
+        json.dump(rj(sc.get("verdict", "DONE_UNTIL"), sc.get("rc", 0), cls=sc.get("cls", "m4pro-24g"), peak=sc.get("peak", 9000)), open(d + "/run.json", "w"))
         open(d + "/run.err", "w").write(sc.get("err", "[pstat] wall=9.0 presents=100 luma=70.0 black=0.02 sd=30.0 diff=1.0\n"))
         open(d + "/frames/perf_frames.csv", "w").write(evfix.perf_csv([sc.get("ms", 16.0)] * 2000))
         return 0
@@ -209,6 +244,23 @@ class GameFlowTests(unittest.TestCase):
         res = self.go(record=True)
         self.assertEqual(res["status"], "PASS"); self.assertIsNotNone(res["recorded"])
         v = self.validated(); self.assertIn("quick\tkyty=aaaaaaa111", v); self.assertIn("class=m4pro-24g", v); self.assertIn("macos=26.6.2", v)
+
+    def test_run_without_a_memory_reading_is_green_but_not_recorded(self):
+        self.scenario = {"map": dict(peak=None)}
+        res = self.go(record=True)
+        self.assertEqual(res["status"], "PASS"); self.assertIsNone(res["recorded"]); self.assertIn("could not be checked", res["record_refused"])
+        self.assertEqual(self.validated(), "# header\n")
+
+    def test_pipeline_list_record_needs_a_passed_proof(self):
+        import hashlib
+        lst = os.path.join(self.gd, "pipelines.kyplst"); open(lst, "wb").write(b"list")
+        sha = hashlib.sha256(b"list").hexdigest()
+        def state():
+            return dict((s[0], s[1]) for s in regress.static_checks("PPSA00001", dict(self.env), gmod=self.g))["pipeline list verified"]
+        self.assertEqual(state(), "fail")                                              # no record
+        open(lst + ".verified", "w").write("sha256=%s\n" % sha); self.assertEqual(state(), "fail")          # right bytes, no result line
+        open(lst + ".verified", "w").write("sha256=%s\nresult=verify: FAILED\n" % sha); self.assertEqual(state(), "fail")
+        open(lst + ".verified", "w").write("sha256=%s\nresult=verify: no shader code in the list\n" % sha); self.assertEqual(state(), "ok")
 
     def test_no_record_flag_no_row(self):
         self.go(record=False); self.assertEqual(self.validated(), "# header\n")

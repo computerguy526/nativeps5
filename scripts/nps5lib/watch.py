@@ -30,8 +30,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bmp  # noqa: E402
 import frames  # noqa: E402
 
-PSTAT = re.compile(r"\[pstat\] wall=([\d.]+) presents=(\d+) luma=([\d.]+) black=([\d.]+) sd=([\d.]+) diff=([\d.]+)")
-SCENE_OPEN = re.compile(r"\[(?:scene|level)-open\] (\S+)(?: t=([\d.]+))?")
+NUM = r"(\d+(?:\.\d+)?)"         # a number float() accepts: a torn line ("luma=." or "1.2.3") must not stop the watcher
+PSTAT = re.compile(r"\[pstat\] wall=%s presents=(\d+) luma=%s black=%s sd=%s diff=%s" % (NUM, NUM, NUM, NUM, NUM))
+SCENE_OPEN = re.compile(r"\[(?:scene|level)-open\] (\S+)(?: t=%s)?" % NUM)
 PREB = re.compile(r"\[prebuild\] Compiling shaders\s+(\d+) / (\d+)")
 PREB_DONE = re.compile(r"\[prebuild\] (\d+) / (\d+) pipelines in")
 DONE, BLACK, STALL, TIMEOUT, FIXED = "DONE_UNTIL", "EARLY_BLACK", "EARLY_STALL", "TIMEOUT", "DONE_FIXED"

@@ -26,7 +26,7 @@ import ab  # noqa: E402
 import run as runmod  # noqa: E402
 
 OTHERS_MAX_MS = 50.0
-SCENE_OPEN = re.compile(r"\[(?:scene|level)-open\] (\S+)(?: t=([\d.]+))?")
+SCENE_OPEN = re.compile(r"\[(?:scene|level)-open\] (\S+)(?: t=(\d+(?:\.\d+)?))?")
 
 
 class BenchError(Exception):
@@ -145,6 +145,15 @@ def quiet_gate(power=runmod.power_source, others=runmod.gpu_others, procs=runmod
     return (not why), why
 
 
+def start_hold(guard, now=time.time):
+    """The machine guard's start hold (<guard>/start.hold, fresh for 30 s): the machine is too loaded for a title run."""
+    h = os.path.join(guard, "start.hold")
+    try:
+        return now() - os.stat(h).st_mtime < 30
+    except OSError:
+        return False
+
+
 def wait_quiet(gate, wait_s, sleep=time.sleep, now=time.time):
     t0 = now()
     while True:
@@ -235,6 +244,10 @@ def parse(argv):
         i += 1
     if len(pos) != 1:
         raise BenchError("usage: nps5 bench <id> --route NAME [--arm A:... --arm B:...] [--runs N]; see --help")
+    if o["runs"] < 1:
+        raise BenchError("--runs must be at least 1")
+    if not (o["quiet_wait"] >= 0 and o["min_effect"] >= 0):
+        raise BenchError("--quiet-wait and --min-effect must be numbers >= 0")
     return pos[0], o
 
 
@@ -293,7 +306,8 @@ def main(argv, environ=None, caller=subprocess.call, gate=None):
                 tags[labels.index(l)] = [t for t in rest.split(",") if t]
             noisy = {}
         else:
-            gate = gate or (lambda: quiet_gate())
+            guard = environ.get("NPS5_GUARD_DIR") or os.path.join(environ["NPS5_SCRATCH"], "guard")
+            gate = gate or (lambda: quiet_gate(hold=lambda: start_hold(guard)))
             noisy = {}
             for idx, tag, cmd in plan:
                 ok, why = wait_quiet(gate, o["quiet_wait"])
@@ -324,6 +338,8 @@ def main(argv, environ=None, caller=subprocess.call, gate=None):
         print("nps5 bench: %s" % e, file=sys.stderr); return e.code
     except runmod.Refuse as e:
         print("nps5 bench: %s" % e, file=sys.stderr); return e.code
+    except OSError as e:
+        print("nps5 bench: %s" % e, file=sys.stderr); return 1
 
 
 if __name__ == "__main__":

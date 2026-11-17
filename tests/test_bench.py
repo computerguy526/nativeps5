@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for scripts/nps5lib/bench.py: bench.tsv, window maths on stored perf_frames.csv + run.err logs, ABBA plans, the quiet
 gate, the arm summary and the CSV / markdown / json outputs. No title is run."""
-import io, json, os, shutil, sys, tempfile, unittest, warnings
+import io, json, os, shutil, sys, tempfile, time, unittest, warnings
 warnings.simplefilter("ignore", ResourceWarning)
 from contextlib import redirect_stdout, redirect_stderr
 sys.dont_write_bytecode = True
@@ -107,6 +107,16 @@ class T(unittest.TestCase):
         ok, why = bench.wait_quiet(lambda: (False, ["noisy"]), 50, sleep=lambda s: t.__setitem__(0, t[0] + s), now=lambda: t[0])
         self.assertFalse(ok); self.assertGreaterEqual(t[0], 50)
         self.assertEqual(bench.wait_quiet(lambda: (True, []), 50, sleep=lambda s: 1 / 0, now=lambda: 0)[0], True)
+
+    def test_start_hold_and_bad_counts(self):
+        d = tempfile.mkdtemp()
+        self.assertFalse(bench.start_hold(d))
+        open(os.path.join(d, "start.hold"), "w").close()
+        self.assertTrue(bench.start_hold(d)); self.assertFalse(bench.start_hold(d, now=lambda: time.time() + 60))
+        ok, why = bench.quiet_gate(power=lambda: "AC", others=lambda: 0, procs=lambda: [], hold=lambda: bench.start_hold(d))
+        self.assertFalse(ok); self.assertIn("start hold", why[0])
+        for bad in (["X", "--route", "r", "--runs", "0"], ["X", "--route", "r", "--runs", "-2"], ["X", "--quiet-wait", "-1"], ["X", "--min-effect", "nan"]):
+            with self.assertRaises(bench.BenchError, msg=str(bad)): bench.parse(bad)
 
     def test_dry_run_plans_abba(self):
         rc, out, _ = self.main(["PPSA00001", "--route", "wm", "--arm", "a:X=1", "--arm", "b:X=2", "--dry-run"])

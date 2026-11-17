@@ -9,17 +9,20 @@ Per game: static checks first (no title run: game.py check, the pipeline list's 
 the canonical binary when it exists), then the games/<id>/smoke.tsv routes of the mode through `nps5 run --class func`.
 smoke.tsv: name, scene, mode (quick | full | quick,full), reach (<until spec>@<s>), mem_max_mib, stall_ms_max, description.
 --quick runs the routes whose mode has quick, the default (full) runs the routes whose mode has full.
-Green / red rule, per route, from run.json and the run's own files (never from a human reading): GREEN needs verdict DONE_UNTIL or
-DONE_FIXED (the reach target was reached: TIMEOUT is red; CRASH, FAIL_RC<n>, EARLY_BLACK, EARLY_STALL, DUMP_MODIFIED are red; rc 86 is
-red as a memory finding, not a crash), no `[RED]` line in run.err, peak footprint (run.json timings.peak_footprint_mib, when the run
-recorded it) at most mem_max_mib, the largest frame after the steady window starts at most stall_ms_max, and a real picture: frame
-dumps (pics.py: not black, not flat) or the last `[pstat]` line (black fraction under 0.9); no picture evidence at all is red.
+Green / red rule, per route, from run.json and the run's own files (never from a human reading): GREEN needs verdict DONE_UNTIL
+(the reach target was reached: TIMEOUT, ENDED_EARLY and DONE_FIXED are red; CRASH, FAIL_RC<n>, EARLY_BLACK, EARLY_STALL, DUMP_MODIFIED
+are red; rc 86 is red as a memory finding, not a crash), no `[RED]` line in run.err, peak footprint (run.json
+timings.peak_footprint_mib) at most mem_max_mib, the largest frame after the steady window starts at most stall_ms_max, and a real
+picture: frame dumps (pics.py: not black, not flat) or the last `[pstat]` line (black fraction under 0.9); no picture evidence at all is
+red. A rule whose input is missing (no peak footprint recorded, no frame times) does not turn a route red, but it is listed as
+"not checked" and such a run is never recorded in validated.tsv.
 Game status: PASS (all green, no baseline, or within tolerance), CHANGED (green, p95 moved more than 2% but within --tolerance, default
 10%), REGRESSION (a red route, or p95 worse than the baseline by more than the tolerance), ERROR (a run could not be judged: no run.json,
 refused, static check failed). Baselines: <scratch>/titles/<id>/regress/baselines/<REV, default latest>/<mode>/<route>.json.
 --record writes games/<id>/validated.tsv (one row per mode and machine class) ONLY when the game is PASS or CHANGED, every route of the
-mode ran green, the profile is in games/ (never a provisional one from NPS5_GAMES_DIR) and the machine class is known. A red result
-leaves the rows as they were. NPS5_REGRESS_SKIP=ID,... leaves out a title another agent is working on.
+mode ran green with every rule checked, the profile is in games/ (never a provisional one from NPS5_GAMES_DIR), the machine class is
+known, and the back end (kyty= or anyps5=) and ps5recomp were built from committed sources (an identity with +<hash> is a changed
+checkout: the row would name a commit that is not what ran). A red result leaves the rows as they were. NPS5_REGRESS_SKIP=ID,... leaves out a title another agent is working on.
 Exit: 0 all PASS/CHANGED, 1 a REGRESSION or ERROR, 2 usage."""
 import glob, importlib.util, io, json, os, re, shlex, subprocess, sys, time
 from contextlib import redirect_stdout
@@ -32,8 +35,10 @@ import frames as fr  # noqa: E402
 import pics  # noqa: E402
 import run as runmod  # noqa: E402
 
-GOOD_VERDICTS = ("DONE_UNTIL", "DONE_FIXED")
-PSTAT = re.compile(r"\[pstat\] wall=([\d.]+) presents=(\d+) luma=([\d.]+) black=([\d.]+) sd=([\d.]+) diff=([\d.]+)")
+GOOD_VERDICTS = ("DONE_UNTIL",)
+UNJUDGED_VERDICTS = ("RUNNING", "ERROR", "INTERRUPTED")      # the runner did not finish the run: nothing to judge
+NUM = r"(\d+(?:\.\d+)?)"
+PSTAT = re.compile(r"\[pstat\] wall=%s presents=(\d+) luma=%s black=%s sd=%s diff=%s" % (NUM, NUM, NUM, NUM, NUM))
 BLACK_FRACTION_MAX = 0.9
 DUMP_LUMA_MIN = 6.0            # mean luma (0-255) of the last dump below this: black screen
 DUMP_SHARP_MIN = 0.05          # a flat colour has no edges
@@ -92,20 +97,24 @@ def picture_check(run_dir, err_text=""):
 # ---------------------------------------------------------------- one route (pure on its inputs)
 def judge_route(route, rj, frames, err_text, pic):
     """-> dict(name, status green|red|error, reasons[], metrics). `rj` None = no run.json, `frames` a fr.Frames or None."""
-    r = dict(name=route["name"], status="green", reasons=[], metrics={})
+    r = dict(name=route["name"], status="green", reasons=[], metrics={}, unchecked=[])
     if rj is None:
         return dict(r, status="error", reasons=["no run.json (the run was refused or did not start)"])
     bad = runmod.validate_run_json(rj)
     if bad:
         return dict(r, status="error", reasons=["run.json invalid: " + "; ".join(bad[:3])])
     v, rc = rj.get("verdict"), rj.get("rc")
-    if v == "RUNNING":
-        return dict(r, status="error", reasons=["run.json says RUNNING (run killed or still going)"])
+    if v in UNJUDGED_VERDICTS:
+        return dict(r, status="error", reasons=["run.json says %s (the runner was killed, failed, or the run is still going)" % v])
     red = r["reasons"]
     if rc == 86:
         red.append("rc 86: memory limit reached (a memory finding, not a fault)")
     elif v == "TIMEOUT":
         red.append("reach target %s not reached within %ss" % (route["until"], route["secs"]))
+    elif v == "ENDED_EARLY":
+        red.append("the title exited by itself before reach target %s" % route["until"])
+    elif v == "DONE_FIXED":
+        red.append("verdict DONE_FIXED: the run had no reach target, so reaching %s was never observed" % route["until"])
     elif v not in GOOD_VERDICTS:
         red.append("verdict %s (rc %s)" % (v, rc))
     kinds = sorted(set(re.findall(r"\[RED\] ?(\S+)", err_text)))
@@ -116,7 +125,11 @@ def judge_route(route, rj, frames, err_text, pic):
         r["metrics"]["peak_mib"] = peak
         if peak > route["mem_max"]:
             red.append("peak footprint %s MiB over %d" % (peak, route["mem_max"]))
-    if frames is not None and len(frames):
+    else:
+        r["unchecked"].append("memory (no peak footprint in run.json)")
+    if frames is None or not len(frames):
+        r["unchecked"].append("stall (no frame times)")
+    else:
         try:
             w = fr.steady_window(frames)
             r["metrics"].update(p50=round(w.stats["p50"], 3), p95=round(w.stats["p95"], 3), fps=round(w.stats["fps"], 2), n=w.stats["n"])
@@ -126,7 +139,7 @@ def judge_route(route, rj, frames, err_text, pic):
             if worst > route["stall_max"]:
                 red.append("largest frame after the window start %.0f ms over %d" % (worst, route["stall_max"]))
         except fr.FramesError as e:
-            r["metrics"]["window"] = str(e)
+            r["metrics"]["window"] = str(e); r["unchecked"].append("stall (%s)" % e)
     r["metrics"]["picture"] = pic["source"]
     if not pic["ok"]:
         red.append("picture: " + pic["detail"])
@@ -137,7 +150,7 @@ def judge_route(route, rj, frames, err_text, pic):
 
 def compare_baseline(metrics, base, tol_pct):
     """-> (state, note): same | moved | worse. Compares p95 (the number a stall shows up in) with the stored baseline."""
-    if not base or base.get("p95") is None or metrics.get("p95") is None:
+    if not base or not base.get("p95") or metrics.get("p95") is None:
         return "same", "no baseline"
     d = 100.0 * (metrics["p95"] - base["p95"]) / base["p95"]
     note = "p95 %.2f vs baseline %.2f ms (%+.1f%%)" % (metrics["p95"], base["p95"], d)
@@ -170,15 +183,23 @@ ROW_KEYS = ("kyty", "kk", "ps5recomp", "lineage", "date", "class", "machine", "m
 
 
 def validated_row(mode, rjs, cls, macos, date):
-    """One validated.tsv line from the run.json files of a green mode. The component commits of every route must agree."""
-    comps = {k: {(rj.get("components") or {}).get(k) for rj in rjs} for k in ("kyty", "kk", "ps5recomp")}
+    """One validated.tsv line from the run.json files of a green mode. The component commits of every route must agree; the first
+    word names the GPU back end that ran (kyty= or anyps5=). The back end and ps5recomp must be committed sources; KosmicKrisp may
+    carry +<hash> (the public layout applies its patch series on the pinned commit without committing)."""
+    gpus = {rj.get("gpu") for rj in rjs}
+    if len(gpus) != 1 or next(iter(gpus)) not in ("kyty", "anyps5"):
+        raise RegressError("routes ran on different or unknown GPU back ends (%s): not recorded" % ", ".join(sorted(map(str, gpus))), 1)
+    back = next(iter(gpus))
+    comps = {k: {(rj.get("components") or {}).get(k) for rj in rjs} for k in (back, "kk", "ps5recomp")}
     for k, vs in comps.items():
         if len(vs) != 1 or None in vs:
             raise RegressError("routes ran on different or unknown %s commits (%s): not recorded" % (k, ", ".join(sorted(map(str, vs)))), 1)
+        if k != "kk" and "+" in next(iter(vs)):
+            raise RegressError("%s was built from a checkout with uncommitted changes (%s): commit them first; not recorded" % (k, next(iter(vs))), 1)
     first = rjs[0]
     lin = "%s+%s" % (first.get("lineage") or "unknown", "+".join(first.get("patches") or []) or "none")
-    return "%s\tkyty=%s kk=%s ps5recomp=%s lineage=%s date=%s class=%s machine=%s macos=%s" % (
-        mode, next(iter(comps["kyty"]))[:10], next(iter(comps["kk"]))[:10], next(iter(comps["ps5recomp"]))[:10], lin, date, cls,
+    return "%s\t%s=%s kk=%s ps5recomp=%s lineage=%s date=%s class=%s machine=%s macos=%s" % (
+        mode, back, next(iter(comps[back]))[:10], next(iter(comps["kk"]))[:19], next(iter(comps["ps5recomp"]))[:10], lin, date, cls,
         (first.get("machine") or {}).get("model") or "unknown", macos or "unknown")
 
 
@@ -212,6 +233,9 @@ def may_record(provisional, cls, status, routes, expected):
         return "status %s: validated.tsv is written only for PASS or CHANGED" % status
     if len(routes) < expected or expected == 0 or any(x["status"] != "green" for x in routes):
         return "not every route of the mode ran green"
+    un = ["%s: %s" % (x["name"], ", ".join(x["unchecked"])) for x in routes if x.get("unchecked")]
+    if un:
+        return "a rule could not be checked (%s): a validated row needs every rule checked" % "; ".join(un)
     return None
 
 
@@ -228,12 +252,15 @@ def static_checks(tid, environ, gmod=None, patcher=None):
         lst = os.path.join(p.dir, "pipelines.kyplst")
         if os.path.isfile(lst):
             import hashlib
-            want = None
+            want, passed = None, False
             vp = lst + ".verified"
             if os.path.isfile(vp):
-                m = re.search(r"^sha256=(\w+)", open(vp).read(), re.M); want = m.group(1) if m else None
-            have = hashlib.sha256(open(lst, "rb").read()).hexdigest()
-            out.append(("pipeline list verified", "ok" if want == have else "fail", "pipelines.kyplst.verified matches" if want == have else ".verified missing or for other bytes: nps5 cache verify-list %s" % tid))
+                with open(vp) as f: rec = f.read()
+                m = re.search(r"^sha256=(\w+)", rec, re.M); want = m.group(1) if m else None
+                passed = re.search(r"^result=verify: no shader code in the list$", rec, re.M) is not None
+            with open(lst, "rb") as f: have = hashlib.sha256(f.read()).hexdigest()
+            good = want == have and passed
+            out.append(("pipeline list verified", "ok" if good else "fail", "pipelines.kyplst.verified matches" if good else ".verified missing, for other bytes or without a passed proof: nps5 cache verify-list %s" % tid))
     except g.Err:
         pass
     if patcher:
@@ -366,7 +393,8 @@ def render(res):
         o.append("  static %-24s %s  %s" % (s[0], s[1].upper(), s[2]))
     for x in res["routes"]:
         m = x["metrics"]
-        o.append("  route %-12s %-5s %s%s" % (x["name"], x["status"].upper(), ("p50 %.2f p95 %.2f ms stall %s ms; " % (m["p50"], m["p95"], m.get("stall_ms", "-"))) if "p95" in m else "", "; ".join(x["reasons"])))
+        o.append("  route %-12s %-5s %s%s%s" % (x["name"], x["status"].upper(), ("p50 %.2f p95 %.2f ms stall %s ms; " % (m["p50"], m["p95"], m.get("stall_ms", "-"))) if "p95" in m else "", "; ".join(x["reasons"]),
+                                         (" [not checked: %s]" % ", ".join(x["unchecked"])) if x.get("unchecked") else ""))
     o += ["  note: " + n for n in res["notes"]]
     if res.get("recorded"): o.append("  recorded in validated.tsv: " + res["recorded"].replace("\t", " "))
     if res.get("record_refused"): o.append("  NOT recorded: " + res["record_refused"])
@@ -378,6 +406,7 @@ def cmd_list(environ):
     g = runmod._game()
     import cache as cachemod
     cur = cachemod.stack_commits(environ)
+    cur["anyps5"] = runmod.commit_of(environ.get("NPS5_ANYPS5_DIR")) or "unknown"
     for tid, hits in sorted(g.find_all(environ).items()):
         p = g.Profile(*hits[0])
         sp = os.path.join(p.dir, "smoke.tsv")
@@ -387,7 +416,7 @@ def cmd_list(environ):
         print("%s%s: %d smoke route(s) (%s quick), baselines: %s" % (tid, " [provisional]" if p.provisional else "", len(rts), len(select_routes(rts, True)), ", ".join(bases) or "none"))
         for _, c in (p.optfile("validated.tsv") or []):
             f = dict(w.partition("=")[::2] for w in c[1].split()) if len(c) > 1 else {}
-            ok = all(cur.get(k, "x").startswith(f[k][:7]) or f[k].startswith(cur.get(k, "x")[:7]) for k in ("kyty", "kk", "ps5recomp") if k in f)
+            ok = all(cur.get(k, "x").startswith(f[k][:7]) or f[k].startswith(cur.get(k, "x")[:7]) for k in ("kyty", "anyps5", "kk", "ps5recomp") if k in f)
             print("  validated %-5s class=%-12s %s %s" % (c[0], f.get("class", "-"), f.get("date", "-"), "current" if ok else "OLD (stack moved since)"))
     return 0
 
@@ -412,6 +441,10 @@ def parse(argv):
     if len(pos) != 1 or pos[0] not in ("check", "baseline", "list"):
         raise RegressError("usage: nps5 regress check|baseline|list [--games ID,...] [--quick] [--record]; see --help")
     o["cmd"] = pos[0]
+    if not (0 <= o["tolerance"] < float("inf")):         # nan compares false with everything: no regression would ever be found
+        raise RegressError("--tolerance must be a percentage >= 0")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*", o["baseline"]):
+        raise RegressError("--baseline is a name (letters, digits, _ . + -), not a path")
     return o
 
 
@@ -447,6 +480,8 @@ def main(argv, environ=None, caller=subprocess.call, statics=None):
         print("nps5 regress: %s" % e, file=sys.stderr); return e.code
     except runmod.Refuse as e:
         print("nps5 regress: %s" % e, file=sys.stderr); return e.code
+    except OSError as e:
+        print("nps5 regress: %s" % e, file=sys.stderr); return 1
 
 
 if __name__ == "__main__":

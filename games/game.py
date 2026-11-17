@@ -125,7 +125,7 @@ class Profile:
 def _cols(v):
     return [x for x in v]
 
-def v_text(v, a): return None if any(x.strip() for x in v) or True else None
+def v_text(v, a): return None
 def v_id(v, a): return None if len(v) == 1 and re.fullmatch(r"[A-Z]{4}\d{5}", v[0]) else "title id like PPSA12345 expected"
 def v_int(v, a): return None if len(v) == 1 and re.fullmatch(r"\d+", v[0]) else "decimal integer expected"
 def v_hex(v, a): return None if len(v) == 1 and re.fullmatch(r"0x[0-9a-fA-F_]+", v[0]) else "0x-prefixed hex expected"
@@ -313,12 +313,15 @@ def check_profile(p, schema):
                 W("patches.py", None, "no literal BUILDS = {...} found; builds are not cross-checked")
             else:
                 bd = dict(builds)
+                if not isinstance(pb, dict): raise ValueError("BUILDS is not a dict")
                 for ver, eb in pb.items():
+                    if not (isinstance(eb, str) and re.fullmatch(r"[0-9a-f]{16,64}", eb)):      # '' or a short prefix would match other builds
+                        E("patches.py", None, "BUILDS %s=%r must be at least 16 lowercase hex digits" % (ver, eb)); continue
                     if ver not in bd: E("patches.py", None, "BUILDS version %s has no build row in game.tsv" % ver)
                     elif not (bd[ver].startswith(eb) or eb.startswith(bd[ver])): E("patches.py", None, "BUILDS %s=%s differs from game.tsv eboot=%s" % (ver, eb, bd[ver]))
                 for ver in bd:
                     if ver not in pb: W("patches.py", None, "build %s has no BUILDS entry" % ver)
-        except (SyntaxError, ValueError) as ex:
+        except (SyntaxError, ValueError, TypeError, RecursionError) as ex:
             E("patches.py", None, "cannot parse: %s" % ex)
     # scenes
     markers = {c[0] for c in p.get("marker") if c}
@@ -370,9 +373,24 @@ def check_profile(p, schema):
             else:
                 if c[2] not in ("quick", "full", "quick,full"): E(fname, n, "mode must be quick, full or quick,full")
                 if not re.fullmatch(r".+@\d+", c[3]): E(fname, n, "reach must be <until spec>@<s>")
+                else:
+                    reach = c[3].rsplit("@", 1)[0]
+                    if not UNTIL_RE.fullmatch(reach): E(fname, n, "bad reach target %r (an until spec as in scenes.tsv)" % reach)
+                    elif reach.startswith("marker:") and re.split(r"[+,]", reach[7:])[0] not in markers: E(fname, n, "marker %r is not defined" % re.split(r"[+,]", reach[7:])[0])
+                    if int(c[3].rsplit("@", 1)[1]) < 1: E(fname, n, "reach seconds must be at least 1")
                 if not c[4].isdigit() or not c[5].isdigit(): E(fname, n, "mem_max_mib and stall_ms_max must be decimal")
             h = _abs_hit(c)
             if h: E(fname, n, "absolute or personal path %r" % h)
+    # validated.tsv: mode <TAB> words; a row a tool cannot read is not a validation
+    for n, c in (p.optfile("validated.tsv") or []):
+        kv = dict(w.partition("=")[::2] for w in (c[1].split() if len(c) > 1 else []))
+        if len(c) != 2 or c[0] not in ("quick", "full"): E("validated.tsv", n, "needs <quick|full> <TAB> key=value words")
+        elif not (("kyty" in kv) != ("anyps5" in kv)): E("validated.tsv", n, "needs exactly one of kyty=<commit> or anyps5=<commit> (the back end that ran)")
+        elif not all(re.fullmatch(r"[0-9a-f]{7,40}(\+[0-9a-f]{8})?", kv.get(k, "")) for k in ("kyty" if "kyty" in kv else "anyps5", "kk", "ps5recomp")):
+            E("validated.tsv", n, "kyty= / anyps5=, kk= and ps5recomp= must be commits (7 to 40 hex, optionally +<8 hex>)")
+        elif not re.fullmatch(r"\d{4}-\d\d-\d\d", kv.get("date", "")): E("validated.tsv", n, "needs date=<YYYY-MM-DD>")
+        h = _abs_hit(c)
+        if h: E("validated.tsv", n, "absolute or personal path %r" % h)
     # stage evidence
     st = p.one("stage")
     if st in STAGES:

@@ -225,5 +225,16 @@ class Files(unittest.TestCase):
         self.assertEqual(v[0], W.BLACK)
 
 
+
+class TornLines(unittest.TestCase):
+    def test_torn_number_does_not_stop_the_watcher(self):
+        j = W.Judge(30)
+        for line in ("[pstat] wall=1 presents=1 luma=. black=0 sd=0 diff=0", "[pstat] wall=1.2.3 presents=1 luma=70 black=0 sd=0 diff=0",
+                     "[scene-open] map t=1.2.3", "[scene-open] map t=."):
+            j.feed_line(1.0, line)                       # raised ValueError before: the watcher died and the title ran on unwatched
+        j.feed_line(2.0, "[pstat] wall=2.0 presents=5 luma=70.0 black=0.02 sd=30.0 diff=1.0")
+        self.assertIsNotNone(j.t_pic)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -130,10 +130,31 @@ class CheckTests(Base):
             self.assertTrue(self.has(errs, need), need)
 
     def test_patches_builds_cross_check(self):
-        errs, _ = self.check(extra={"patches.py": "BUILDS = {'01.001': '0123456789abcdef', '03.1': 'aaaa'}\ndef main():\n    pass\n"})
+        errs, _ = self.check(extra={"patches.py": "BUILDS = {'01.001': '0123456789abcdef', '03.1': 'aaaaaaaaaaaaaaaa'}\ndef main():\n    pass\n"})
         self.assertTrue(self.has(errs, "BUILDS version 03.1"))
         errs, _ = self.check(extra={"patches.py": "BUILDS = {'01.001': 'ffffffffffffffff'}\n"})
         self.assertTrue(self.has(errs, "differs"))
+        for bad in ("''", "'0123'", "5"):           # an empty or short prefix is a prefix of every build ID
+            errs, _ = self.check(extra={"patches.py": "BUILDS = {'01.001': %s}\n" % bad})
+            self.assertTrue(self.has(errs, "at least 16 lowercase hex"), bad)
+        errs, _ = self.check(extra={"patches.py": "BUILDS = [1]\n"}); self.assertTrue(self.has(errs, "cannot parse"))
+
+    def test_smoke_reach_is_an_until_spec(self):
+        for bad, need in (("nonsense@60", "bad reach target"), ("marker:nomarker@60", "is not defined"), ("marker:worldmap@0", "at least 1")):
+            errs, _ = self.check(extra={"smoke.tsv": "s1\ttitle\tquick\t%s\t18000\t500\tok\n" % bad})
+            self.assertTrue(self.has(errs, need), bad)
+
+    def test_validated_rows_are_checked(self):
+        ok = "# c\nfull\tkyty=329f43a6 kk=8110779 ps5recomp=ce4c7dd lineage=kyty6+dr date=2026-11-17 class=m4pro-24g machine=Mac16,8 macos=26.6.2\n" \
+             "quick\tanyps5=abcdef1 kk=0123456789+89abcdef ps5recomp=ce4c7dd date=2026-11-17\n"
+        errs, _ = self.check(extra={"validated.tsv": ok}); self.assertEqual(errs, [])
+        for bad, need in (("full kyty=1234567 kk=1234567 ps5recomp=1234567 date=2026-11-17\n", "needs <quick|full>"),
+                          ("fast\tkyty=1234567 kk=1234567 ps5recomp=1234567 date=2026-11-17\n", "needs <quick|full>"),
+                          ("full\tkk=1234567 ps5recomp=1234567 date=2026-11-17\n", "exactly one of"),
+                          ("full\tkyty=1234567 anyps5=1234567 kk=1234567 ps5recomp=1234567 date=2026-11-17\n", "exactly one of"),
+                          ("full\tkyty=unknown kk=1234567 ps5recomp=1234567 date=2026-11-17\n", "must be commits"),
+                          ("full\tkyty=1234567 kk=1234567 ps5recomp=1234567 date=yesterday\n", "date=")):
+            errs, _ = self.check(extra={"validated.tsv": bad}); self.assertTrue(self.has(errs, need), bad)
 
 
 class EnvTests(Base):
