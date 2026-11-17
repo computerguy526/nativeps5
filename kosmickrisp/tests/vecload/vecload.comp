@@ -1,0 +1,19 @@
+#version 450
+// Vector SSBO loads against robustBufferAccess2 semantics (KosmicKrisp patch 0005).
+// binding 0 is bound with a range shorter than the buffer; binding 1 collects results.
+// Invocation i < 8 loads uvec4 element i, 8 <= i < 16 loads uvec2 element i-8 (view of the same binding),
+// 16 <= i < 24 loads uvec3-sized (three consecutive dwords, std430 struct) element i-16.
+layout(local_size_x = 32) in;
+layout(std430, set = 0, binding = 0) readonly buffer B4 { uvec4 v4[]; };
+layout(std430, set = 0, binding = 0) readonly buffer B2 { uvec2 v2[]; };
+struct T3 { uint a, b, c; };
+layout(std430, set = 0, binding = 0) readonly buffer B3 { T3 v3[]; };
+layout(std430, set = 0, binding = 1) writeonly buffer O { uvec4 o[]; };
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uvec4 r = uvec4(0xdeadbeefu);
+    if (i < 8u)       r = v4[i];
+    else if (i < 16u) r = uvec4(v2[i - 8u], 0u, 0u);
+    else if (i < 24u) { T3 t = v3[i - 16u]; r = uvec4(t.a, t.b, t.c, 0u); }
+    o[i] = r;
+}

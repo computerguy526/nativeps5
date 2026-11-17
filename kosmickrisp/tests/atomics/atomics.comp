@@ -1,0 +1,171 @@
+// 64-bit buffer words under contention (nativeps5, KosmicKrisp): plain 64-bit accesses (OP 12) and the
+// opt-in shaderBufferInt64Atomics (OP 0..11). No loop here waits on another invocation without a bound.
+// Compiled once per operation by run.sh: -DOP=<n> [-DBDA]. Every invocation applies one 64-bit atomic
+// to slot[hash(i) % slotCount] and records the value the atomic returned; atomics_test.c replays the
+// operands on the CPU. The operand and slot functions here and in atomics_test.c must stay identical.
+#version 460
+#extension GL_ARB_gpu_shader_int64 : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_KHR_memory_scope_semantics : require
+
+#define OP_ADD 0
+#define OP_UMIN 1
+#define OP_UMAX 2
+#define OP_SMIN 3
+#define OP_SMAX 4
+#define OP_AND 5
+#define OP_OR 6
+#define OP_XOR 7
+#define OP_XCHG 8
+#define OP_CAS 9
+#define OP_CASLOOP 10
+#define OP_LOADSTORE 11
+#define OP_PLAIN 12
+#define OP_CONTROL 13
+
+#if OP != OP_PLAIN && OP != OP_CONTROL
+#extension GL_EXT_shader_atomic_int64 : require
+#endif
+
+#if OP == OP_SMIN || OP == OP_SMAX
+#define T int64_t
+#else
+#define T uint64_t
+#endif
+
+layout(local_size_x = 64) in;
+
+// OP_PLAIN uses no 64-bit atomic: plain loads and stores of volatile 64-bit words.
+#if OP == OP_PLAIN || OP == OP_CONTROL
+#define SLOTS_QUALIFIER volatile
+#else
+#define SLOTS_QUALIFIER
+#endif
+
+#ifdef BDA
+layout(buffer_reference, std430, buffer_reference_align = 8) SLOTS_QUALIFIER buffer SlotsRef { T slot[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) volatile buffer HalvesRef { uint dword[]; };
+layout(push_constant) uniform PC { SlotsRef slots; uint slotCount; } pc;
+#define SLOT(s) pc.slots.slot[s]
+#else
+layout(set = 0, binding = 0, std430) SLOTS_QUALIFIER buffer Slots { T slot[]; } slots_;
+layout(push_constant) uniform PC { uint64_t unused; uint slotCount; } pc;
+#define SLOT(s) slots_.slot[s]
+#endif
+layout(set = 0, binding = 1, std430) buffer Out { uint64_t old[]; } out_;
+layout(set = 0, binding = 2, std430) buffer Stat { uint bad; uint loads; } stat_;
+
+uint hash(uint x) {
+    x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16;
+    return x;
+}
+
+uint64_t pack(uint hi, uint lo) { return (uint64_t(hi) << 32) | uint64_t(lo); }
+
+uint64_t operand(uint i) {
+    uint h1 = hash(2u * i + 1u), h2 = hash(2u * i + 2u);
+#if OP == OP_ADD || OP == OP_CASLOOP
+    return pack(h1 & 0xffu, 0xffffff00u | (h2 & 0xffu));           // carries into the high dword
+#elif OP == OP_UMIN || OP == OP_UMAX
+    return pack(h1 & 0x3ffu, h2);                                    // equal high dwords are common
+#elif OP == OP_SMIN || OP == OP_SMAX
+    return pack(uint(int(h1 & 0x3ffu) - 512), h2);                   // both signs
+#elif OP == OP_AND
+    return (h2 & 3u) == 0u ? ~(uint64_t(1) << (h1 & 63u)) : ~uint64_t(0);
+#elif OP == OP_OR
+    return (h2 & 3u) == 0u ? (uint64_t(1) << (h1 & 63u)) : uint64_t(0);
+#elif OP == OP_XOR
+    return pack(h1, h2);
+#else
+    return pack(~i, i);                                              // a token unique to the invocation
+#endif
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint s = hash(i ^ 0x9e3779b9u) % pc.slotCount;
+    uint64_t v = operand(i);
+#if OP == OP_ADD
+    out_.old[i] = atomicAdd(SLOT(s), v);
+#elif OP == OP_UMIN
+    out_.old[i] = atomicMin(SLOT(s), v);
+#elif OP == OP_UMAX
+    out_.old[i] = atomicMax(SLOT(s), v);
+#elif OP == OP_SMIN
+    out_.old[i] = uint64_t(atomicMin(SLOT(s), int64_t(v)));
+#elif OP == OP_SMAX
+    out_.old[i] = uint64_t(atomicMax(SLOT(s), int64_t(v)));
+#elif OP == OP_AND
+    out_.old[i] = atomicAnd(SLOT(s), v);
+#elif OP == OP_OR
+    out_.old[i] = atomicOr(SLOT(s), v);
+#elif OP == OP_XOR
+    out_.old[i] = atomicXor(SLOT(s), v);
+#elif OP == OP_XCHG
+    out_.old[i] = atomicExchange(SLOT(s), v);
+#elif OP == OP_CAS
+    out_.old[i] = atomicCompSwap(SLOT(s), uint64_t(0), v);           // one winner per slot
+#elif OP == OP_CASLOOP
+    // Lock-free add built from atomicLoad + atomicCompSwap; out = number of failed attempts.
+    // Bounded, so that a driver whose compare-exchange never succeeds fails the test instead of
+    // hanging the GPU: an invocation that gives up reports ~0 and its add is missing from the sum.
+    uint64_t tries = 0ul;
+    bool added = false;
+    for (uint k = 0u; k < 65536u && !added; k++) {
+        uint64_t seen = atomicLoad(SLOT(s), gl_ScopeDevice, gl_StorageSemanticsNone, gl_SemanticsRelaxed);
+        if (atomicCompSwap(SLOT(s), seen, seen + v) == seen) added = true;
+        else tries++;
+    }
+    out_.old[i] = added ? tries : ~0ul;
+#elif OP == OP_LOADSTORE
+    // Writers store words whose high dword is the complement of the low one; readers must never see
+    // a word made of two different stores.
+    for (uint k = 0u; k < 16u; k++) {
+        if ((i & 1u) != 0u) {
+            uint lo = hash(i * 16u + k);
+            atomicStore(SLOT(s), pack(~lo, lo), gl_ScopeDevice, gl_StorageSemanticsNone, gl_SemanticsRelaxed);
+        } else {
+            uint64_t seen = atomicLoad(SLOT(s), gl_ScopeDevice, gl_StorageSemanticsNone, gl_SemanticsRelaxed);
+            if (uint(seen >> 32) != ~uint(seen)) atomicAdd(stat_.bad, 1u);
+            atomicAdd(stat_.loads, 1u);
+        }
+    }
+    out_.old[i] = 0ul;
+#elif OP == OP_PLAIN
+    // The same with plain, naturally aligned 64-bit loads and stores (no 64-bit atomic, no driver lock):
+    // measures whether the GPU tears an aligned 8-byte access. This is what the AGC recompiler relies on
+    // when it lowers an atomic 64-bit load or store on a device without shaderBufferInt64Atomics.
+    for (uint k = 0u; k < 64u; k++) {
+        if ((i & 1u) != 0u) {
+            uint lo = hash(i * 64u + k);
+            SLOT(s) = pack(~lo, lo);
+        } else {
+            uint64_t seen = SLOT(s);
+            if (uint(seen >> 32) != ~uint(seen)) atomicAdd(stat_.bad, 1u);
+            atomicAdd(stat_.loads, 1u);
+        }
+        memoryBarrierBuffer();
+    }
+    out_.old[i] = 0ul;
+#elif OP == OP_CONTROL && defined(BDA)
+    // Negative control for OP_PLAIN: the writers store the two dwords separately, so readers must see
+    // torn words. Shows that the test can observe a tear at all.
+    HalvesRef halves = HalvesRef(uint64_t(pc.slots));
+    for (uint k = 0u; k < 64u; k++) {
+        if ((i & 1u) != 0u) {
+            uint lo = hash(i * 64u + k);
+            halves.dword[2u * s] = lo;
+            memoryBarrierBuffer();
+            halves.dword[2u * s + 1u] = ~lo;
+        } else {
+            uint64_t seen = SLOT(s);
+            if (uint(seen >> 32) != ~uint(seen)) atomicAdd(stat_.bad, 1u);
+            atomicAdd(stat_.loads, 1u);
+        }
+        memoryBarrierBuffer();
+    }
+    out_.old[i] = 0ul;
+#elif OP == OP_CONTROL
+    out_.old[i] = 0ul;      // the control only exists in the buffer_reference build
+#endif
+}

@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 23:19:03 +0000
+Subject: [PATCH] kosmickrisp: KK_MSL_OPT bit 128, coherent device pointers
+ only in shaders with plain device stores
+
+Atomics alone do not count as writes (KK already emits them through
+non-coherent device pointers). Opt-in: a plain load after the shader's own
+atomic write to the same address is then not protected from the macOS 26
+store-to-load miscompile that KK_WORKAROUND_6 covers.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/msl_private.h | 2 ++
+ src/kosmickrisp/compiler/nir_to_msl.c  | 9 +++++++--
+ src/kosmickrisp/compiler/nir_to_msl.h  | 5 +++++
+ 3 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/compiler/msl_private.h b/src/kosmickrisp/compiler/msl_private.h
+index 39ba386..3cbee2e 100644
+--- a/src/kosmickrisp/compiler/msl_private.h
++++ b/src/kosmickrisp/compiler/msl_private.h
+@@ -29,6 +29,8 @@ struct nir_to_msl_ctx {
+    uint32_t msl_opt;
+    /* The shader stores to or does atomics on device memory */
+    bool has_device_writes;
++   /* The shader has plain (non-atomic) stores to device memory */
++   bool has_device_stores;
+    bool uses_per_draw_data;
+    unsigned short indentlevel;
+    struct io_slot_info inputs_info[NUM_TOTAL_VARYING_SLOTS];
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index a24d1bd..170c4c9 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -1162,8 +1162,10 @@ global_access_qualifier(struct nir_to_msl_ctx *ctx,
+                         enum gl_access_qualifier access)
+ {
+    if (!(ctx->disabled_workarounds & BITFIELD64_BIT(6)) &&
+-       (ctx->has_device_writes ||
+-        !(ctx->msl_opt & KK_MSL_OPT_COHERENT_WRITERS)))
++       ((ctx->msl_opt & KK_MSL_OPT_COHERENT_STORES)
++           ? ctx->has_device_stores
++           : (ctx->has_device_writes ||
++              !(ctx->msl_opt & KK_MSL_OPT_COHERENT_WRITERS))))
+       return "coherent device";
+    if (access & ACCESS_VOLATILE) {
+       /* KK_WORKAROUND_15 */
+@@ -2724,6 +2726,9 @@ nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options)
+                continue;
+             switch (nir_instr_as_intrinsic(instr)->intrinsic) {
+             case nir_intrinsic_store_global:
++               ctx.has_device_stores = true;
++               ctx.has_device_writes = true;
++               break;
+             case nir_intrinsic_global_atomic:
+             case nir_intrinsic_global_atomic_swap:
+                ctx.has_device_writes = true;
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index bb016bc..6bfeafe 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -40,6 +40,11 @@ struct vk_color_attachment_location_state;
+ /* Guarded device loads as select(load(guard ? address : root), default)
+  * instead of a branch (msl_nir_select_guarded_loads). Result-preserving. */
+ #define KK_MSL_OPT_SELECT_LOADS     (1u << 6)
++/* KK_WORKAROUND_6 coherent pointers only in shaders with plain stores to
++ * device memory; atomics alone (which KK already emits through non-coherent
++ * device pointers) do not count. A plain load after the shader's own atomic
++ * write to the same address is then no longer protected. */
++#define KK_MSL_OPT_COHERENT_STORES  (1u << 7)
+ 
+ struct nir_to_msl_options {
+    void *mem_ctx;

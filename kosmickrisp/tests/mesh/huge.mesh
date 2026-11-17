@@ -1,0 +1,24 @@
+#version 450
+#extension GL_EXT_mesh_shader : require
+// Legal under the advertised limits (28 KiB of shared memory, 256 vertices) but not in Metal's single 32 KiB threadgroup budget
+// once the staged outputs are added: pipeline creation must fail cleanly (an error result, no crash), not hand Metal a function it rejects.
+layout(local_size_x = 256) in;
+layout(triangles, max_vertices = 256, max_primitives = 256) out;
+layout(location = 0) out vec4 vColor[];
+layout(location = 1) perprimitiveEXT out vec4 pColor[];
+shared vec4 scratch[1792];   // 28 KiB
+void main() {
+    const uint i = gl_LocalInvocationIndex;
+    SetMeshOutputsEXT(255, 85);
+    scratch[i] = vec4(float(i));
+    scratch[1536u + (i & 255u)] = vec4(1.0);
+    barrier();
+    if (i >= 255u) return;
+    const uint t = i / 3u, k = i % 3u;
+    gl_MeshVerticesEXT[i].gl_Position = vec4(float(k), float(t), 0.5, 1.0);
+    vColor[i] = scratch[1536u + i] + scratch[i];
+    if (k == 0u) {
+        gl_PrimitiveTriangleIndicesEXT[t] = uvec3(i, i + 1u, i + 2u);
+        pColor[t] = vec4(1.0);
+    }
+}

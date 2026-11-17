@@ -1,0 +1,40 @@
+#version 450
+#extension GL_EXT_mesh_shader : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_ballot : require
+// 64 invocations per workgroup, each writes one quad (4 vertices, 2 triangles) of an 8x8 grid.
+// Workgroup 0 fills the left half of the target, workgroup 1 the right half.
+// Exercises: workgroup memory + barrier, a storage buffer and a uniform buffer in the mesh stage,
+// gl_WorkGroupID, subgroup built-ins and a ballot, gl_CullPrimitiveEXT.
+layout(local_size_x = 64) in;
+layout(triangles, max_vertices = 256, max_primitives = 128) out;
+layout(location = 0) out vec4 vColor[];
+layout(location = 1) perprimitiveEXT out vec4 pColor[];
+layout(set = 0, binding = 0) readonly buffer Palette { vec4 colors[4]; } palette;
+layout(set = 0, binding = 1) uniform Params { vec4 primitiveColor; uint cullCell; } params;
+shared uint cells[64];
+void main() {
+    const uint i = gl_LocalInvocationIndex;
+    const uint g = gl_WorkGroupID.x;
+    SetMeshOutputsEXT(256, 128);
+    cells[i] = i;
+    barrier();
+    const uint neighbour = cells[i ^ 1u];      // written by another invocation
+    const uint self = neighbour ^ 1u;
+    // every invocation of a full subgroup votes; the ballot must have gl_SubgroupSize bits set
+    const uvec4 ballot = subgroupBallot(true);
+    const bool subgroupOk = gl_SubgroupSize == 32u && subgroupBallotBitCount(ballot) == 32u && gl_SubgroupInvocationID < 32u;
+    const vec4 c = subgroupOk ? palette.colors[(self + g) & 3u] : vec4(1.0, 0.0, 1.0, 1.0);
+    const float x0 = -1.0 + float(g) + float(self & 7u) / 8.0;
+    const float y0 = -1.0 + float(self >> 3u) / 4.0;
+    for (uint k = 0u; k < 4u; k++) {
+        gl_MeshVerticesEXT[i * 4u + k].gl_Position = vec4(x0 + float(k & 1u) / 8.0, y0 + float(k >> 1u) / 4.0, 0.25, 1.0);
+        vColor[i * 4u + k] = c;
+    }
+    gl_PrimitiveTriangleIndicesEXT[i * 2u] = uvec3(i * 4u, i * 4u + 1u, i * 4u + 2u);
+    gl_PrimitiveTriangleIndicesEXT[i * 2u + 1u] = uvec3(i * 4u + 1u, i * 4u + 3u, i * 4u + 2u);
+    pColor[i * 2u] = params.primitiveColor;
+    pColor[i * 2u + 1u] = params.primitiveColor;
+    gl_MeshPrimitivesEXT[i * 2u].gl_CullPrimitiveEXT = self == params.cullCell;
+    gl_MeshPrimitivesEXT[i * 2u + 1u].gl_CullPrimitiveEXT = false;
+}

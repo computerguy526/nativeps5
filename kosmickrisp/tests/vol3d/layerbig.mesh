@@ -1,0 +1,29 @@
+#version 450
+#extension GL_EXT_mesh_shader : require
+// The title's shape: 96 threads per group, 192 vertices / 64 primitives declared, 16 KiB of workgroup memory,
+// one workgroup per layer in Y. Each group emits 64 triangles (32 quads stacked over the target) into its layer.
+layout(local_size_x = 96) in;
+layout(triangles, max_vertices = 192, max_primitives = 64) out;
+layout(location = 0) flat out vec4 vColor[];
+layout(push_constant) uniform PC { vec4 color; } pc;
+shared uint scratch[4096];
+void main() {
+    const uint i = gl_LocalInvocationIndex;
+    for (uint k = i; k < 4096u; k += 96u) scratch[k] = k * 3u + gl_WorkGroupID.y;
+    barrier();
+    SetMeshOutputsEXT(192, 64);
+    // vertex i and i + 96: quad q = v / 4 (48 quads' worth of vertices, 32 used)
+    for (uint v = i; v < 192u; v += 96u) {
+        const uint q = v >> 2u, c = v & 3u;
+        const float y0 = -1.0 + 2.0 * float(q) / 32.0, y1 = -1.0 + 2.0 * float(q + 1u) / 32.0;
+        gl_MeshVerticesEXT[v].gl_Position = vec4((c & 1u) != 0u ? 1.0 : -1.0, (c & 2u) != 0u ? y1 : y0, 0.5, 1.0);
+        const uint check = scratch[(v * 17u) & 4095u] - ((v * 17u) & 4095u) * 3u;   // = gl_WorkGroupID.y
+        vColor[v] = vec4(pc.color.r, float(check) / 255.0, pc.color.b, 1.0);
+    }
+    if (i < 64u) {
+        const uint q = i >> 1u;
+        gl_PrimitiveTriangleIndicesEXT[i] = (i & 1u) == 0u ? uvec3(q * 4u, q * 4u + 1u, q * 4u + 2u) : uvec3(q * 4u + 2u, q * 4u + 1u, q * 4u + 3u);
+        gl_MeshPrimitivesEXT[i].gl_Layer = int(gl_WorkGroupID.y);
+        gl_MeshPrimitivesEXT[i].gl_CullPrimitiveEXT = false;
+    }
+}

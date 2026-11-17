@@ -1,0 +1,471 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 00:27:54 +0000
+Subject: [PATCH] kosmickrisp: KK_MSL_OPT bits 256 (one math_mode block per run
+ of statements) and 512 (coherent per address base)
+
+256: consecutive ALU statements with the same math mode share one
+'{ #pragma METAL fp math_mode }' block (register reads/writes may sit inside
+a run). Megakernel p020: 9,628 -> 1,911 blocks, MSL -23 %.
+
+512: msl_nir_mark_unwritten_loads traces every device address to the values
+its pointer bits come from and marks loads whose bases no store or atomic
+of the shader uses; KK_WORKAROUND_6 leaves those non-coherent. One buffer
+bound through two descriptors counts as two bases. Runs as the last SSA
+pass so the mark cannot make an earlier pass move a guarded load.
+
+Both opt-in.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ .../compiler/msl_nir_lower_common.c           | 275 ++++++++++++++++++
+ src/kosmickrisp/compiler/msl_private.h        |   2 +
+ src/kosmickrisp/compiler/nir_to_msl.c         |  56 ++++
+ src/kosmickrisp/compiler/nir_to_msl.h         |  12 +
+ src/kosmickrisp/vulkan/kk_shader.c            |   2 +-
+ 5 files changed, 346 insertions(+), 1 deletion(-)
+
+diff --git a/src/kosmickrisp/compiler/msl_nir_lower_common.c b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+index 77b1049..6c6aafc 100644
+--- a/src/kosmickrisp/compiler/msl_nir_lower_common.c
++++ b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+@@ -1174,3 +1174,278 @@ msl_nir_select_guarded_loads(nir_shader *nir)
+       progress |= select_loads_impl(impl);
+    return progress;
+ }
++
++/* KK_MSL_OPT_COHERENT_PER_BASE: which device loads can a store or atomic of
++ * the same shader not reach?
++ *
++ * Every device address is traced back to the values its pointer bits come
++ * from (its bases): 64-bit loads, the root table pointer, and 32-bit loads
++ * that are assembled into a pointer (shift by 32, or, pack). Offsets (values
++ * that are only widened and added) are ignored. Bases are compared by the
++ * structure of the expression that produced them, so two loads of the same
++ * descriptor slot are the same base. A load whose bases are all known and
++ * none of which is a base of any store/atomic in the shader is marked
++ * ACCESS_NON_WRITEABLE; KK_WORKAROUND_6 then leaves it non-coherent. If the
++ * bases of any write are unknown, nothing is marked.
++ *
++ * Limit: two different bases that point into the same memory (one buffer
++ * bound to two descriptors) are treated as distinct. */
++#define MSL_BASES_MAX 6
++
++struct msl_bases {
++   uint64_t key[MSL_BASES_MAX];
++   unsigned count;
++};
++
++static uint64_t
++msl_mix(uint64_t h, uint64_t v)
++{
++   h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
++   h *= 0xff51afd7ed558ccdull;
++   return h ^ (h >> 33);
++}
++
++/* Structural hash of the expression that computes def; 0 = not comparable. */
++static uint64_t
++msl_canon(struct hash_table *memo, nir_def *def, unsigned depth)
++{
++   struct hash_entry *e = _mesa_hash_table_search(memo, def);
++   if (e)
++      return (uint64_t)(uintptr_t)e->data;
++   uint64_t h = 0;
++   nir_instr *instr = nir_def_instr(def);
++   if (depth < 48) {
++      switch (instr->type) {
++      case nir_instr_type_load_const: {
++         nir_load_const_instr *lc = nir_instr_as_load_const(instr);
++         h = msl_mix(0x11, def->bit_size);
++         for (unsigned i = 0; i < def->num_components; i++)
++            h = msl_mix(h, nir_const_value_as_uint(lc->value[i], def->bit_size));
++         break;
++      }
++      case nir_instr_type_alu: {
++         nir_alu_instr *alu = nir_instr_as_alu(instr);
++         h = msl_mix(0x22, alu->op);
++         h = msl_mix(h, def->num_components);
++         for (unsigned s = 0; h && s < nir_op_infos[alu->op].num_inputs; s++) {
++            uint64_t c = msl_canon(memo, alu->src[s].src.ssa, depth + 1);
++            if (!c) {
++               h = 0;
++               break;
++            }
++            h = msl_mix(h, c);
++            for (unsigned i = 0; i < NIR_MAX_VEC_COMPONENTS; i++) {
++               if (nir_alu_instr_channel_used(alu, s, i))
++                  h = msl_mix(h, alu->src[s].swizzle[i] + 1);
++            }
++         }
++         break;
++      }
++      case nir_instr_type_intrinsic: {
++         nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++         switch (intr->intrinsic) {
++         case nir_intrinsic_load_buffer_ptr_kk:
++            h = msl_mix(0x33, nir_intrinsic_binding(intr));
++            break;
++         case nir_intrinsic_load_global:
++         case nir_intrinsic_load_global_constant:
++         case nir_intrinsic_load_global_constant_offset:
++         case nir_intrinsic_load_global_constant_bounded:
++            h = msl_mix(0x44, intr->intrinsic);
++            h = msl_mix(h, def->bit_size * 8 + def->num_components);
++            for (unsigned s = 0;
++                 h && s < nir_intrinsic_infos[intr->intrinsic].num_srcs; s++) {
++               uint64_t c = msl_canon(memo, intr->src[s].ssa, depth + 1);
++               h = c ? msl_mix(h, c) : 0;
++            }
++            break;
++         default:
++            break;
++         }
++         break;
++      }
++      default:
++         break;
++      }
++   }
++   if (h == 0 && instr->type == nir_instr_type_load_const)
++      h = 1;
++   _mesa_hash_table_insert(memo, def, (void *)(uintptr_t)h);
++   return h;
++}
++
++static bool
++msl_bases_add(struct msl_bases *set, uint64_t key)
++{
++   if (!key)
++      return false;
++   for (unsigned i = 0; i < set->count; i++) {
++      if (set->key[i] == key)
++         return true;
++   }
++   if (set->count == MSL_BASES_MAX)
++      return false;
++   set->key[set->count++] = key;
++   return true;
++}
++
++/* Collects the bases of def. `assembled`: def's bits are being assembled into
++ * a pointer, so narrow values count as pointer bits. False = unknown. */
++static bool
++msl_collect_bases(struct hash_table *memo, nir_def *def, bool assembled,
++                  struct msl_bases *set, unsigned depth)
++{
++   if (depth > 32)
++      return false;
++   const bool pointer_bits = assembled || def->bit_size == 64;
++   nir_instr *instr = nir_def_instr(def);
++   switch (instr->type) {
++   case nir_instr_type_load_const:
++      return true;
++   case nir_instr_type_alu: {
++      nir_alu_instr *alu = nir_instr_as_alu(instr);
++      nir_def *a = alu->src[0].src.ssa;
++      nir_def *b = nir_op_infos[alu->op].num_inputs > 1 ? alu->src[1].src.ssa
++                                                        : NULL;
++      switch (alu->op) {
++      case nir_op_iadd:
++         return msl_collect_bases(memo, a, assembled, set, depth + 1) &&
++                msl_collect_bases(memo, b, assembled, set, depth + 1);
++      case nir_op_isub:
++         return msl_collect_bases(memo, a, assembled, set, depth + 1);
++      case nir_op_ior:
++      case nir_op_ixor:
++      case nir_op_pack_64_2x32_split:
++         if (def->bit_size != 64 && !assembled)
++            return true;
++         return msl_collect_bases(memo, a, true, set, depth + 1) &&
++                msl_collect_bases(memo, b, true, set, depth + 1);
++      case nir_op_pack_64_2x32:
++      case nir_op_mov:
++      case nir_op_unpack_64_2x32_split_x:
++      case nir_op_unpack_64_2x32_split_y:
++         return msl_collect_bases(memo, a, pointer_bits, set, depth + 1);
++      case nir_op_ishl:
++         if (def->bit_size == 64 && nir_src_is_const(alu->src[1].src) &&
++             nir_src_as_uint(alu->src[1].src) == 32)
++            return msl_collect_bases(memo, a, true, set, depth + 1);
++         return !pointer_bits ? true : false;
++      case nir_op_u2u64:
++      case nir_op_i2i64:
++         /* A widened narrow value that is only added is an offset. */
++         if (!assembled)
++            return true;
++         return msl_collect_bases(memo, a, true, set, depth + 1);
++      default:
++         /* Other arithmetic: an offset when narrow, unknown when it makes
++          * pointer bits. */
++         return !pointer_bits;
++      }
++   }
++   case nir_instr_type_intrinsic: {
++      nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++      switch (intr->intrinsic) {
++      case nir_intrinsic_load_buffer_ptr_kk:
++         return msl_bases_add(set, msl_canon(memo, def, 0));
++      case nir_intrinsic_load_global:
++      case nir_intrinsic_load_global_constant:
++      case nir_intrinsic_load_global_constant_offset:
++      case nir_intrinsic_load_global_constant_bounded:
++         if (!pointer_bits)
++            return true;
++         return msl_bases_add(set, msl_canon(memo, def, 0));
++      default:
++         return !pointer_bits;
++      }
++   }
++   default:
++      return !pointer_bits;
++   }
++}
++
++bool
++msl_nir_mark_unwritten_loads(nir_shader *nir)
++{
++   struct hash_table *memo = _mesa_pointer_hash_table_create(NULL);
++   struct set *written = _mesa_set_create(NULL, _mesa_hash_u64, _mesa_key_u64_equal);
++   uint64_t *keys = NULL;
++   unsigned num_keys = 0, cap_keys = 0;
++   bool known = true, progress = false;
++
++   nir_foreach_function_impl(impl, nir) {
++      nir_foreach_block(block, impl) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_intrinsic)
++               continue;
++            nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++            nir_def *addr;
++            switch (intr->intrinsic) {
++            case nir_intrinsic_store_global:
++               addr = intr->src[1].ssa;
++               break;
++            case nir_intrinsic_global_atomic:
++            case nir_intrinsic_global_atomic_swap:
++               addr = intr->src[0].ssa;
++               break;
++            default:
++               continue;
++            }
++            struct msl_bases bases = {.count = 0};
++            if (!msl_collect_bases(memo, addr, false, &bases, 0) ||
++                bases.count == 0) {
++               known = false;
++               continue;
++            }
++            for (unsigned i = 0; i < bases.count; i++) {
++               if (num_keys == cap_keys) {
++                  cap_keys = cap_keys ? cap_keys * 2 : 64;
++                  keys = realloc(keys, cap_keys * sizeof(*keys));
++               }
++               keys[num_keys] = bases.key[i];
++               _mesa_set_add(written, &keys[num_keys]);
++               num_keys++;
++            }
++         }
++      }
++   }
++
++   /* The set stores pointers into `keys`, which realloc may have moved:
++    * rebuild it. */
++   _mesa_set_clear(written, NULL);
++   for (unsigned i = 0; i < num_keys; i++)
++      _mesa_set_add(written, &keys[i]);
++
++   if (known) {
++      nir_foreach_function_impl(impl, nir) {
++         nir_foreach_block(block, impl) {
++            nir_foreach_instr(instr, block) {
++               if (instr->type != nir_instr_type_intrinsic)
++                  continue;
++               nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++               if (intr->intrinsic != nir_intrinsic_load_global ||
++                   (nir_intrinsic_access(intr) &
++                    (ACCESS_ATOMIC | ACCESS_VOLATILE | ACCESS_COHERENT)))
++                  continue;
++               struct msl_bases bases = {.count = 0};
++               if (!msl_collect_bases(memo, intr->src[0].ssa, false, &bases,
++                                      0) ||
++                   bases.count == 0)
++                  continue;
++               bool hit = false;
++               for (unsigned i = 0; i < bases.count && !hit; i++)
++                  hit = _mesa_set_search(written, &bases.key[i]) != NULL;
++               if (hit)
++                  continue;
++               nir_intrinsic_set_access(intr, nir_intrinsic_access(intr) |
++                                                 ACCESS_NON_WRITEABLE);
++               progress = true;
++            }
++         }
++      }
++   }
++
++   free(keys);
++   _mesa_set_destroy(written, NULL);
++   _mesa_hash_table_destroy(memo, NULL);
++   return progress;
++}
+diff --git a/src/kosmickrisp/compiler/msl_private.h b/src/kosmickrisp/compiler/msl_private.h
+index 3cbee2e..4f20805 100644
+--- a/src/kosmickrisp/compiler/msl_private.h
++++ b/src/kosmickrisp/compiler/msl_private.h
+@@ -32,6 +32,8 @@ struct nir_to_msl_ctx {
+    /* The shader has plain (non-atomic) stores to device memory */
+    bool has_device_stores;
+    bool uses_per_draw_data;
++   /* Math mode of the open pragma block (KK_MSL_OPT_GROUP_PRAGMA) or NULL */
++   const char *open_math_mode;
+    unsigned short indentlevel;
+    struct io_slot_info inputs_info[NUM_TOTAL_VARYING_SLOTS];
+    struct io_slot_info outputs_info[NUM_TOTAL_VARYING_SLOTS];
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 170c4c9..ca93073 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -1162,6 +1162,8 @@ global_access_qualifier(struct nir_to_msl_ctx *ctx,
+                         enum gl_access_qualifier access)
+ {
+    if (!(ctx->disabled_workarounds & BITFIELD64_BIT(6)) &&
++       !((ctx->msl_opt & KK_MSL_OPT_COHERENT_PER_BASE) &&
++         (access & ACCESS_NON_WRITEABLE)) &&
+        ((ctx->msl_opt & KK_MSL_OPT_COHERENT_STORES)
+            ? ctx->has_device_stores
+            : (ctx->has_device_writes ||
+@@ -2252,9 +2254,52 @@ alu_fp_math_mode_pragma(struct nir_to_msl_ctx *ctx, const nir_alu_instr *alu)
+    return NULL;
+ }
+ 
++static void
++close_math_mode_block(struct nir_to_msl_ctx *ctx)
++{
++   if (ctx->open_math_mode) {
++      ctx->open_math_mode = NULL;
++      P_IND(ctx, "}\n");
++   }
++}
++
+ static void
+ instr_to_msl(struct nir_to_msl_ctx *ctx, nir_instr *instr)
+ {
++   if (ctx->msl_opt & KK_MSL_OPT_GROUP_PRAGMA) {
++      switch (instr->type) {
++      case nir_instr_type_alu: {
++         nir_alu_instr *alu = nir_instr_as_alu(instr);
++         const char *math_mode = alu_fp_math_mode_pragma(ctx, alu);
++         if (!math_mode || !ctx->open_math_mode ||
++             strcmp(math_mode, ctx->open_math_mode) != 0) {
++            close_math_mode_block(ctx);
++            if (math_mode) {
++               P_IND(ctx, "{\n");
++               P_IND(ctx, "#pragma METAL fp math_mode(%s)\n", math_mode);
++               ctx->open_math_mode = math_mode;
++            }
++         }
++         P_IND(ctx, "t%d = ", alu->def.index);
++         alu_to_msl(ctx, alu);
++         P(ctx, ";\n");
++         return;
++      }
++      case nir_instr_type_load_const:
++      case nir_instr_type_undef:
++         return;
++      case nir_instr_type_intrinsic: {
++         nir_intrinsic_op op = nir_instr_as_intrinsic(instr)->intrinsic;
++         if (op != nir_intrinsic_load_reg && op != nir_intrinsic_store_reg)
++            close_math_mode_block(ctx);
++         break;
++      }
++      default:
++         close_math_mode_block(ctx);
++         break;
++      }
++   }
++
+    switch (instr->type) {
+    case nir_instr_type_alu: {
+       nir_alu_instr *alu = nir_instr_as_alu(instr);
+@@ -2307,6 +2352,7 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+       nir_foreach_instr(instr, block) {
+          instr_to_msl(ctx, instr);
+       }
++      close_math_mode_block(ctx);
+       break;
+    }
+    case nir_cf_node_if: {
+@@ -2471,6 +2517,12 @@ msl_preprocess_nir(struct nir_shader *nir)
+ 
+ bool
+ msl_optimize_nir(struct nir_shader *nir)
++{
++   return msl_optimize_nir_opt(nir, 0);
++}
++
++bool
++msl_optimize_nir_opt(struct nir_shader *nir, uint32_t msl_opt)
+ {
+    bool progress;
+    NIR_PASS(_, nir, nir_lower_int64);
+@@ -2511,6 +2563,10 @@ msl_optimize_nir(struct nir_shader *nir)
+    NIR_PASS(_, nir, nir_opt_shrink_stores, false);
+    NIR_PASS(_, nir, nir_lower_load_const_to_scalar);
+    NIR_PASS(_, nir, msl_nir_lower_algebraic_late);
++   /* Last pass in SSA form: the mark must not let an earlier pass speculate
++    * or move a guarded load. */
++   if (msl_opt & KK_MSL_OPT_COHERENT_PER_BASE)
++      NIR_PASS(_, nir, msl_nir_mark_unwritten_loads);
+    NIR_PASS(_, nir, nir_convert_from_ssa, true, false);
+    NIR_PASS(_, nir, nir_trivialize_registers);
+    NIR_PASS(_, nir, nir_opt_copy_prop);
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index 6bfeafe..7ea118e 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -45,6 +45,16 @@ struct vk_color_attachment_location_state;
+  * device pointers) do not count. A plain load after the shader's own atomic
+  * write to the same address is then no longer protected. */
+ #define KK_MSL_OPT_COHERENT_STORES  (1u << 7)
++/* One '{ #pragma METAL fp math_mode(..) }' block for a run of consecutive
++ * statements with the same math mode instead of one block per statement
++ * (smaller MSL, shorter Metal compiles; same code). Register reads/writes
++ * (bit casts only) may sit inside a run. */
++#define KK_MSL_OPT_GROUP_PRAGMA     (1u << 8)
++/* KK_WORKAROUND_6 per load: a device load stays non-coherent when none of
++ * the bases of its address is a base of a store or atomic of the shader
++ * (msl_nir_mark_unwritten_loads). Limit: one buffer bound through two
++ * descriptors counts as two bases. */
++#define KK_MSL_OPT_COHERENT_PER_BASE (1u << 9)
+ 
+ struct nir_to_msl_options {
+    void *mem_ctx;
+@@ -64,6 +74,7 @@ char *nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options);
+ /* Call this after all API-specific lowerings. It will bring the NIR out of SSA
+  * at the end */
+ bool msl_optimize_nir(struct nir_shader *nir);
++bool msl_optimize_nir_opt(struct nir_shader *nir, uint32_t msl_opt);
+ 
+ /* Call this before all API-speicific lowerings, it will */
+ void msl_preprocess_nir(struct nir_shader *nir);
+@@ -121,6 +132,7 @@ bool msl_nir_fs_io_types(nir_shader *nir);
+ bool msl_nir_vs_io_types(nir_shader *nir);
+ bool msl_nir_fake_guard_for_discards(struct nir_shader *nir);
+ bool msl_nir_select_guarded_loads(struct nir_shader *nir);
++bool msl_nir_mark_unwritten_loads(struct nir_shader *nir);
+ bool msl_nir_lower_sample_shading(nir_shader *nir);
+ bool msl_nir_lower_barycentric_coord(nir_shader *nir);
+ void msl_nir_lower_clip_cull_distance(nir_shader *nir,
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 5c5028f..9c28bf3 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1187,7 +1187,7 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+    if (pdev->settings.msl_opt & KK_MSL_OPT_SELECT_LOADS)
+       NIR_PASS(_, nir, msl_nir_select_guarded_loads);
+ 
+-   msl_optimize_nir(nir);
++   msl_optimize_nir_opt(nir, pdev->settings.msl_opt);
+    modify_nir_info(nir);
+ 
+    struct nir_to_msl_options translate_options = {

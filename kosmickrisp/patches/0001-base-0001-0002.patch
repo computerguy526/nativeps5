@@ -1,0 +1,331 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 03:17:27 +0000
+Subject: [PATCH] base: 0001+0002
+
+---
+ src/kosmickrisp/bridge/mtl_compiler.h |   3 +
+ src/kosmickrisp/bridge/mtl_compiler.m | 245 +++++++++++++++++++++++++-
+ src/kosmickrisp/vulkan/kk_device.c    |   1 +
+ 3 files changed, 247 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.h b/src/kosmickrisp/bridge/mtl_compiler.h
+index d097653..c010165 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.h
++++ b/src/kosmickrisp/bridge/mtl_compiler.h
+@@ -18,6 +18,9 @@ enum mtl_pixel_format;
+ /* Compiler */
+ mtl_compiler *mtl_new_compiler(mtl_device *device);
+ 
++/* Write the KK_PIPELINE_ARCHIVE file if new pipelines were compiled. */
++void mtl_compiler_flush_archive(void);
++
+ /* Library */
+ mtl_library *
+ mtl_new_library(mtl_compiler *compiler, const char *src,
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index f0f6a61..ebbe142 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -12,6 +12,169 @@
+ #include <Metal/MTL4LibraryFunctionDescriptor.h>
+ #include <Metal/MTL4RenderPipeline.h>
+ #include <Metal/MTLDevice.h>
++#include <Metal/MTL4Archive.h>
++#include <Metal/MTL4Compiler.h>
++#include <Metal/MTL4PipelineDataSetSerializer.h>
++
++#include <stdlib.h>
++#include <pthread.h>
++#include <sys/sysctl.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <CommonCrypto/CommonDigest.h>
++#include "git_sha1.h"
++
++/* App-controlled persistent pipeline archive (nativeps5).
++ *
++ * KK_PIPELINE_ARCHIVE=<file> makes every MTL4Compiler record the pipelines it
++ * builds (descriptors plus GPU binaries) in an MTL4PipelineDataSetSerializer
++ * and look pipelines up in the archive loaded from <file> before compiling.
++ * The archive is rewritten by mtl_compiler_flush_archive() (compiler release
++ * and process exit) only when something new was compiled, so a warm launch
++ * never pays the Metal compile again even if the OS Metal cache was evicted.
++ * Unset: behaviour is unchanged. */
++static id<MTL4PipelineDataSetSerializer> kk_serializer;
++static id<MTL4Archive> kk_archive;
++static MTL4CompilerTaskOptions *kk_task_options;
++static NSURL *kk_archive_url;
++static pthread_mutex_t kk_archive_lock = PTHREAD_MUTEX_INITIALIZER;
++static uint32_t kk_archive_hits, kk_archive_misses;
++static bool kk_archive_dirty, kk_archive_atexit;
++static bool kk_archive_debug;
++
++static void
++kk_archive_log(const char *what, double ms)
++{
++   if (kk_archive_debug)
++      fprintf(stderr, "[kk-archive] %s %.2f ms (hits %u misses %u)\n", what, ms,
++              kk_archive_hits, kk_archive_misses);
++}
++
++static double
++kk_now_ms(void)
++{
++   return (double)clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1e6;
++}
++
++void
++mtl_compiler_flush_archive(void)
++{
++   @autoreleasepool {
++      pthread_mutex_lock(&kk_archive_lock);
++      if (kk_serializer && kk_archive_dirty) {
++         NSError *error = nil;
++         double t0 = kk_now_ms();
++         if ([kk_serializer serializeAsArchiveAndFlushToURL:kk_archive_url error:&error])
++            kk_archive_dirty = false;
++         else
++            fprintf(stderr, "[kk-archive] flush failed: %s\n",
++                    [error.localizedDescription UTF8String]);
++         kk_archive_log("flushed", kk_now_ms() - t0);
++      }
++      pthread_mutex_unlock(&kk_archive_lock);
++   }
++}
++
++static MTL4CompilerTaskOptions *
++kk_lookup_options(void)
++{
++   return kk_task_options;
++}
++
++/* Called after a pipeline was created: a lookup that took this long was a
++ * real compile, so the archive is stale. Archive hits are ~ms. */
++static void
++kk_note_pipeline(double ms)
++{
++   if (kk_archive_debug && ms > 1.0)
++      fprintf(stderr, "[kk-archive] pipeline %.1f ms\n", ms);
++   if (!kk_serializer)
++      return;
++   pthread_mutex_lock(&kk_archive_lock);
++   if (ms > 20.0) {
++      kk_archive_misses++;
++      kk_archive_dirty = true;
++   } else {
++      kk_archive_hits++;
++   }
++   pthread_mutex_unlock(&kk_archive_lock);
++}
++
++
++/* App-provided prebuilt Metal libraries (nativeps5).
++ *
++ * KK_METALLIB_DIR=<dir>: before compiling MSL, look for <dir>/<key>.metallib
++ * and load it with newLibraryWithURL (no MSL -> AIR compile, which Metal 4
++ * pipeline archives cannot persist). KK_MSL_COLLECT_DIR=<dir>: on a miss, write
++ * <key>.metal (+ <key>.opts) so an offline tool can build the metallib with
++ * Apple's toolchain (tools/kk-metallib/build_metallib.sh). The key hashes the
++ * MSL text, the compile options, the KosmicKrisp build, the macOS build and
++ * the GPU, so a stale library is never used after an OS/driver/GPU change.
++ * Both unset: behaviour is unchanged. */
++static const char *kk_metallib_dir, *kk_collect_dir;
++static bool kk_metallib_debug;
++static char kk_stamp[256];
++static pthread_once_t kk_metallib_once = PTHREAD_ONCE_INIT;
++static uint32_t kk_ml_hits, kk_ml_misses;
++
++static void
++kk_metallib_init(void)
++{
++   kk_metallib_dir = getenv("KK_METALLIB_DIR");
++   kk_collect_dir = getenv("KK_MSL_COLLECT_DIR");
++   if (kk_metallib_dir && !kk_metallib_dir[0])
++      kk_metallib_dir = NULL;
++   if (kk_collect_dir && !kk_collect_dir[0])
++      kk_collect_dir = NULL;
++   kk_metallib_debug = getenv("KK_METALLIB_DEBUG") != NULL;
++   char osbuild[64] = "?";
++   size_t len = sizeof(osbuild);
++   sysctlbyname("kern.osversion", osbuild, &len, NULL, 0);
++   snprintf(kk_stamp, sizeof(kk_stamp), "kk=%s%s;os=%s;", PACKAGE_VERSION, MESA_GIT_SHA1, osbuild);
++}
++
++static void
++kk_metallib_key(id<MTL4Compiler> comp, const char *src, int msl_version,
++                int math_mode, int math_fp_fns, char out[33])
++{
++   CC_SHA256_CTX c;
++   unsigned char d[CC_SHA256_DIGEST_LENGTH];
++   char opt[64];
++   CC_SHA256_Init(&c);
++   CC_SHA256_Update(&c, kk_stamp, (CC_LONG)strlen(kk_stamp));
++   const char *gpu = [[comp device].name UTF8String];
++   CC_SHA256_Update(&c, gpu, (CC_LONG)strlen(gpu));
++   snprintf(opt, sizeof(opt), ";msl=%x;math=%d;fp=%d;", msl_version, math_mode, math_fp_fns);
++   CC_SHA256_Update(&c, opt, (CC_LONG)strlen(opt));
++   CC_SHA256_Update(&c, src, (CC_LONG)strlen(src));
++   CC_SHA256_Final(d, &c);
++   for (int i = 0; i < 16; i++)
++      snprintf(out + i * 2, 3, "%02x", d[i]);
++}
++
++static void
++kk_collect_msl(const char *key, const char *src, int msl_version, int math_mode, int math_fp_fns)
++{
++   char path[1024], tmp[1100];
++   snprintf(path, sizeof(path), "%s/%s.metal", kk_collect_dir, key);
++   struct stat st;
++   if (stat(path, &st) == 0)
++      return;
++   mkdir(kk_collect_dir, 0755);
++   snprintf(tmp, sizeof(tmp), "%s.tmp%d", path, getpid());
++   FILE *f = fopen(tmp, "wb");
++   if (!f)
++      return;
++   fwrite(src, 1, strlen(src), f);
++   fclose(f);
++   rename(tmp, path);
++   snprintf(path, sizeof(path), "%s/%s.opts", kk_collect_dir, key);
++   f = fopen(path, "wb");
++   if (f) {
++      fprintf(f, "msl=%x\nmath=%d\nfp=%d\nstamp=%s\n", msl_version, math_mode, math_fp_fns, kk_stamp);
++      fclose(f);
++   }
++}
+ 
+ /* Compiler */
+ mtl_compiler *
+@@ -22,6 +185,41 @@ mtl_new_compiler(mtl_device *device)
+ 
+       MTL4CompilerDescriptor *desc = [[MTL4CompilerDescriptor new] autorelease];
+ 
++      const char *archive_path = getenv("KK_PIPELINE_ARCHIVE");
++      pthread_mutex_lock(&kk_archive_lock);
++      if (archive_path && archive_path[0] && !kk_serializer) {
++         kk_archive_debug = getenv("KK_PIPELINE_ARCHIVE_DEBUG") != NULL;
++         kk_archive_url = [[NSURL fileURLWithPath:[NSString stringWithUTF8String:archive_path]] retain];
++         NSError *aerr = nil;
++         MTL4PipelineDataSetSerializerDescriptor *sd = [[MTL4PipelineDataSetSerializerDescriptor new] autorelease];
++         /* CaptureBinaries only: combined with CaptureDescriptors the
++          * archive flush returns NO. */
++         sd.configuration = MTL4PipelineDataSetSerializerConfigurationCaptureBinaries;
++         kk_serializer = [dev newPipelineDataSetSerializerWithDescriptor:sd];
++         if ([[NSFileManager defaultManager] fileExistsAtPath:kk_archive_url.path]) {
++            double t0 = kk_now_ms();
++            kk_archive = [dev newArchiveWithURL:kk_archive_url error:&aerr];
++            if (kk_archive) {
++               kk_task_options = [MTL4CompilerTaskOptions new];
++               kk_task_options.lookupArchives = @[ kk_archive ];
++            } else {
++               fprintf(stderr, "[kk-archive] ignoring %s: %s\n", archive_path,
++                       [aerr.localizedDescription UTF8String]);
++               kk_archive_dirty = true;
++            }
++            kk_archive_log(kk_archive ? "loaded" : "rejected", kk_now_ms() - t0);
++         } else {
++            kk_archive_dirty = true;
++         }
++         if (!kk_archive_atexit) {
++            kk_archive_atexit = true;
++            atexit(mtl_compiler_flush_archive);
++         }
++      }
++      if (kk_serializer)
++         desc.pipelineDataSetSerializer = kk_serializer;
++      pthread_mutex_unlock(&kk_archive_lock);
++
+       NSError *error;
+       id<MTL4Compiler> compiler = [dev newCompilerWithDescriptor:desc error:&error];
+ 
+@@ -42,7 +240,42 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+ {
+    @autoreleasepool {
+       id<MTL4Compiler> comp = (id<MTL4Compiler>)compiler;
++      pthread_once(&kk_metallib_once, kk_metallib_init);
++      if (kk_metallib_dir || kk_collect_dir) {
++         char key[33];
++         kk_metallib_key(comp, src, (int)msl_version, (int)math_mode, (int)math_fp_fns, key);
++         if (kk_metallib_dir) {
++            char path[1024];
++            snprintf(path, sizeof(path), "%s/%s.metallib", kk_metallib_dir, key);
++            if (access(path, R_OK) == 0) {
++               double t0 = kk_now_ms();
++               NSError *lerr = nil;
++               id<MTLLibrary> prebuilt = [[comp device] newLibraryWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:path]]
++                                                                    error:&lerr];
++               if (prebuilt) {
++                  kk_ml_hits++;
++                  if (kk_metallib_debug)
++                     fprintf(stderr, "[kk-metallib] hit %s %.2f ms (%zu B msl, hits %u misses %u)\n", key,
++                             kk_now_ms() - t0, strlen(src), kk_ml_hits, kk_ml_misses);
++                  return prebuilt;
++               }
++               fprintf(stderr, "[kk-metallib] rejected %s: %s\n", path, [lerr.localizedDescription UTF8String]);
++            }
++         }
++         kk_ml_misses++;
++         if (kk_metallib_debug)
++            fprintf(stderr, "[kk-metallib] miss %s (%zu B msl)\n", key, strlen(src));
++         if (kk_collect_dir)
++            kk_collect_msl(key, src, (int)msl_version, (int)math_mode, (int)math_fp_fns);
++      }
+       NSString *ns_src = [NSString stringWithCString:src encoding:NSASCIIStringEncoding];
++      /* Benchmark aid: a unique trailing comment defeats the OS Metal
++       * function/library cache (keyed on the source text) to emulate an
++       * evicted or new-OS cache. Not for production use. */
++      const char *bust = getenv("KK_MSL_CACHE_BUST");
++      if (bust && bust[0])
++         ns_src = [ns_src stringByAppendingFormat:@"\n// bust %s\n", bust];
++      double lib_t0 = kk_now_ms();
+ 
+       MTLCompileOptions *opts = [[MTLCompileOptions new] autorelease];
+       opts.languageVersion = (MTLLanguageVersion)msl_version;
+@@ -55,6 +288,8 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+ 
+       NSError *error;
+       id<MTLLibrary> lib = [comp newLibraryWithDescriptor:desc error:&error];
++      if (kk_archive_debug)
++         fprintf(stderr, "[kk-archive] library %.1f ms (%zu B msl)\n", kk_now_ms() - lib_t0, strlen(src));
+ 
+       if (lib == nil) {
+          fprintf(stderr, "Failed to create MTLLibrary: %s\n", [error.localizedDescription UTF8String]);
+@@ -92,8 +327,11 @@ mtl_new_compute_pipeline_state(mtl_compiler *compiler,
+       desc.maxTotalThreadsPerThreadgroup = max_total_threads_per_threadgroup;
+ 
+       NSError *error;
+-      id<MTLComputePipelineState> pipeline = [comp newComputePipelineStateWithDescriptor:desc compilerTaskOptions:nil
++      double t0 = kk_now_ms();
++      id<MTLComputePipelineState> pipeline = [comp newComputePipelineStateWithDescriptor:desc
++                                                                     compilerTaskOptions:kk_lookup_options()
+                                                                                    error:&error];
++      kk_note_pipeline(kk_now_ms() - t0);
+ 
+       if (pipeline == nil) {
+          fprintf(stderr, "Failed to create MTLComputePipelineState: %s\n", [error.localizedDescription UTF8String]);
+@@ -192,8 +430,11 @@ mtl_new_render_pipeline(mtl_compiler *compiler, mtl_render_pass_descriptor *desc
+       MTL4RenderPipelineDescriptor *desc = (MTL4RenderPipelineDescriptor *)descriptor;
+ 
+       NSError *error = nil;
+-      id<MTLRenderPipelineState> pipeline = [comp newRenderPipelineStateWithDescriptor:desc compilerTaskOptions:nil
++      double t0 = kk_now_ms();
++      id<MTLRenderPipelineState> pipeline = [comp newRenderPipelineStateWithDescriptor:desc
++                                                                   compilerTaskOptions:kk_lookup_options()
+                                                                                  error:&error];
++      kk_note_pipeline(kk_now_ms() - t0);
+ 
+       if (pipeline == nil) {
+          fprintf(stderr, "Failed to create MTLRenderPipelineState: %s\n", [error.localizedDescription UTF8String]);
+diff --git a/src/kosmickrisp/vulkan/kk_device.c b/src/kosmickrisp/vulkan/kk_device.c
+index 17e9f10..bde824e 100644
+--- a/src/kosmickrisp/vulkan/kk_device.c
++++ b/src/kosmickrisp/vulkan/kk_device.c
+@@ -108,6 +108,7 @@ kk_release_compiler(struct kk_device *dev)
+ 
+       if (compiler->refcount == 0) {
+          _mesa_hash_table_remove(&compilers_ht, ent);
++         mtl_compiler_flush_archive();
+          mtl_release(compiler->handle);
+          ralloc_free(compiler);
+       }

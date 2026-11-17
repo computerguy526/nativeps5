@@ -1,0 +1,3586 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 21:08:36 +0000
+Subject: [PATCH] base: kk-bary working tree (patches 0003-0012)
+
+---
+ .nps5-patches                                 |    3 +
+ src/compiler/nir/nir_intrinsics.py            |   12 +
+ src/compiler/nir/nir_lower_explicit_io.c      |   54 +-
+ .../nir/nir_shader_compiler_options.h         |    5 +
+ src/kosmickrisp/bridge/mtl_compiler.h         |    9 +
+ src/kosmickrisp/bridge/mtl_compiler.m         |   21 +
+ src/kosmickrisp/bridge/mtl_encoder.h          |    8 +
+ src/kosmickrisp/bridge/mtl_encoder.m          |   43 +-
+ src/kosmickrisp/compiler/meson.build          |    1 +
+ src/kosmickrisp/compiler/msl_iomap.c          |  127 ++
+ .../compiler/msl_nir_lower_common.c           |   57 +-
+ src/kosmickrisp/compiler/msl_nir_lower_mesh.c | 1024 +++++++++++++++++
+ src/kosmickrisp/compiler/msl_private.h        |    7 +
+ src/kosmickrisp/compiler/msl_type_inference.c |   17 +
+ src/kosmickrisp/compiler/nir_to_msl.c         |  151 ++-
+ src/kosmickrisp/compiler/nir_to_msl.h         |    3 +
+ src/kosmickrisp/vulkan/kk_bo.c                |   67 +-
+ src/kosmickrisp/vulkan/kk_bo.h                |   27 +-
+ src/kosmickrisp/vulkan/kk_buffer.c            |    2 +
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c        |   17 +-
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h        |    2 +-
+ src/kosmickrisp/vulkan/kk_cmd_draw.c          |  125 +-
+ src/kosmickrisp/vulkan/kk_cmd_meta.c          |    7 +-
+ src/kosmickrisp/vulkan/kk_cmd_pool.c          |    3 +-
+ src/kosmickrisp/vulkan/kk_descriptor_set.c    |    3 +-
+ src/kosmickrisp/vulkan/kk_device_memory.c     |    6 +-
+ src/kosmickrisp/vulkan/kk_event.c             |    2 +-
+ src/kosmickrisp/vulkan/kk_image.c             |   15 +
+ .../vulkan/kk_nir_lower_descriptors.c         |    2 +
+ src/kosmickrisp/vulkan/kk_physical_device.c   |   55 +-
+ src/kosmickrisp/vulkan/kk_private.h           |    8 +
+ src/kosmickrisp/vulkan/kk_query_pool.c        |   52 +-
+ src/kosmickrisp/vulkan/kk_query_pool.h        |    8 +-
+ src/kosmickrisp/vulkan/kk_query_table.c       |    3 +-
+ src/kosmickrisp/vulkan/kk_shader.c            |  434 ++++++-
+ src/kosmickrisp/vulkan/kk_shader.h            |   18 +-
+ src/kosmickrisp/vulkan/kk_sync.c              |   20 +
+ src/kosmickrisp/vulkan/meson.build            |    2 +-
+ 38 files changed, 2312 insertions(+), 108 deletions(-)
+ create mode 100644 .nps5-patches
+ create mode 100644 src/kosmickrisp/compiler/msl_nir_lower_mesh.c
+
+diff --git a/.nps5-patches b/.nps5-patches
+new file mode 100644
+index 0000000..bcf8aa0
+--- /dev/null
++++ b/.nps5-patches
+@@ -0,0 +1,3 @@
++0001-kosmickrisp-persistent-mtl4-pipeline-archive.patch d5cff4e0baf9acd488337ba412cdc1fe777442d11388d1f95d38a85dbc439104
++0002-kosmickrisp-prebuilt-metallib-lookup-and-msl-collect.patch f7acb9a43285d8b73f23a844ecd85fbe5274ead365a4e308b76f37c8a83add64
++0003-kosmickrisp-ext-mesh-shader-metal-mesh-functions.patch a44388a2611332459a9a522ba03286be50acb515fef368782f64a4ef540c4784
+diff --git a/src/compiler/nir/nir_intrinsics.py b/src/compiler/nir/nir_intrinsics.py
+index 94b98cb..c535b49 100644
+--- a/src/compiler/nir/nir_intrinsics.py
++++ b/src/compiler/nir/nir_intrinsics.py
+@@ -3354,6 +3354,18 @@ intrinsic("load_sampler_handle_kk", [1], 1, [],
+ image("fence_kk")
+ # Store clip distance to vertex output.
+ store("clip_distance_kk", [], [BASE])
++
++# KosmicKrisp mesh shaders (Metal mesh functions). The lowering stages every
++# mesh output in workgroup memory and emits an epilogue that fills a
++# thread-local vertex / primitive struct with store_per_vertex_output /
++# store_per_primitive_output and then commits it:
++# src[0] = primitive count (mesh.set_primitive_count)
++intrinsic("mesh_set_primitive_count_kk", src_comp=[1])
++# src[0] = vertex index (mesh.set_vertex)
++intrinsic("mesh_commit_vertex_kk", src_comp=[1])
++# src[0] = primitive index, src[1] = its vertex indices (mesh.set_index per
++# vertex, then mesh.set_primitive)
++intrinsic("mesh_commit_primitive_kk", src_comp=[1, 0])
+ # System value indicating whether to emulate depth clamp.
+ system_value("is_depth_clamp_emulated_kk", 1, bit_sizes=[1])
+ # System value indicating whether to emulate the viewport Z transform.
+diff --git a/src/compiler/nir/nir_lower_explicit_io.c b/src/compiler/nir/nir_lower_explicit_io.c
+index 0a8aa0d..8a77d96 100644
+--- a/src/compiler/nir/nir_lower_explicit_io.c
++++ b/src/compiler/nir/nir_lower_explicit_io.c
+@@ -851,16 +851,25 @@ build_explicit_io_load(nir_builder *b, nir_intrinsic_instr *intrin,
+        */
+       nir_def *zero = nir_imm_zero(b, load->num_components, bit_size);
+ 
+-      /* TODO: Better handle block_intel. */
+-      assert(load->num_components == 1);
+-      const unsigned load_size = bit_size / 8;
+-      nir_push_if(b, addr_is_in_bounds(b, addr, addr_format, load_size));
++      /* Multi-component loads are only built by nir_lower_explicit_io_instr()
++       * under options->vectorize_bounded_explicit_io_loads, which wraps them
++       * in a single in-bounds check of the whole vector.
++       */
++      assert(load->num_components == 1 ||
++             b->shader->options->vectorize_bounded_explicit_io_loads);
++      if (load->num_components == 1) {
++         const unsigned load_size = bit_size / 8;
++         nir_push_if(b, addr_is_in_bounds(b, addr, addr_format, load_size));
+ 
+-      nir_builder_instr_insert(b, &load->instr);
++         nir_builder_instr_insert(b, &load->instr);
+ 
+-      nir_pop_if(b, NULL);
++         nir_pop_if(b, NULL);
+ 
+-      result = nir_if_phi(b, &load->def, zero);
++         result = nir_if_phi(b, &load->def, zero);
++      } else {
++         nir_builder_instr_insert(b, &load->instr);
++         result = &load->def;
++      }
+    } else {
+       nir_builder_instr_insert(b, &load->instr);
+       result = &load->def;
+@@ -1499,10 +1508,37 @@ nir_lower_explicit_io_instr(nir_builder *b,
+    switch (intrin->intrinsic) {
+    case nir_intrinsic_load_deref: {
+       nir_def *value;
++      /* Backend opt-in: keep tightly packed 2-4 component bounds-checked
++       * loads as vector loads.  The whole extent is checked once and, if
++       * entirely in range, loaded as one vector; any partially or fully out
++       * of range access takes the per-component path below, so the result is
++       * identical to scalarizing (per-component robustness2 granularity).
++       */
++      const bool vec_bounded =
++         scalarize && addr_format_needs_bounds_check(addr_format) &&
++         b->shader->options->vectorize_bounded_explicit_io_loads &&
++         !b->shader->options->has_load_global_bounded &&
++         util_bitcount(deref->modes) == 1 &&
++         vec_stride == scalar_size && intrin->num_components > 1 &&
++         intrin->def.bit_size != 1;
+       if (scalarize) {
+          nir_def *comps[NIR_MAX_VEC_COMPONENTS] = {
+             NULL,
+          };
++         nir_def *vec_value = NULL;
++         if (vec_bounded) {
++            nir_io_offset vaddr = build_addr(b, intrin, base_addr, addr_format,
++                                             0, align_mul, align_offset);
++            const unsigned vec_size = intrin->num_components * scalar_size;
++            nir_push_if(b, addr_is_in_bounds(b, vaddr.def, addr_format,
++                                             vec_size));
++            vec_value = build_explicit_io_load(b, intrin, vaddr, addr_format,
++                                               deref->modes, align_mul,
++                                               align_offset,
++                                               intrin->num_components, 0,
++                                               vec_size);
++            nir_push_else(b, NULL);
++         }
+          for (unsigned i = 0; i < intrin->num_components; i++) {
+             unsigned comp_offset = i * vec_stride;
+             nir_io_offset comp_addr =
+@@ -1516,6 +1552,10 @@ nir_lower_explicit_io_instr(nir_builder *b,
+                                               1, comp_offset, scalar_size);
+          }
+          value = nir_vec(b, comps, intrin->num_components);
++         if (vec_bounded) {
++            nir_pop_if(b, NULL);
++            value = nir_if_phi(b, vec_value, value);
++         }
+       } else {
+          nir_io_offset addr = build_addr(b, intrin, base_addr, addr_format, 0,
+                                          align_mul, align_offset);
+diff --git a/src/compiler/nir/nir_shader_compiler_options.h b/src/compiler/nir/nir_shader_compiler_options.h
+index 5bc0438..4931db7 100644
+--- a/src/compiler/nir/nir_shader_compiler_options.h
++++ b/src/compiler/nir/nir_shader_compiler_options.h
+@@ -739,6 +739,11 @@ typedef struct nir_shader_compiler_options {
+    /** Backend supports f2e4m3fn_satfn */
+    bool has_f2e4m3fn_satfn;
+ 
++   /** nir_lower_explicit_io keeps bounds-checked 2-4 component loads as one
++    * vector load behind a single whole-extent check, falling back to
++    * per-component checks only when the access is not entirely in range. */
++   bool vectorize_bounded_explicit_io_loads;
++
+    /** Backend supports load_global_bounded intrinsics. */
+    bool has_load_global_bounded;
+ 
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.h b/src/kosmickrisp/bridge/mtl_compiler.h
+index c010165..c036fed 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.h
++++ b/src/kosmickrisp/bridge/mtl_compiler.h
+@@ -40,6 +40,15 @@ mtl_new_compute_pipeline_state(mtl_compiler *compiler,
+ /* Render pipeline descriptor */
+ mtl_render_pipeline_descriptor *mtl_new_render_pipeline_descriptor(void);
+ 
++/* Mesh pipelines (MTL4MeshRenderPipelineDescriptor). The other
++ * mtl_render_pipeline_descriptor_set_* functions apply to both kinds, except
++ * the vertex shader and the input primitive topology. */
++mtl_render_pipeline_descriptor *mtl_new_mesh_render_pipeline_descriptor(void);
++
++void mtl_render_pipeline_descriptor_set_mesh_shader(
++   mtl_render_pipeline_descriptor *descriptor, mtl_function_descriptor *shader,
++   uint64_t max_total_threads_per_threadgroup);
++
+ void mtl_render_pipeline_descriptor_set_vertex_shader(
+    mtl_render_pipeline_descriptor *descriptor, mtl_function_descriptor *shader);
+ 
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index ebbe142..62e5a28 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -11,6 +11,7 @@
+ #include <Metal/MTL4LibraryDescriptor.h>
+ #include <Metal/MTL4LibraryFunctionDescriptor.h>
+ #include <Metal/MTL4RenderPipeline.h>
++#include <Metal/MTL4MeshRenderPipeline.h>
+ #include <Metal/MTLDevice.h>
+ #include <Metal/MTL4Archive.h>
+ #include <Metal/MTL4Compiler.h>
+@@ -350,6 +351,26 @@ mtl_new_render_pipeline_descriptor()
+    }
+ }
+ 
++mtl_render_pipeline_descriptor *
++mtl_new_mesh_render_pipeline_descriptor()
++{
++   @autoreleasepool {
++      return [MTL4MeshRenderPipelineDescriptor new];
++   }
++}
++
++void
++mtl_render_pipeline_descriptor_set_mesh_shader(mtl_render_pipeline_descriptor *descriptor,
++                                               mtl_function_descriptor *shader,
++                                               uint64_t max_total_threads_per_threadgroup)
++{
++   @autoreleasepool {
++      MTL4MeshRenderPipelineDescriptor *desc = (MTL4MeshRenderPipelineDescriptor *)descriptor;
++      desc.meshFunctionDescriptor = (MTL4FunctionDescriptor *)shader;
++      desc.maxTotalThreadsPerMeshThreadgroup = max_total_threads_per_threadgroup;
++   }
++}
++
+ void
+ mtl_render_pipeline_descriptor_set_vertex_shader(mtl_render_pipeline_descriptor *descriptor,
+                                                  mtl_function_descriptor *shader)
+diff --git a/src/kosmickrisp/bridge/mtl_encoder.h b/src/kosmickrisp/bridge/mtl_encoder.h
+index df900fe..a59f976 100644
+--- a/src/kosmickrisp/bridge/mtl_encoder.h
++++ b/src/kosmickrisp/bridge/mtl_encoder.h
+@@ -118,6 +118,14 @@ void mtl_set_depth_test_bounds(mtl_render_encoder *encoder, float min,
+ void mtl_set_vertex_amplification_count(mtl_render_encoder *encoder,
+                                         uint32_t *layer_ids, uint32_t id_count);
+ 
++/* Mesh draws: `groups` threadgroups of `threads` mesh threads each, no object
++ * stage. The indirect buffer holds three uint32 group counts. */
++void mtl_draw_mesh_threadgroups(mtl_render_encoder *encoder,
++                                struct mtl_size groups, struct mtl_size threads);
++
++void mtl_draw_mesh_threadgroups_indirect(mtl_render_encoder *encoder,
++                                         uint64_t addr, struct mtl_size threads);
++
+ void mtl_render_set_argument_table(mtl_render_encoder *encoder,
+                                    mtl_argument_table *table,
+                                    enum mtl_render_stages stages);
+diff --git a/src/kosmickrisp/bridge/mtl_encoder.m b/src/kosmickrisp/bridge/mtl_encoder.m
+index ae7a06a..f6a4c17 100644
+--- a/src/kosmickrisp/bridge/mtl_encoder.m
++++ b/src/kosmickrisp/bridge/mtl_encoder.m
+@@ -438,6 +438,30 @@ mtl_render_set_argument_table(mtl_render_encoder *encoder,
+    }
+ }
+ 
++void
++mtl_draw_mesh_threadgroups(mtl_render_encoder *encoder, struct mtl_size groups,
++                           struct mtl_size threads)
++{
++   @autoreleasepool {
++      id<MTL4RenderCommandEncoder> enc = (id<MTL4RenderCommandEncoder>)encoder;
++      [enc drawMeshThreadgroups:MTLSizeMake(groups.x, groups.y, groups.z)
++    threadsPerObjectThreadgroup:MTLSizeMake(1, 1, 1)
++      threadsPerMeshThreadgroup:MTLSizeMake(threads.x, threads.y, threads.z)];
++   }
++}
++
++void
++mtl_draw_mesh_threadgroups_indirect(mtl_render_encoder *encoder, uint64_t addr,
++                                    struct mtl_size threads)
++{
++   @autoreleasepool {
++      id<MTL4RenderCommandEncoder> enc = (id<MTL4RenderCommandEncoder>)encoder;
++      [enc drawMeshThreadgroupsWithIndirectBuffer:addr
++                      threadsPerObjectThreadgroup:MTLSizeMake(1, 1, 1)
++                        threadsPerMeshThreadgroup:MTLSizeMake(threads.x, threads.y, threads.z)];
++   }
++}
++
+ void
+ mtl_draw_primitives(mtl_render_encoder *encoder,
+                     enum mtl_primitive_type primitve_type, uint32_t vertexStart,
+@@ -506,6 +530,21 @@ mtl_draw_indexed_primitives_indirect(mtl_render_encoder *encoder,
+    }
+ }
+ 
++/* Relaxed timestamps are sampled at command encoder boundaries, so every timestamp written inside
++ * one encoder reads the same value. Precise ones can split the encoder, which gives each
++ * vkCmdWriteTimestamp its own value (what a profiler needs). KK_TS_RELAXED=1 selects Relaxed. */
++static MTL4TimestampGranularity
++nps5_ts_granularity(void)
++{
++   static int relaxed = -1;
++   if (relaxed < 0) {
++      const char *e = getenv("KK_TS_RELAXED");
++      relaxed = (e && *e && *e != '0') ? 1 : 0;
++   }
++   return relaxed ? MTL4TimestampGranularityRelaxed
++                  : MTL4TimestampGranularityPrecise;
++}
++
+ void
+ mtl_compute_write_timestamp(mtl_compute_encoder *encoder,
+                             mtl_counter_heap *heap, uint32_t index)
+@@ -514,7 +553,7 @@ mtl_compute_write_timestamp(mtl_compute_encoder *encoder,
+       id<MTL4ComputeCommandEncoder> enc =
+          (id<MTL4ComputeCommandEncoder>)encoder;
+       id<MTL4CounterHeap> h = (id<MTL4CounterHeap>)heap;
+-      [enc writeTimestampWithGranularity:MTL4TimestampGranularityRelaxed
++      [enc writeTimestampWithGranularity:nps5_ts_granularity()
+                                 intoHeap:h
+                                  atIndex:index];
+    }
+@@ -528,7 +567,7 @@ mtl_render_write_timestamp(mtl_render_encoder *encoder,
+    @autoreleasepool {
+       id<MTL4RenderCommandEncoder> enc = (id<MTL4RenderCommandEncoder>)encoder;
+       id<MTL4CounterHeap> h = (id<MTL4CounterHeap>)heap;
+-      [enc writeTimestampWithGranularity:MTL4TimestampGranularityRelaxed
++      [enc writeTimestampWithGranularity:nps5_ts_granularity()
+                               afterStage:(MTLRenderStages)stage
+                                 intoHeap:h
+                                  atIndex:index];
+diff --git a/src/kosmickrisp/compiler/meson.build b/src/kosmickrisp/compiler/meson.build
+index 91cb3f9..8e079d3 100644
+--- a/src/kosmickrisp/compiler/meson.build
++++ b/src/kosmickrisp/compiler/meson.build
+@@ -9,6 +9,7 @@ libmsl_compiler_files = files(
+     'msl_nir_gather_common.c',
+     'msl_nir_lower_common.c',
+     'msl_nir_lower_input_attachments.c',
++    'msl_nir_lower_mesh.c',
+     'msl_nir_lower_subgroups.c',
+ )
+ 
+diff --git a/src/kosmickrisp/compiler/msl_iomap.c b/src/kosmickrisp/compiler/msl_iomap.c
+index 669e655..bf36dfb 100644
+--- a/src/kosmickrisp/compiler/msl_iomap.c
++++ b/src/kosmickrisp/compiler/msl_iomap.c
+@@ -277,6 +277,15 @@ fs_input_block(nir_shader *shader, struct nir_to_msl_ctx *ctx)
+          fs_input_no_interpolant(ctx, location);
+    }
+ 
++   /* Only one [[barycentric_coord]] may exist per function: when perspective
++    * is also read it is the function parameter and linear uses alias it. */
++   if (BITSET_TEST(shader->info.system_values_read,
++                   SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD) &&
++       !BITSET_TEST(shader->info.system_values_read,
++                    SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD))
++      P_IND(ctx, "float3 gl_BaryCoordLinear "
++                 "[[barycentric_coord, center_no_perspective]];\n");
++
+    /* Enable reading from framebuffer */
+    u_foreach_bit64(location, shader->info.outputs_read) {
+       struct io_slot_info info = ctx->outputs_info[location];
+@@ -352,6 +361,22 @@ msl_nir_gather_io_info(nir_builder *b, nir_intrinsic_instr *intrin, void *data)
+          interp_intrin->intrinsic == nir_intrinsic_load_barycentric_at_offset;
+       break;
+    }
++   case nir_intrinsic_store_per_vertex_output:
++   case nir_intrinsic_store_per_primitive_output: {
++      unsigned component = nir_intrinsic_component(intrin);
++      struct nir_io_semantics io = nir_intrinsic_io_semantics(intrin);
++      unsigned location = nir_src_as_uint(intrin->src[2u]) + io.location;
++      ctx->output[location].type = nir_intrinsic_src_type(intrin);
++      ctx->output[location].per_primitive =
++         intrin->intrinsic == nir_intrinsic_store_per_primitive_output;
++      ctx->output[location].num_components =
++         MAX2(ctx->output[location].num_components,
++              intrin->num_components + component);
++      assert(ctx->output[location].num_components <= 4u &&
++             "Cannot have more than a vec4");
++      break;
++   }
++   case nir_intrinsic_load_per_primitive_input:
+    case nir_intrinsic_load_input: {
+       unsigned component = nir_intrinsic_component(intrin);
+       struct nir_io_semantics io = nir_intrinsic_io_semantics(intrin);
+@@ -426,6 +451,101 @@ msl_gather_io_info(struct nir_to_msl_ctx *ctx,
+                               nir_metadata_all, &gather_ctx);
+ }
+ 
++static bool
++mesh_slot_is_builtin_uint(unsigned location)
++{
++   return location == VARYING_SLOT_LAYER || location == VARYING_SLOT_VIEWPORT ||
++          location == VARYING_SLOT_PRIMITIVE_ID;
++}
++
++/* Generate the vertex and primitive structs of a mesh shader and the mesh type
++ * built from them */
++static void
++mesh_output_blocks(nir_shader *shader, struct nir_to_msl_ctx *ctx)
++{
++   unsigned clip_count = 0;
++   for (unsigned c = 0; c < 2; c++) {
++      struct io_slot_info info = ctx->outputs_info[VARYING_SLOT_CLIP_DIST0 + c];
++      if (info.num_components)
++         clip_count = c * 4 + info.num_components;
++   }
++
++   for (unsigned pass = 0; pass < 2; pass++) {
++      const bool per_primitive = pass == 1;
++      P(ctx, "struct %s {\n",
++        per_primitive ? "MeshPrimitiveOut" : "MeshVertexOut");
++      ctx->indentlevel++;
++      if (!per_primitive &&
++          !ctx->outputs_info[VARYING_SLOT_POS].num_components)
++         P_IND(ctx, "float4 position [[position]];\n");
++      if (per_primitive &&
++          !ctx->outputs_info[VARYING_SLOT_CULL_PRIMITIVE].num_components)
++         P_IND(ctx, "bool cull_primitive [[primitive_culled]];\n");
++      for (unsigned location = 0; location < NUM_TOTAL_VARYING_SLOTS;
++           location++) {
++         struct io_slot_info info = ctx->outputs_info[location];
++         if (!info.num_components || info.per_primitive != per_primitive)
++            continue;
++         if (location == VARYING_SLOT_CLIP_DIST0 ||
++             location == VARYING_SLOT_CLIP_DIST1)
++            continue;
++         if (location == VARYING_SLOT_CULL_PRIMITIVE) {
++            P_IND(ctx, "bool cull_primitive [[primitive_culled]];\n");
++            continue;
++         }
++         if (location == VARYING_SLOT_POS) {
++            P_IND(ctx, "float4 position [[position]];\n");
++            continue;
++         }
++         if (mesh_slot_is_builtin_uint(location) ||
++             location == VARYING_SLOT_PSIZ) {
++            P_IND(ctx, "%s ", location == VARYING_SLOT_PSIZ ? "float" : "uint");
++         } else {
++            P_IND(ctx, "%s%s ", alu_type_to_string(info.type),
++                  vector_suffixes[info.num_components]);
++         }
++         varying_slot_name(ctx, location, 0);
++         P(ctx, " ");
++         varying_slot_semantic(ctx, location, 0);
++         P(ctx, ";\n");
++      }
++      if (!per_primitive && clip_count)
++         P_IND(ctx, "float gl_ClipDistance [[clip_distance]] [%u];\n",
++               clip_count);
++      ctx->indentlevel--;
++      P(ctx, "};\n");
++   }
++
++   const char *topology = "triangle";
++   if (shader->info.mesh.primitive_type == MESA_PRIM_POINTS)
++      topology = "point";
++   else if (shader->info.mesh.primitive_type == MESA_PRIM_LINES)
++      topology = "line";
++   P(ctx,
++     "using KKMesh = metal::mesh<MeshVertexOut, MeshPrimitiveOut, %u, %u, "
++     "metal::topology::%s>;\n",
++     MAX2(shader->info.mesh.max_vertices_out, 1),
++     MAX2(shader->info.mesh.max_primitives_out, 1), topology);
++}
++
++uint32_t
++msl_mesh_output_name(struct nir_to_msl_ctx *ctx, unsigned location,
++                     unsigned component, bool per_primitive)
++{
++   P(ctx, per_primitive ? "kk_mp." : "kk_mv.");
++   if (location == VARYING_SLOT_CULL_PRIMITIVE) {
++      P(ctx, "cull_primitive");
++      return 1;
++   }
++   varying_slot_name(ctx, location, component);
++   if (location == VARYING_SLOT_POS)
++      return 4;
++   if (location == VARYING_SLOT_CULL_PRIMITIVE ||
++       location == VARYING_SLOT_PSIZ || mesh_slot_is_builtin_uint(location))
++      return 1;
++   return ctx->outputs_info[location].num_components;
++}
++
+ /* Generate all the struct definitions needed for shader I/O */
+ void
+ msl_emit_io_blocks(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+@@ -441,6 +561,9 @@ msl_emit_io_blocks(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+    case MESA_SHADER_COMPUTE:
+    case MESA_SHADER_TESS_CTRL:
+       break;
++   case MESA_SHADER_MESH:
++      mesh_output_blocks(shader, ctx);
++      break;
+    default:
+       assert(0);
+    }
+@@ -478,6 +601,10 @@ msl_emit_output_var(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+                FS_OUTPUT_NAME[location]);
+       }
+       break;
++   case MESA_SHADER_MESH:
++      P_IND(ctx, "MeshVertexOut kk_mv = {};\n");
++      P_IND(ctx, "MeshPrimitiveOut kk_mp = {};\n");
++      break;
+    default:
+       break;
+    }
+diff --git a/src/kosmickrisp/compiler/msl_nir_lower_common.c b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+index 757af5c..9844d66 100644
+--- a/src/kosmickrisp/compiler/msl_nir_lower_common.c
++++ b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+@@ -338,8 +338,10 @@ msl_disable_triangle_merge(nir_shader *nir)
+ 
+    nir_builder b = nir_builder_at(nir_before_impl(entrypoint));
+ 
++   /* INTERP_MODE_NONE (still the perspective builtin) marks a use that only
++    * looks at the sign: no need for the gl_FragCoord.w normalisation. */
+    nir_def *barycentric = nir_load_barycentric_coord_pixel(
+-      &b, 32u, .interp_mode = INTERP_MODE_SMOOTH);
++      &b, 32u, .interp_mode = INTERP_MODE_NONE);
+    BITSET_SET(nir->info.system_values_read,
+               SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD);
+ 
+@@ -992,3 +994,56 @@ msl_nir_lower_multisample_alpha(nir_shader *s, bool alpha_to_coverage,
+ 
+    return progress;
+ }
++
++/* Metal only has [[barycentric_coord]] at the pixel center. The other SPIR-V
++ * BaryCoord* flavours (centroid, per-sample, interpolateAt*) are expressed as
++ * a first-order extrapolation of the pixel barycentrics using screen-space
++ * derivatives: exact for no-perspective, a close approximation for
++ * perspective. Centroid maps to the pixel center (exact without MSAA). */
++static bool
++lower_barycentric_coord(nir_builder *b, nir_intrinsic_instr *intr,
++                        UNUSED void *data)
++{
++   nir_def *offset = NULL;
++   switch (intr->intrinsic) {
++   case nir_intrinsic_load_barycentric_coord_centroid:
++      break;
++   case nir_intrinsic_load_barycentric_coord_sample:
++      b->cursor = nir_before_instr(&intr->instr);
++      offset = nir_fadd_imm(
++         b, nir_load_sample_pos_from_id(b, 32u, nir_load_sample_id(b)), -0.5);
++      break;
++   case nir_intrinsic_load_barycentric_coord_at_sample:
++      b->cursor = nir_before_instr(&intr->instr);
++      offset = nir_fadd_imm(
++         b, nir_load_sample_pos_from_id(b, 32u, intr->src[0].ssa), -0.5);
++      break;
++   case nir_intrinsic_load_barycentric_coord_at_offset:
++      b->cursor = nir_before_instr(&intr->instr);
++      offset = intr->src[0].ssa;
++      break;
++   default:
++      return false;
++   }
++
++   b->cursor = nir_before_instr(&intr->instr);
++   nir_def *pixel = nir_load_barycentric_coord_pixel(
++      b, 32u, .interp_mode = nir_intrinsic_interp_mode(intr));
++   nir_def *res = pixel;
++   if (offset) {
++      res = nir_fadd(b, res,
++                     nir_fmul(b, nir_ddx(b, pixel), nir_channel(b, offset, 0)));
++      res = nir_fadd(b, res,
++                     nir_fmul(b, nir_ddy(b, pixel), nir_channel(b, offset, 1)));
++   }
++   nir_def_replace(&intr->def, res);
++   return true;
++}
++
++bool
++msl_nir_lower_barycentric_coord(nir_shader *nir)
++{
++   assert(nir->info.stage == MESA_SHADER_FRAGMENT);
++   return nir_shader_intrinsics_pass(nir, lower_barycentric_coord,
++                                     nir_metadata_control_flow, NULL);
++}
+diff --git a/src/kosmickrisp/compiler/msl_nir_lower_mesh.c b/src/kosmickrisp/compiler/msl_nir_lower_mesh.c
+new file mode 100644
+index 0000000..d6f3440
+--- /dev/null
++++ b/src/kosmickrisp/compiler/msl_nir_lower_mesh.c
+@@ -0,0 +1,1024 @@
++/*
++ * Copyright 2026 nativeps5 contributors
++ * SPDX-License-Identifier: MIT
++ */
++
++/* Mesh shaders for Metal.
++ *
++ * A Vulkan mesh shader writes its outputs as arrays: any invocation of the
++ * workgroup may write any component of any vertex or primitive, and
++ * SetMeshOutputsEXT gives the counts. A Metal mesh function instead hands whole
++ * structs to mesh.set_vertex(i, v) / mesh.set_primitive(i, p) and the index
++ * list to mesh.set_index().
++ *
++ * This pass (run while outputs are still variables) therefore:
++ *  - turns every output variable into workgroup (threadgroup) memory, so the
++ *    shader body keeps its array semantics and is lowered by the regular
++ *    shared-memory path,
++ *  - stages the SetMeshOutputsEXT counts in workgroup memory too,
++ *  - appends an epilogue behind a workgroup barrier: invocation i emits the
++ *    vertices and primitives i, i + N, i + 2N, ... (N = workgroup size) by
++ *    filling a thread-local struct (store_per_vertex_output /
++ *    store_per_primitive_output) and committing it (mesh_commit_*_kk).
++ *
++ * Direct outputs. Metal gives a mesh function 32 KiB of threadgroup memory
++ * for the shader's own workgroup memory and the staged outputs together. When
++ * the staged copy would not fit (or KK_MESH_DIRECT=1), the outputs of a class
++ * (per-vertex or per-primitive) are not staged if the shader's writes allow
++ * it: every access to an output is to element [f] where f is one of a few
++ * functions of the invocation alone (its local invocation index or its
++ * subgroup id and subgroup invocation, e.g. gl_MeshVerticesEXT[
++ * gl_LocalInvocationIndex]), and no two invocations can name the same element
++ * (checked by evaluating f for every invocation). Each invocation then owns
++ * the elements it names: they become function-local variables, and after the
++ * barrier the invocation commits its own elements itself. Outputs of the
++ * class that do not fit the pattern stay staged and are read back by the
++ * owner at commit, which is allowed only when the owners provably cover
++ * every element.
++ *
++ * Clip distances go to Metal's clip_distance array. Cull distances have no
++ * Metal equivalent; a primitive whose vertices all have a negative value for
++ * one cull distance is culled through primitive_culled, together with
++ * gl_CullPrimitiveEXT.
++ */
++
++#include "nir_to_msl.h"
++
++#include "nir.h"
++#include "nir_builder.h"
++#include "nir_constant_expressions.h"
++
++#include "util/u_dynarray.h"
++
++#define MESH_MAX_SLOTS     8
++#define MESH_EVAL_NODES    96
++#define MESH_SUBGROUP_SIZE 32
++
++enum mesh_class {
++   MESH_VERTEX,
++   MESH_PRIMITIVE,
++   MESH_CLASSES,
++};
++
++struct mesh_output {
++   nir_variable *var;
++   enum mesh_class cls;
++   /* Vectors/scalars per vertex or primitive: the length of the inner array,
++    * or 1 */
++   unsigned elems;
++   bool array;
++   /* Not staged: element [slot] of this invocation lives in priv[slot] */
++   bool direct;
++   nir_variable **priv;
++};
++
++struct cull_source {
++   struct mesh_output *out;
++   unsigned element;
++};
++
++/* One function of the invocation used as an output index */
++struct mesh_slot {
++   nir_def *expr;
++   uint32_t *values;
++};
++
++struct mesh_class_state {
++   bool direct;
++   bool subgroup_domain;
++   unsigned num_slots;
++   struct mesh_slot slots[MESH_MAX_SLOTS];
++   unsigned max_count;
++   const char *why;
++};
++
++/* An output access `var[index]` whose index is a function of the invocation */
++struct mesh_access {
++   nir_deref_instr *deref;
++   struct mesh_output *out;
++   uint32_t *values;
++   bool subgroup_domain;
++   unsigned slot;
++};
++
++struct mesh_lower_state {
++   /* Sized from the shader (no fixed cap: a release build has no assert to
++    * stop an overflow, and dropping outputs would silently corrupt them). */
++   struct mesh_output *outputs;
++   unsigned num_outputs;
++   nir_variable *counts;
++   struct mesh_output *indices;
++   struct mesh_output *cull_primitive;
++   struct cull_source *cull;
++   unsigned num_cull;
++   unsigned clip_size;
++   bool points;
++   unsigned threads;
++   struct mesh_class_state cls[MESH_CLASSES];
++};
++
++static bool
++retag_output_deref(nir_builder *b, nir_instr *instr, void *data)
++{
++   if (instr->type != nir_instr_type_deref)
++      return false;
++
++   nir_deref_instr *deref = nir_instr_as_deref(instr);
++   if (!(deref->modes & nir_var_shader_out))
++      return false;
++
++   deref->modes = nir_var_mem_shared;
++   return true;
++}
++
++static bool
++lower_set_counts(nir_builder *b, nir_intrinsic_instr *intr, void *data)
++{
++   struct mesh_lower_state *state = data;
++   if (intr->intrinsic != nir_intrinsic_set_vertex_and_primitive_count)
++      return false;
++
++   b->cursor = nir_before_instr(&intr->instr);
++   nir_store_array_var_imm(b, state->counts, 0, intr->src[0].ssa, 0x1);
++   nir_store_array_var_imm(b, state->counts, 1, intr->src[1].ssa, 0x1);
++   nir_instr_remove(&intr->instr);
++   return true;
++}
++
++static nir_alu_type
++io_type_for(const struct glsl_type *type)
++{
++   switch (glsl_get_base_type(type)) {
++   case GLSL_TYPE_FLOAT:
++      return nir_type_float32;
++   case GLSL_TYPE_FLOAT16:
++      return nir_type_float16;
++   case GLSL_TYPE_INT:
++      return nir_type_int32;
++   case GLSL_TYPE_UINT:
++      return nir_type_uint32;
++   case GLSL_TYPE_INT16:
++      return nir_type_int16;
++   case GLSL_TYPE_UINT16:
++      return nir_type_uint16;
++   case GLSL_TYPE_BOOL:
++      return nir_type_bool1;
++   default:
++      UNREACHABLE("Unsupported mesh output type");
++   }
++}
++
++/* Position of element `e` of a compact (clip/cull) array in the merged
++ * clip+cull numbering, or of a cull-only array behind the clip distances. */
++static bool
++compact_is_cull(const struct mesh_lower_state *state, const nir_variable *var,
++                unsigned e, unsigned *index)
++{
++   unsigned loc = var->data.location;
++   if (loc == VARYING_SLOT_CULL_DIST0 || loc == VARYING_SLOT_CULL_DIST1) {
++      *index = (loc - VARYING_SLOT_CULL_DIST0) * 4 + var->data.location_frac + e;
++      return true;
++   }
++
++   unsigned g = (loc - VARYING_SLOT_CLIP_DIST0) * 4 + var->data.location_frac + e;
++   if (state->clip_size && g >= state->clip_size) {
++      *index = g - state->clip_size;
++      return true;
++   }
++   *index = g;
++   return false;
++}
++
++static void
++emit_store(nir_builder *b, const struct mesh_lower_state *state, nir_def *value,
++           nir_def *index, unsigned location, unsigned component,
++           nir_alu_type type, bool per_primitive)
++{
++   if (location == VARYING_SLOT_PSIZ && !state->points)
++      return;
++
++   /* Metal has no shading rate or per-primitive viewport mask outputs */
++   if (location == VARYING_SLOT_PRIMITIVE_SHADING_RATE ||
++       location == VARYING_SLOT_VIEWPORT_MASK)
++      return;
++
++   if (location == VARYING_SLOT_LAYER || location == VARYING_SLOT_VIEWPORT ||
++       location == VARYING_SLOT_PRIMITIVE_ID)
++      type = nir_type_uint32;
++
++   const nir_io_semantics sem = {.location = location, .num_slots = 1};
++   if (per_primitive) {
++      nir_store_per_primitive_output(b, value, index, nir_imm_int(b, 0),
++                                     .component = component, .src_type = type,
++                                     .io_semantics = sem,
++                                     .write_mask =
++                                        BITFIELD_MASK(value->num_components));
++   } else {
++      nir_store_per_vertex_output(b, value, index, nir_imm_int(b, 0),
++                                  .component = component, .src_type = type,
++                                  .io_semantics = sem,
++                                  .write_mask =
++                                     BITFIELD_MASK(value->num_components));
++   }
++}
++
++/* Element `e` of vertex/primitive `index` of an output: from the staged
++ * array, or from this invocation's own copy for `slot`. */
++static nir_def *
++load_element(nir_builder *b, const struct mesh_output *out, nir_def *index,
++             unsigned slot, unsigned e)
++{
++   nir_deref_instr *elem =
++      out->direct
++         ? nir_build_deref_var(b, out->priv[slot])
++         : nir_build_deref_array(b, nir_build_deref_var(b, out->var), index);
++   if (out->array)
++      elem = nir_build_deref_array_imm(b, elem, e);
++   return nir_load_deref(b, elem);
++}
++
++/* Copies element `index` of one output into the thread-local output struct. */
++static void
++emit_output(nir_builder *b, const struct mesh_lower_state *state,
++            const struct mesh_output *out, nir_def *index, unsigned slot,
++            bool per_primitive)
++{
++   nir_variable *var = out->var;
++   const struct glsl_type *type = glsl_get_array_element(var->type);
++   unsigned location = var->data.location;
++
++   if (var->data.compact) {
++      assert(glsl_type_is_array(type));
++      for (unsigned e = 0; e < glsl_get_length(type); e++) {
++         unsigned g;
++         if (compact_is_cull(state, var, e, &g))
++            continue;
++         nir_def *value = load_element(b, out, index, slot, e);
++         emit_store(b, state, value, index, VARYING_SLOT_CLIP_DIST0 + g / 4,
++                    g % 4, nir_type_float32, per_primitive);
++      }
++   } else if (glsl_type_is_array(type)) {
++      const struct glsl_type *inner = glsl_get_array_element(type);
++      assert(glsl_type_is_vector_or_scalar(inner));
++      for (unsigned e = 0; e < glsl_get_length(type); e++) {
++         nir_def *value = load_element(b, out, index, slot, e);
++         emit_store(b, state, value, index, location + e,
++                    var->data.location_frac, io_type_for(inner), per_primitive);
++      }
++   } else {
++      assert(glsl_type_is_vector_or_scalar(type));
++      emit_store(b, state, load_element(b, out, index, slot, 0), index,
++                 location, var->data.location_frac, io_type_for(type),
++                 per_primitive);
++   }
++}
++
++static nir_def *
++load_cull_distance(nir_builder *b, const struct cull_source *src,
++                   nir_def *vertex)
++{
++   /* Always staged: read for the vertices of any primitive */
++   assert(!src->out->direct);
++   return load_element(b, src->out, vertex, 0, src->element);
++}
++
++/* ---- direct outputs: analysis ---- */
++
++struct eval_point {
++   uint32_t index;
++   uint32_t subgroup;
++   uint32_t subgroup_invocation;
++};
++
++struct eval_ctx {
++   const nir_shader *nir;
++   unsigned nodes;
++   bool uses_index;
++   bool uses_subgroup;
++};
++
++/* Value of `def` for one invocation, if it is a function of the invocation
++ * alone (constants, invocation system values and ALU on them). */
++static bool
++eval_def(struct eval_ctx *ctx, const struct eval_point *pt, nir_def *def,
++         nir_const_value *out)
++{
++   if (++ctx->nodes > MESH_EVAL_NODES)
++      return false;
++
++   nir_instr *instr = nir_def_instr(def);
++   switch (instr->type) {
++   case nir_instr_type_load_const: {
++      nir_load_const_instr *lc = nir_instr_as_load_const(instr);
++      for (unsigned c = 0; c < def->num_components; c++)
++         out[c] = lc->value[c];
++      return true;
++   }
++   case nir_instr_type_intrinsic: {
++      nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++      const uint16_t *size = ctx->nir->info.workgroup_size;
++      switch (intr->intrinsic) {
++      case nir_intrinsic_load_local_invocation_index:
++         ctx->uses_index = true;
++         out[0] = nir_const_value_for_uint(pt->index, def->bit_size);
++         return true;
++      case nir_intrinsic_load_local_invocation_id: {
++         ctx->uses_index = true;
++         const uint32_t sx = MAX2(size[0], 1), sy = MAX2(size[1], 1);
++         out[0] = nir_const_value_for_uint(pt->index % sx, def->bit_size);
++         out[1] = nir_const_value_for_uint((pt->index / sx) % sy, def->bit_size);
++         out[2] = nir_const_value_for_uint(pt->index / (sx * sy), def->bit_size);
++         return true;
++      }
++      case nir_intrinsic_load_subgroup_id:
++         ctx->uses_subgroup = true;
++         out[0] = nir_const_value_for_uint(pt->subgroup, def->bit_size);
++         return true;
++      case nir_intrinsic_load_subgroup_invocation:
++         ctx->uses_subgroup = true;
++         out[0] =
++            nir_const_value_for_uint(pt->subgroup_invocation, def->bit_size);
++         return true;
++      default:
++         return false;
++      }
++   }
++   case nir_instr_type_alu: {
++      nir_alu_instr *alu = nir_instr_as_alu(instr);
++      const nir_op_info *info = &nir_op_infos[alu->op];
++      nir_const_value src[NIR_ALU_MAX_INPUTS][NIR_MAX_VEC_COMPONENTS];
++      nir_const_value *srcs[NIR_ALU_MAX_INPUTS];
++      unsigned bit_size = 0;
++      if (!nir_alu_type_get_type_size(info->output_type))
++         bit_size = alu->def.bit_size;
++
++      for (unsigned i = 0; i < info->num_inputs; i++) {
++         nir_def *s = alu->src[i].src.ssa;
++         if (bit_size == 0 && !nir_alu_type_get_type_size(info->input_types[i]))
++            bit_size = s->bit_size;
++
++         nir_const_value value[NIR_MAX_VEC_COMPONENTS];
++         if (!eval_def(ctx, pt, s, value))
++            return false;
++         for (unsigned j = 0; j < nir_ssa_alu_instr_src_components(alu, i); j++)
++            src[i][j] = value[alu->src[i].swizzle[j]];
++         srcs[i] = src[i];
++      }
++      if (bit_size == 0)
++         bit_size = 32;
++
++      uint16_t poison = 0;
++      memset(out, 0, sizeof(*out) * alu->def.num_components);
++      nir_eval_const_opcode(alu->op, out, &poison, alu->def.num_components,
++                            bit_size, srcs,
++                            ctx->nir->info.float_controls_execution_mode);
++      return poison == 0;
++   }
++   default:
++      return false;
++   }
++}
++
++/* The value of an index for every invocation: `threads` values by local
++ * invocation index, or threads x 32 values by (subgroup id, subgroup
++ * invocation). Metal does not say how invocations map to SIMD groups, so the
++ * second form covers every pair an invocation could have. */
++static uint32_t *
++eval_index(const nir_shader *nir, void *mem_ctx, unsigned threads, nir_def *def,
++           bool *subgroup_domain)
++{
++   if (def->num_components != 1)
++      return NULL;
++
++   struct eval_ctx ctx = {.nir = nir};
++   struct eval_point pt = {0};
++   nir_const_value value[NIR_MAX_VEC_COMPONENTS];
++   if (!eval_def(&ctx, &pt, def, value))
++      return NULL;
++   if (ctx.uses_index && ctx.uses_subgroup)
++      return NULL;
++
++   *subgroup_domain = ctx.uses_subgroup;
++   const unsigned points = threads * (ctx.uses_subgroup ? MESH_SUBGROUP_SIZE : 1);
++   uint32_t *values = ralloc_array(mem_ctx, uint32_t, points);
++   for (unsigned p = 0; p < points; p++) {
++      if (ctx.uses_subgroup) {
++         pt.subgroup = p / MESH_SUBGROUP_SIZE;
++         pt.subgroup_invocation = p % MESH_SUBGROUP_SIZE;
++      } else {
++         pt.index = p;
++      }
++      ctx.nodes = 0;
++      if (!eval_def(&ctx, &pt, def, value))
++         return NULL;
++      const uint64_t v = nir_const_value_as_uint(value[0], def->bit_size);
++      values[p] = (uint32_t)MIN2(v, (uint64_t)UINT32_MAX);
++   }
++   return values;
++}
++
++static struct mesh_output *
++find_output(struct mesh_lower_state *state, const nir_variable *var)
++{
++   for (unsigned i = 0; i < state->num_outputs; i++) {
++      if (state->outputs[i].var == var)
++         return &state->outputs[i];
++   }
++   return NULL;
++}
++
++static bool
++use_is_load_or_store(nir_src *use)
++{
++   nir_instr *instr = nir_src_use_instr(use);
++   if (instr->type != nir_instr_type_intrinsic)
++      return false;
++   nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++   return intr->intrinsic == nir_intrinsic_load_deref ||
++          (intr->intrinsic == nir_intrinsic_store_deref &&
++           use == &intr->src[0]);
++}
++
++/* `deref` is var[index]: only whole-element loads and stores below it */
++static bool
++element_uses_are_simple(const struct mesh_output *out, nir_deref_instr *deref)
++{
++   nir_foreach_use_including_if(use, &deref->def) {
++      if (nir_src_is_if(use))
++         return false;
++      if (!out->array) {
++         if (!use_is_load_or_store(use))
++            return false;
++         continue;
++      }
++
++      nir_instr *instr = nir_src_use_instr(use);
++      if (instr->type != nir_instr_type_deref)
++         return false;
++      nir_deref_instr *inner = nir_instr_as_deref(instr);
++      if (inner->deref_type != nir_deref_type_array)
++         return false;
++      nir_foreach_use_including_if(inner_use, &inner->def) {
++         if (nir_src_is_if(inner_use) || !use_is_load_or_store(inner_use))
++            return false;
++      }
++   }
++   return true;
++}
++
++static unsigned
++type_bytes(const struct glsl_type *type)
++{
++   if (glsl_type_is_array(type))
++      return glsl_get_length(type) * type_bytes(glsl_get_array_element(type));
++   if (!glsl_type_is_vector_or_scalar(type))
++      return 0;
++   return glsl_get_vector_elements(type) *
++          (glsl_type_is_boolean(type) ? 4 : glsl_get_bit_size(type) / 8);
++}
++
++static unsigned
++find_slot(const struct mesh_class_state *cls, unsigned threads,
++          const uint32_t *values)
++{
++   const unsigned points =
++      threads * (cls->subgroup_domain ? MESH_SUBGROUP_SIZE : 1);
++   for (unsigned k = 0; k < cls->num_slots; k++) {
++      if (!memcmp(cls->slots[k].values, values, points * sizeof(uint32_t)))
++         return k;
++   }
++   return cls->num_slots;
++}
++
++/* No element is named by two invocations or by two indices of one. `owned`
++ * is the number of elements that are named at all. */
++static bool
++slots_are_disjoint(const struct mesh_lower_state *state,
++                   const struct mesh_class_state *cls, unsigned *owned)
++{
++   const unsigned points =
++      state->threads * (cls->subgroup_domain ? MESH_SUBGROUP_SIZE : 1);
++   BITSET_WORD *seen = rzalloc_array(state->outputs, BITSET_WORD,
++                                     BITSET_WORDS(MAX2(cls->max_count, 1u)));
++   bool disjoint = true;
++   *owned = 0;
++   for (unsigned k = 0; k < cls->num_slots && disjoint; k++) {
++      for (unsigned p = 0; p < points; p++) {
++         const uint32_t v = cls->slots[k].values[p];
++         if (v >= cls->max_count)
++            continue;
++         if (BITSET_TEST(seen, v)) {
++            disjoint = false;
++            break;
++         }
++         BITSET_SET(seen, v);
++         (*owned)++;
++      }
++   }
++   ralloc_free(seen);
++   return disjoint;
++}
++
++/* Decides per class whether its outputs can skip the staging, fills
++ * state->cls and the accesses to rewrite. */
++static void
++analyze_direct(nir_shader *nir, nir_function_impl *impl,
++               struct mesh_lower_state *state, struct util_dynarray *accesses)
++{
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr(instr, block) {
++         if (instr->type != nir_instr_type_deref)
++            continue;
++         nir_deref_instr *deref = nir_instr_as_deref(instr);
++
++         if (deref->deref_type == nir_deref_type_var) {
++            struct mesh_output *out = find_output(state, deref->var);
++            if (!out)
++               continue;
++            nir_foreach_use_including_if(use, &deref->def) {
++               if (nir_src_is_if(use) ||
++                   nir_src_use_instr(use)->type != nir_instr_type_deref ||
++                   nir_instr_as_deref(nir_src_use_instr(use))->deref_type !=
++                      nir_deref_type_array)
++                  out->direct = false;
++            }
++            continue;
++         }
++
++         nir_deref_instr *parent = nir_deref_instr_parent(deref);
++         if (!parent || parent->deref_type != nir_deref_type_var)
++            continue;
++         struct mesh_output *out = find_output(state, parent->var);
++         if (!out || !out->direct)
++            continue;
++
++         struct mesh_access access = {.deref = deref, .out = out};
++         if (deref->deref_type != nir_deref_type_array ||
++             !element_uses_are_simple(out, deref) ||
++             !(access.values =
++                  eval_index(nir, state->outputs, state->threads,
++                             deref->arr.index.ssa, &access.subgroup_domain))) {
++            out->direct = false;
++            continue;
++         }
++         util_dynarray_append(accesses, access);
++      }
++   }
++
++   for (unsigned c = 0; c < MESH_CLASSES; c++) {
++      struct mesh_class_state *cls = &state->cls[c];
++      bool all_direct = true;
++      unsigned owned = 0;
++
++      /* Output by output: it joins the direct ones if, with its indices
++       * added, still no two invocations (or two indices of one) can name the
++       * same element. */
++      for (unsigned i = 0; i < state->num_outputs; i++) {
++         struct mesh_output *out = &state->outputs[i];
++         if (out->cls != c)
++            continue;
++
++         const unsigned saved_slots = cls->num_slots;
++         const bool saved_domain = cls->subgroup_domain;
++         util_dynarray_foreach(accesses, struct mesh_access, access) {
++            if (access->out != out || !out->direct)
++               continue;
++            if (cls->num_slots &&
++                cls->subgroup_domain != access->subgroup_domain) {
++               out->direct = false;
++               break;
++            }
++            if (find_slot(cls, state->threads, access->values) <
++                cls->num_slots)
++               continue;
++            if (cls->num_slots == MESH_MAX_SLOTS) {
++               out->direct = false;
++               break;
++            }
++            cls->subgroup_domain = access->subgroup_domain;
++            cls->slots[cls->num_slots++] = (struct mesh_slot){
++               .expr = access->deref->arr.index.ssa,
++               .values = access->values,
++            };
++         }
++         if (out->direct && cls->num_slots != saved_slots &&
++             !slots_are_disjoint(state, cls, &owned))
++            out->direct = false;
++         if (!out->direct) {
++            cls->num_slots = saved_slots;
++            cls->subgroup_domain = saved_domain;
++            all_direct = false;
++         }
++      }
++
++      slots_are_disjoint(state, cls, &owned);
++      cls->direct = true;
++      cls->why = all_direct ? "all outputs" : "some outputs stay staged";
++      if (cls->num_slots == 0) {
++         cls->direct = false;
++         cls->why = "no output is indexed by the invocation alone, each "
++                    "element from one invocation";
++      } else if (!all_direct &&
++                 (cls->subgroup_domain || owned != cls->max_count)) {
++         /* A staged output is read back by the owner of the element at
++          * commit: every element needs one */
++         cls->direct = false;
++         cls->why = "an output needs staging and not every element has an "
++                    "owner";
++      }
++
++      for (unsigned i = 0; i < state->num_outputs; i++) {
++         if (state->outputs[i].cls == c && !cls->direct)
++            state->outputs[i].direct = false;
++      }
++      util_dynarray_foreach(accesses, struct mesh_access, access) {
++         if (access->out->cls == c && access->out->direct)
++            access->slot = find_slot(cls, state->threads, access->values);
++      }
++   }
++}
++
++/* Recreates an index expression at the cursor */
++static nir_def *
++rebuild_index(nir_builder *b, nir_def *def)
++{
++   nir_instr *instr = nir_def_instr(def);
++   switch (instr->type) {
++   case nir_instr_type_load_const:
++      return nir_build_imm(b, def->num_components, def->bit_size,
++                           nir_instr_as_load_const(instr)->value);
++   case nir_instr_type_intrinsic:
++      switch (nir_instr_as_intrinsic(instr)->intrinsic) {
++      case nir_intrinsic_load_local_invocation_index:
++         return nir_load_local_invocation_index(b);
++      case nir_intrinsic_load_local_invocation_id:
++         return nir_load_local_invocation_id(b);
++      case nir_intrinsic_load_subgroup_id:
++         return nir_load_subgroup_id(b);
++      case nir_intrinsic_load_subgroup_invocation:
++         return nir_load_subgroup_invocation(b);
++      default:
++         UNREACHABLE("not an invocation value");
++      }
++   case nir_instr_type_alu: {
++      nir_alu_instr *alu = nir_instr_as_alu(instr);
++      nir_def *src[NIR_ALU_MAX_INPUTS];
++      for (unsigned i = 0; i < nir_op_infos[alu->op].num_inputs; i++)
++         src[i] = rebuild_index(b, alu->src[i].src.ssa);
++      nir_alu_instr *clone = nir_alu_instr_clone(b->shader, alu);
++      for (unsigned i = 0; i < nir_op_infos[alu->op].num_inputs; i++)
++         clone->src[i].src = nir_src_for_ssa(src[i]);
++      nir_builder_instr_insert(b, &clone->instr);
++      return &clone->def;
++   }
++   default:
++      UNREACHABLE("not an invocation value");
++   }
++}
++
++/* Points every access of a direct output at the invocation's own copy */
++static void
++rewrite_direct(nir_function_impl *impl, struct mesh_lower_state *state,
++               struct util_dynarray *accesses)
++{
++   for (unsigned i = 0; i < state->num_outputs; i++) {
++      struct mesh_output *out = &state->outputs[i];
++      if (!out->direct)
++         continue;
++
++      /* Inner arrays stay arrays here: the caller lowers indirect accesses
++       * and splits them (kk_lower_nir) */
++      const struct glsl_type *type = glsl_get_array_element(out->var->type);
++      const unsigned slots = state->cls[out->cls].num_slots;
++      out->priv = rzalloc_array(state->outputs, nir_variable *, slots);
++      for (unsigned v = 0; v < slots; v++)
++         out->priv[v] = nir_local_variable_create(impl, type, "kk_mesh_own");
++   }
++
++   util_dynarray_foreach(accesses, struct mesh_access, access) {
++      struct mesh_output *out = access->out;
++      if (!out->direct)
++         continue;
++
++      nir_deref_instr *deref = access->deref;
++      nir_builder b = nir_builder_at(nir_before_instr(&deref->instr));
++      nir_deref_instr *own = nir_build_deref_var(&b, out->priv[access->slot]);
++      nir_def_rewrite_uses(&deref->def, &own->def);
++      nir_instr_remove(&deref->instr);
++      if (out->array) {
++         nir_foreach_use(use, &own->def)
++            nir_instr_as_deref(nir_src_use_instr(use))->modes = own->modes;
++      }
++   }
++
++   /* The output variables themselves are gone */
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr_safe(instr, block) {
++         if (instr->type != nir_instr_type_deref)
++            continue;
++         nir_deref_instr *deref = nir_instr_as_deref(instr);
++         if (deref->deref_type != nir_deref_type_var)
++            continue;
++         struct mesh_output *out = find_output(state, deref->var);
++         if (out && out->direct) {
++            assert(nir_def_is_unused(&deref->def));
++            nir_instr_remove(instr);
++         }
++      }
++   }
++   for (unsigned i = 0; i < state->num_outputs; i++) {
++      if (state->outputs[i].direct)
++         exec_node_remove(&state->outputs[i].var->node);
++   }
++}
++
++/* Vertex outputs of `vertex` into the output struct, then the commit */
++static void
++emit_vertex(nir_builder *b, const struct mesh_lower_state *state,
++            nir_def *vertex, unsigned slot)
++{
++   for (unsigned i = 0; i < state->num_outputs; i++) {
++      const struct mesh_output *out = &state->outputs[i];
++      if (out->cls != MESH_VERTEX)
++         continue;
++      emit_output(b, state, out, vertex, slot, false);
++   }
++   nir_mesh_commit_vertex_kk(b, vertex);
++}
++
++static void
++emit_primitive(nir_builder *b, const struct mesh_lower_state *state,
++               nir_def *primitive, unsigned slot, unsigned max_vertices,
++               unsigned prim_verts)
++{
++   for (unsigned i = 0; i < state->num_outputs; i++) {
++      const struct mesh_output *out = &state->outputs[i];
++      if (out->cls != MESH_PRIMITIVE || out == state->indices ||
++          out == state->cull_primitive)
++         continue;
++      emit_output(b, state, out, primitive, slot, true);
++   }
++
++   nir_def *indices;
++   if (state->indices) {
++      indices = load_element(b, state->indices, primitive, slot, 0);
++      /* A corrupt index must not reach set_index */
++      indices = nir_umin(
++         b, indices,
++         nir_imm_intN_t(b, MAX2(max_vertices, 1) - 1, indices->bit_size));
++   } else {
++      indices = nir_imm_zero(b, prim_verts, 32);
++   }
++
++   if (state->cull_primitive || state->num_cull) {
++      nir_def *culled = nir_imm_false(b);
++      if (state->cull_primitive)
++         culled = load_element(b, state->cull_primitive, primitive, slot, 0);
++      for (unsigned c = 0; c < state->num_cull; c++) {
++         nir_def *all_negative = nir_imm_true(b);
++         for (unsigned v = 0; v < indices->num_components; v++) {
++            nir_def *distance = load_cull_distance(
++               b, &state->cull[c], nir_channel(b, indices, v));
++            all_negative =
++               nir_iand(b, all_negative, nir_flt_imm(b, distance, 0.0));
++         }
++         culled = nir_ior(b, culled, all_negative);
++      }
++      emit_store(b, state, culled, primitive, VARYING_SLOT_CULL_PRIMITIVE, 0,
++                 nir_type_bool1, true);
++   }
++
++   nir_mesh_commit_primitive_kk(b, primitive, indices);
++}
++
++bool
++msl_nir_lower_mesh(nir_shader *nir, unsigned threadgroup_limit)
++{
++   assert(nir->info.stage == MESA_SHADER_MESH);
++   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
++
++   const uint32_t threads = MAX2(1u, (uint32_t)nir->info.workgroup_size[0] *
++                                        nir->info.workgroup_size[1] *
++                                        nir->info.workgroup_size[2]);
++   const uint32_t prim_verts =
++      mesa_vertices_per_prim(nir->info.mesh.primitive_type);
++
++   struct mesh_lower_state state = {
++      .clip_size = nir->info.clip_distance_array_size,
++      .points = nir->info.mesh.primitive_type == MESA_PRIM_POINTS,
++      .threads = threads,
++      .cls[MESH_VERTEX].max_count = nir->info.mesh.max_vertices_out,
++      .cls[MESH_PRIMITIVE].max_count = nir->info.mesh.max_primitives_out,
++   };
++
++   unsigned output_count = 0;
++   unsigned cull_capacity = 0;
++   nir_foreach_variable_with_modes(var, nir, nir_var_shader_out) {
++      output_count++;
++      if (var->data.compact)
++         cull_capacity += glsl_get_length(glsl_get_array_element(var->type));
++   }
++   state.outputs =
++      rzalloc_array(nir, struct mesh_output, MAX2(output_count, 1u));
++   state.cull = rzalloc_array(nir, struct cull_source, MAX2(cull_capacity, 1u));
++
++   /* What the staged copy of every output would take, next to the shader's
++    * own workgroup memory and the two counts */
++   unsigned staged_bytes = align(nir->info.shared_size, 16) + 8;
++   nir_foreach_variable_with_modes(var, nir, nir_var_shader_out) {
++      struct mesh_output *out = &state.outputs[state.num_outputs++];
++      const struct glsl_type *elem =
++         glsl_type_is_array(var->type) ? glsl_get_array_element(var->type)
++                                       : NULL;
++      *out = (struct mesh_output){
++         .var = var,
++         .cls = var->data.per_primitive ||
++                      var->data.location == VARYING_SLOT_PRIMITIVE_INDICES ||
++                      var->data.location == VARYING_SLOT_CULL_PRIMITIVE
++                   ? MESH_PRIMITIVE
++                   : MESH_VERTEX,
++         .array = elem && glsl_type_is_array(elem),
++         .elems = elem && glsl_type_is_array(elem) ? glsl_get_length(elem) : 1,
++      };
++      out->direct =
++         elem && glsl_type_is_vector_or_scalar(out->array
++                                                  ? glsl_get_array_element(elem)
++                                                  : elem);
++      staged_bytes += type_bytes(var->type);
++   }
++
++   for (unsigned i = 0; i < state.num_outputs; i++) {
++      struct mesh_output *out = &state.outputs[i];
++      nir_variable *var = out->var;
++
++      if (var->data.location == VARYING_SLOT_PRIMITIVE_INDICES)
++         state.indices = out;
++      else if (var->data.location == VARYING_SLOT_CULL_PRIMITIVE)
++         state.cull_primitive = out;
++      else if (var->data.compact) {
++         const struct glsl_type *elem = glsl_get_array_element(var->type);
++         for (unsigned e = 0; e < glsl_get_length(elem); e++) {
++            unsigned index;
++            if (compact_is_cull(&state, var, e, &index) &&
++                state.num_cull < cull_capacity) {
++               state.cull[state.num_cull++] =
++                  (struct cull_source){.out = out, .element = e};
++               /* Read for the vertices of any primitive: stays staged */
++               out->direct = false;
++            }
++         }
++      }
++   }
++
++   /* KK_MESH_DIRECT=1: direct outputs wherever the writes allow, 0: never.
++    * Default: only for a shader whose staged outputs do not fit. */
++   const char *direct_env = getenv("KK_MESH_DIRECT");
++   const bool want_direct = direct_env ? atoi(direct_env) != 0
++                                       : staged_bytes > threadgroup_limit;
++   struct util_dynarray accesses;
++   util_dynarray_init(&accesses, state.outputs);
++   if (want_direct) {
++      analyze_direct(nir, impl, &state, &accesses);
++      rewrite_direct(impl, &state, &accesses);
++   } else {
++      for (unsigned i = 0; i < state.num_outputs; i++)
++         state.outputs[i].direct = false;
++      state.cls[MESH_VERTEX].why = state.cls[MESH_PRIMITIVE].why =
++         "staging fits";
++   }
++
++   unsigned direct_outputs[MESH_CLASSES] = {0}, class_outputs[MESH_CLASSES] = {0};
++   for (unsigned i = 0; i < state.num_outputs; i++) {
++      class_outputs[state.outputs[i].cls]++;
++      direct_outputs[state.outputs[i].cls] += state.outputs[i].direct;
++   }
++   if (getenv("KK_MESH_DEBUG"))
++      fprintf(stderr,
++              "[kk-mesh] outputs: staged copy would need %u B with the "
++              "workgroup memory (limit %u); vertices %s (%u of %u outputs "
++              "direct, %u indices: %s), primitives %s (%u of %u outputs "
++              "direct, %u indices: %s)\n",
++              staged_bytes, threadgroup_limit,
++              state.cls[MESH_VERTEX].direct ? "direct" : "staged",
++              direct_outputs[MESH_VERTEX], class_outputs[MESH_VERTEX],
++              state.cls[MESH_VERTEX].num_slots, state.cls[MESH_VERTEX].why,
++              state.cls[MESH_PRIMITIVE].direct ? "direct" : "staged",
++              direct_outputs[MESH_PRIMITIVE], class_outputs[MESH_PRIMITIVE],
++              state.cls[MESH_PRIMITIVE].num_slots,
++              state.cls[MESH_PRIMITIVE].why);
++
++   for (unsigned i = 0; i < state.num_outputs; i++) {
++      if (!state.outputs[i].direct)
++         state.outputs[i].var->data.mode = nir_var_mem_shared;
++   }
++
++   nir_shader_instructions_pass(nir, retag_output_deref,
++                                nir_metadata_control_flow, NULL);
++
++   state.counts =
++      nir_variable_create(nir, nir_var_mem_shared,
++                          glsl_array_type(glsl_uint_type(), 2, 0),
++                          "kk_mesh_counts");
++   nir_shader_intrinsics_pass(nir, lower_set_counts, nir_metadata_control_flow,
++                              &state);
++
++   /* Prologue: no outputs unless SetMeshOutputsEXT runs. */
++   nir_builder b = nir_builder_at(nir_before_impl(impl));
++   for (unsigned i = 0; i < state.num_outputs; i++) {
++      const struct mesh_output *out = &state.outputs[i];
++      if (!out->direct)
++         continue;
++      /* An element this invocation owns but never wrote is undefined in
++       * Vulkan; give it a value all the same */
++      for (unsigned v = 0; v < state.cls[out->cls].num_slots; v++) {
++         const struct glsl_type *type = glsl_without_array(out->priv[v]->type);
++         const unsigned comps = glsl_get_vector_elements(type);
++         nir_def *zero = nir_imm_zero(&b, comps, glsl_get_bit_size(type));
++         for (unsigned e = 0; e < out->elems; e++) {
++            nir_deref_instr *own = nir_build_deref_var(&b, out->priv[v]);
++            if (out->array)
++               own = nir_build_deref_array_imm(&b, own, e);
++            nir_store_deref(&b, own, zero, BITFIELD_MASK(comps));
++         }
++      }
++   }
++   nir_def *invocation = nir_load_local_invocation_index(&b);
++   nir_push_if(&b, nir_ieq_imm(&b, invocation, 0));
++   {
++      nir_store_array_var_imm(&b, state.counts, 0, nir_imm_int(&b, 0), 0x1);
++      nir_store_array_var_imm(&b, state.counts, 1, nir_imm_int(&b, 0), 0x1);
++   }
++   nir_pop_if(&b, NULL);
++   nir_barrier(&b, .execution_scope = SCOPE_WORKGROUP,
++               .memory_scope = SCOPE_WORKGROUP,
++               .memory_semantics = NIR_MEMORY_ACQ_REL,
++               .memory_modes = nir_var_mem_shared);
++
++   /* Epilogue */
++   b.cursor = nir_after_impl(impl);
++   nir_barrier(&b, .execution_scope = SCOPE_WORKGROUP,
++               .memory_scope = SCOPE_WORKGROUP,
++               .memory_semantics = NIR_MEMORY_ACQ_REL,
++               .memory_modes = nir_var_mem_shared);
++   invocation = nir_load_local_invocation_index(&b);
++   nir_def *vertex_count =
++      nir_umin(&b, nir_load_array_var_imm(&b, state.counts, 0),
++               nir_imm_int(&b, nir->info.mesh.max_vertices_out));
++   nir_def *primitive_count =
++      nir_umin(&b, nir_load_array_var_imm(&b, state.counts, 1),
++               nir_imm_int(&b, nir->info.mesh.max_primitives_out));
++
++   nir_push_if(&b, nir_ieq_imm(&b, invocation, 0));
++   nir_mesh_set_primitive_count_kk(&b, primitive_count);
++   nir_pop_if(&b, NULL);
++
++   nir_variable *cursor =
++      nir_local_variable_create(impl, glsl_uint_type(), "kk_mesh_cursor");
++
++   if (state.cls[MESH_VERTEX].direct) {
++      /* Each invocation commits the vertices it owns */
++      for (unsigned k = 0; k < state.cls[MESH_VERTEX].num_slots; k++) {
++         nir_def *vertex = nir_u2u32(
++            &b, rebuild_index(&b, state.cls[MESH_VERTEX].slots[k].expr));
++         nir_push_if(&b, nir_ult(&b, vertex, vertex_count));
++         emit_vertex(&b, &state, vertex, k);
++         nir_pop_if(&b, NULL);
++      }
++   } else {
++      nir_store_var(&b, cursor, invocation, 0x1);
++      nir_push_loop(&b);
++      {
++         nir_def *vertex = nir_load_var(&b, cursor);
++         nir_break_if(&b, nir_uge(&b, vertex, vertex_count));
++         emit_vertex(&b, &state, vertex, 0);
++         nir_store_var(&b, cursor, nir_iadd_imm(&b, vertex, threads), 0x1);
++      }
++      nir_pop_loop(&b, NULL);
++   }
++
++   if (state.cls[MESH_PRIMITIVE].direct) {
++      for (unsigned k = 0; k < state.cls[MESH_PRIMITIVE].num_slots; k++) {
++         nir_def *primitive = nir_u2u32(
++            &b, rebuild_index(&b, state.cls[MESH_PRIMITIVE].slots[k].expr));
++         nir_push_if(&b, nir_ult(&b, primitive, primitive_count));
++         emit_primitive(&b, &state, primitive, k,
++                        nir->info.mesh.max_vertices_out, prim_verts);
++         nir_pop_if(&b, NULL);
++      }
++   } else {
++      nir_store_var(&b, cursor, invocation, 0x1);
++      nir_push_loop(&b);
++      {
++         nir_def *primitive = nir_load_var(&b, cursor);
++         nir_break_if(&b, nir_uge(&b, primitive, primitive_count));
++         emit_primitive(&b, &state, primitive, 0,
++                        nir->info.mesh.max_vertices_out, prim_verts);
++         nir_store_var(&b, cursor, nir_iadd_imm(&b, primitive, threads), 0x1);
++      }
++      nir_pop_loop(&b, NULL);
++   }
++
++   ralloc_free(state.outputs);
++   ralloc_free(state.cull);
++   return nir_progress(true, impl, nir_metadata_none);
++}
+diff --git a/src/kosmickrisp/compiler/msl_private.h b/src/kosmickrisp/compiler/msl_private.h
+index 75da653..e4981ef 100644
+--- a/src/kosmickrisp/compiler/msl_private.h
++++ b/src/kosmickrisp/compiler/msl_private.h
+@@ -16,6 +16,8 @@ struct io_slot_info {
+    bool centroid;
+    bool sample;
+    bool uses_interpolant;
++   /* Mesh shader output written per primitive */
++   bool per_primitive;
+ };
+ 
+ struct nir_to_msl_ctx {
+@@ -74,6 +76,11 @@ void msl_input_name(struct nir_to_msl_ctx *ctx, unsigned location,
+ void msl_output_name(struct nir_to_msl_ctx *ctx, unsigned location,
+                      unsigned component, bool from_input);
+ 
++/* Prints the thread-local mesh output struct member for a slot and returns its
++ * component count. */
++uint32_t msl_mesh_output_name(struct nir_to_msl_ctx *ctx, unsigned location,
++                              unsigned component, bool per_primitive);
++
+ uint32_t msl_input_num_components(struct nir_to_msl_ctx *ctx,
+                                   uint32_t location);
+ 
+diff --git a/src/kosmickrisp/compiler/msl_type_inference.c b/src/kosmickrisp/compiler/msl_type_inference.c
+index 12e46d5..f0bbd9b 100644
+--- a/src/kosmickrisp/compiler/msl_type_inference.c
++++ b/src/kosmickrisp/compiler/msl_type_inference.c
+@@ -275,6 +275,21 @@ static void
+ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
+ {
+    switch (instr->intrinsic) {
++   case nir_intrinsic_store_per_vertex_output:
++   case nir_intrinsic_store_per_primitive_output:
++      set_type(types, &instr->src[0],
++               ti_type_from_nir(nir_intrinsic_src_type(instr)));
++      set_type(types, &instr->src[1], TYPE_UINT);
++      break;
++   case nir_intrinsic_mesh_set_primitive_count_kk:
++   case nir_intrinsic_mesh_commit_vertex_kk:
++      set_type(types, &instr->src[0], TYPE_UINT);
++      break;
++   case nir_intrinsic_mesh_commit_primitive_kk:
++      set_type(types, &instr->src[0], TYPE_UINT);
++      set_type(types, &instr->src[1], TYPE_UINT);
++      break;
++   case nir_intrinsic_load_per_primitive_input:
+    case nir_intrinsic_load_input:
+    case nir_intrinsic_load_interpolated_input:
+    case nir_intrinsic_load_output: {
+@@ -408,6 +423,8 @@ infer_types_from_intrinsic(struct hash_table *types, nir_intrinsic_instr *instr)
+    case nir_intrinsic_load_sample_pos:
+    case nir_intrinsic_load_frag_coord:
+    case nir_intrinsic_load_barycentric_coord_pixel:
++   case nir_intrinsic_load_barycentric_coord_centroid:
++   case nir_intrinsic_load_barycentric_coord_sample:
+       set_type(types, &instr->def, TYPE_FLOAT);
+       break;
+    case nir_intrinsic_load_front_face:
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 98ff1e4..43380b0 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -20,6 +20,8 @@ get_stage_string(mesa_shader_stage stage)
+    case MESA_SHADER_COMPUTE:
+    case MESA_SHADER_TESS_CTRL:
+       return "kernel";
++   case MESA_SHADER_MESH:
++      return "[[mesh]]";
+    default:
+       assert(0);
+       return "";
+@@ -80,6 +82,12 @@ emit_sysvals(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+    unsigned i;
+    BITSET_FOREACH_SET(i, shader->info.system_values_read, SYSTEM_VALUE_MAX) {
+       const char *sysval;
++      /* Metal allows a single [[barycentric_coord]] per function. The
++       * no-perspective flavour goes in the stage_in struct (see
++       * fs_input_block) because only struct members take an interpolation
++       * qualifier. */
++      if (i == SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD)
++         continue;
+       if (is_frag_with_post_depth_coverage && i == SYSTEM_VALUE_SAMPLE_MASK_IN)
+          sysval = sysval_sample_mask_in_post_depth_coverage;
+       else
+@@ -97,6 +105,9 @@ emit_inputs(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+    case MESA_SHADER_FRAGMENT:
+       P_IND(ctx, "FragmentIn in [[stage_in]],\n");
+       break;
++   case MESA_SHADER_MESH:
++      P_IND(ctx, "KKMesh mesh_out,\n");
++      break;
+    default:
+       break;
+    }
+@@ -1226,7 +1237,24 @@ intrinsic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+       P(ctx, "gl_PrimitiveID;\n");
+       break;
+    case nir_intrinsic_load_barycentric_coord_pixel:
+-      P(ctx, "gl_BaryCoord;\n");
++      /* centroid/sample/at_* variants were lowered to this one. */
++      if (nir_intrinsic_interp_mode(instr) == INTERP_MODE_SMOOTH) {
++         /* KK_WORKAROUND_BARY: Metal returns perspective [[barycentric_coord]]
++          * un-normalised (b0, b1 = l_i / w_i, b2 = 1 - b0 - b1) unless the
++          * fragment reads [[position]].w. A real (safe-math, so not folded)
++          * use of gl_FragCoord.w makes the compiler normalise them. */
++         P(ctx, "gl_BaryCoord;\n");
++         P_IND(ctx, "{\n");
++         P_IND(ctx, "#pragma METAL fp math_mode(safe)\n");
++         P_IND(ctx, "t%d += float3(gl_FragCoord.w * 0.0f);\n", instr->def.index);
++         P_IND(ctx, "}\n");
++      } else if (nir_intrinsic_interp_mode(instr) == INTERP_MODE_NOPERSPECTIVE &&
++          !BITSET_TEST(ctx->shader->info.system_values_read,
++                       SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD)) {
++         P(ctx, "in.gl_BaryCoordLinear;\n");
++      } else {
++         P(ctx, "gl_BaryCoord;\n");
++      }
+       break;
+    case nir_intrinsic_load_sample_pos:
+       P(ctx, "get_sample_position(gl_SampleID);\n");
+@@ -1251,6 +1279,7 @@ intrinsic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+       P(ctx, ";\n");
+       break;
+    }
++   case nir_intrinsic_load_per_primitive_input:
+    case nir_intrinsic_load_input: {
+       unsigned idx = nir_src_as_uint(instr->src[0u]);
+       nir_io_semantics io = nir_intrinsic_io_semantics(instr);
+@@ -1777,6 +1806,69 @@ intrinsic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+       src_to_msl(ctx, &instr->src[0]);
+       P(ctx, ");\n");
+       break;
++   case nir_intrinsic_store_per_vertex_output:
++   case nir_intrinsic_store_per_primitive_output: {
++      bool per_primitive =
++         instr->intrinsic == nir_intrinsic_store_per_primitive_output;
++      nir_io_semantics io = nir_intrinsic_io_semantics(instr);
++      uint32_t location = io.location + nir_src_as_uint(instr->src[2]);
++      uint32_t component = nir_intrinsic_component(instr);
++      uint32_t write_mask = nir_intrinsic_write_mask(instr);
++      uint32_t num_components = instr->num_components;
++
++      if (location == VARYING_SLOT_CLIP_DIST0 ||
++          location == VARYING_SLOT_CLIP_DIST1) {
++         P_IND(ctx, "kk_mv.gl_ClipDistance[%u] = ",
++               (location - VARYING_SLOT_CLIP_DIST0) * 4 + component);
++         src_to_msl(ctx, &instr->src[0]);
++         P(ctx, ";\n");
++         break;
++      }
++
++      P_INDENT(ctx);
++      uint32_t dst_num_components =
++         msl_mesh_output_name(ctx, location, component, per_primitive);
++      if (dst_num_components > 1u) {
++         P(ctx, ".");
++         for (unsigned i = 0; i < num_components; i++)
++            if ((write_mask >> i) & 1)
++               P(ctx, "%c", "xyzw"[component + i]);
++      }
++      P(ctx, " = ");
++      src_to_msl(ctx, &instr->src[0]);
++      if (num_components > 1u) {
++         P(ctx, ".");
++         for (unsigned i = 0; i < num_components; i++)
++            if ((write_mask >> i) & 1)
++               P(ctx, "%c", "xyzw"[i]);
++      }
++      P(ctx, ";\n");
++      break;
++   }
++   case nir_intrinsic_mesh_set_primitive_count_kk:
++      P_IND(ctx, "mesh_out.set_primitive_count(");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, ");\n");
++      break;
++   case nir_intrinsic_mesh_commit_vertex_kk:
++      P_IND(ctx, "mesh_out.set_vertex(");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, ", kk_mv);\n");
++      break;
++   case nir_intrinsic_mesh_commit_primitive_kk: {
++      unsigned verts = nir_src_num_components(instr->src[1]);
++      for (unsigned v = 0; v < verts; v++) {
++         P_IND(ctx, "mesh_out.set_index(");
++         src_to_msl(ctx, &instr->src[0]);
++         P(ctx, " * %uu + %uu, (", verts, v);
++         src_to_msl(ctx, &instr->src[1]);
++         P(ctx, ")%s);\n", verts > 1 ? (v == 0 ? ".x" : v == 1 ? ".y" : ".z") : "");
++      }
++      P_IND(ctx, "mesh_out.set_primitive(");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, ", kk_mp);\n");
++      break;
++   }
+    case nir_intrinsic_store_clip_distance_kk:
+       P_IND(ctx, "out.gl_ClipDistance[%d] = ", nir_intrinsic_base(instr));
+       src_to_msl(ctx, &instr->src[0]);
+@@ -2226,8 +2318,12 @@ msl_preprocess_nir(struct nir_shader *nir)
+     * blending pass sinks writes to the end of the block where we may have a
+     * jump, which is illegal.
+     */
+-   NIR_PASS(_, nir, nir_lower_io_vars_to_temporaries,
+-            nir_shader_get_entrypoint(nir), nir_var_shader_out);
++   /* Mesh outputs are arrays shared by the whole workgroup: no per-invocation
++    * temporaries, splitting or if-ladders for them (msl_nir_lower_mesh). */
++   const bool mesh = nir->info.stage == MESA_SHADER_MESH;
++   if (!mesh)
++      NIR_PASS(_, nir, nir_lower_io_vars_to_temporaries,
++               nir_shader_get_entrypoint(nir), nir_var_shader_out);
+    NIR_PASS(_, nir, nir_lower_global_vars_to_local);
+    NIR_PASS(_, nir, nir_split_var_copies);
+    NIR_PASS(_, nir, nir_split_struct_vars, nir_var_function_temp);
+@@ -2274,7 +2370,8 @@ msl_preprocess_nir(struct nir_shader *nir)
+    NIR_PASS(_, nir, nir_lower_memcpy);
+ 
+    NIR_PASS(_, nir, nir_split_array_vars,
+-            nir_var_function_temp | nir_var_shader_in | nir_var_shader_out);
++            nir_var_function_temp | nir_var_shader_in |
++               (mesh ? 0 : nir_var_shader_out));
+    NIR_PASS(_, nir, nir_lower_alu_to_scalar, kk_scalarize_filter, NULL);
+ 
+    NIR_PASS(_, nir, nir_opt_large_constants, glsl_get_natural_size_align_bytes,
+@@ -2285,7 +2382,8 @@ msl_preprocess_nir(struct nir_shader *nir)
+    NIR_PASS(_, nir, nir_lower_vars_to_scratch, 32,
+             glsl_get_natural_size_align_bytes, glsl_get_word_size_align_bytes);
+    NIR_PASS(_, nir, nir_lower_indirect_derefs_to_if_else_trees,
+-            nir_var_function_temp | nir_var_shader_in | nir_var_shader_out,
++            nir_var_function_temp | nir_var_shader_in |
++               (mesh ? 0 : nir_var_shader_out),
+             UINT32_MAX);
+ 
+    msl_nir_lower_subgroups(nir);
+@@ -2387,6 +2485,9 @@ msl_gather_info(struct nir_to_msl_ctx *ctx, struct nir_to_msl_options *options)
+    nir_index_blocks(impl);
+    nir_index_ssa_defs(impl);
+ 
++   if (ctx->shader->info.stage == MESA_SHADER_MESH)
++      msl_gather_io_info(ctx, ctx->inputs_info, ctx->outputs_info);
++
+    if (ctx->shader->info.stage == MESA_SHADER_VERTEX ||
+        ctx->shader->info.stage == MESA_SHADER_FRAGMENT) {
+       msl_gather_io_info(ctx, ctx->inputs_info, ctx->outputs_info);
+@@ -2403,6 +2504,21 @@ msl_gather_info(struct nir_to_msl_ctx *ctx, struct nir_to_msl_options *options)
+                        SYSTEM_VALUE_SAMPLE_ID);
+          }
+ 
++         /* Perspective barycentrics need gl_FragCoord.w, see the emission. */
++         nir_foreach_function_impl(fimpl, ctx->shader) {
++            nir_foreach_block(fblock, fimpl) {
++               nir_foreach_instr(finstr, fblock) {
++                  if (finstr->type != nir_instr_type_intrinsic)
++                     continue;
++                  nir_intrinsic_instr *fi = nir_instr_as_intrinsic(finstr);
++                  if (fi->intrinsic == nir_intrinsic_load_barycentric_coord_pixel &&
++                      nir_intrinsic_interp_mode(fi) == INTERP_MODE_SMOOTH)
++                     BITSET_SET(ctx->shader->info.system_values_read,
++                                SYSTEM_VALUE_FRAG_COORD);
++               }
++            }
++         }
++
+          /* In Metal this is a function call. */
+          BITSET_CLEAR(ctx->shader->info.system_values_read,
+                       SYSTEM_VALUE_HELPER_INVOCATION);
+@@ -2424,6 +2540,22 @@ msl_gather_info(struct nir_to_msl_ctx *ctx, struct nir_to_msl_options *options)
+    }
+ }
+ 
++/* nps5: an SSA value is defined before every use (it dominates its uses), so
++ * its predeclaration needs no initializer. The zero initializers made Metal's
++ * front end store zero to every one of tens of thousands of variables of a
++ * big compute shader at its entry (a 14 MB MSL: 40 s and 5.5 GB to compile,
++ * 19 s and 1.9 GB without). KK_MSL_ZERO_INIT_SSA=1 restores them. */
++static bool
++msl_zero_init_ssa(void)
++{
++   static int cached = -1;
++   if (cached < 0) {
++      const char *v = getenv("KK_MSL_ZERO_INIT_SSA");
++      cached = (v && v[0] && v[0] != '0') ? 1 : 0;
++   }
++   return cached;
++}
++
+ static void
+ predeclare_ssa_values(struct nir_to_msl_ctx *ctx, nir_function_impl *impl)
+ {
+@@ -2461,8 +2593,11 @@ predeclare_ssa_values(struct nir_to_msl_ctx *ctx, nir_function_impl *impl)
+                continue;
+             if (msl_def_is_sampler(ctx, def)) {
+                P_IND(ctx, "%s t%u;\n", type, def->index);
+-            } else
++            } else if (msl_zero_init_ssa()) {
+                P_IND(ctx, "%s t%u = %s(0);\n", type, def->index, type);
++            } else {
++               P_IND(ctx, "%s t%u;\n", type, def->index);
++            }
+          }
+       }
+    }
+@@ -2503,6 +2638,10 @@ nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options)
+       .text = _mesa_string_buffer_create(options->mem_ctx, 1024),
+       .disabled_workarounds = options->disabled_workarounds,
+    };
++   /* KK_WORKAROUND_19 needs a threadgroup buffer argument, which a mesh
++    * function cannot declare (and its dispatch path is not affected). */
++   if (shader->info.stage == MESA_SHADER_MESH)
++      ctx.disabled_workarounds |= BITFIELD64_BIT(19);
+    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
+    msl_gather_info(&ctx, options);
+ 
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index d4f63b5..d5a5388 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -88,6 +88,7 @@ bool msl_nir_fs_io_types(nir_shader *nir);
+ bool msl_nir_vs_io_types(nir_shader *nir);
+ bool msl_nir_fake_guard_for_discards(struct nir_shader *nir);
+ bool msl_nir_lower_sample_shading(nir_shader *nir);
++bool msl_nir_lower_barycentric_coord(nir_shader *nir);
+ void msl_nir_lower_clip_cull_distance(nir_shader *nir,
+                                       unsigned num_cull_distances);
+ bool msl_nir_lower_instance_id(nir_shader *nir);
+@@ -97,6 +98,7 @@ bool msl_nir_lower_multisample_alpha(nir_shader *s, bool alpha_to_coverage,
+                                      bool alpha_to_one);
+ 
+ bool msl_gather_uses_per_draw_data(nir_shader *nir);
++bool msl_nir_lower_mesh(nir_shader *nir, unsigned threadgroup_limit);
+ 
+ static const nir_shader_compiler_options kk_nir_options = {
+    .lower_fdph = true,
+@@ -127,6 +129,7 @@ static const nir_shader_compiler_options kk_nir_options = {
+    .has_uclz = true,
+    .lower_mul_2x32_64 = true,
+    .compact_arrays = true,
++   .vectorize_bounded_explicit_io_loads = true,
+    /* Metal does not support double. */
+    .lower_doubles_options = (nir_lower_doubles_options)(~0),
+    .lower_int64_options = nir_lower_ufind_msb64 | nir_lower_subgroup_shuffle64,
+diff --git a/src/kosmickrisp/vulkan/kk_bo.c b/src/kosmickrisp/vulkan/kk_bo.c
+index 5562b61..dad97b8 100644
+--- a/src/kosmickrisp/vulkan/kk_bo.c
++++ b/src/kosmickrisp/vulkan/kk_bo.c
+@@ -13,6 +13,67 @@
+ 
+ #include "util/u_memory.h"
+ 
++#include <stdatomic.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <time.h>
++
++/* KK_MEM_STATS=<seconds>: every <seconds> (default 5) print the live device
++ * memory KK allocated, by owner (MiB), as one "[kk-mem]" line, plus a final line
++ * at exit. Heap-level owners are what IOAccelerator sees; the IMG/BUFFER rows
++ * are resources placed inside the APP_ALLOC heaps and not additional. */
++static atomic_llong kk_mem_live[KK_MEM_CAT_COUNT], kk_mem_peak[KK_MEM_CAT_COUNT];
++static atomic_llong kk_mem_total[KK_MEM_CAT_COUNT];
++
++static const char *const kk_mem_names[KK_MEM_CAT_COUNT] = {
++   "none",      "app",        "host_import", "metal_import", "cmd_pool",
++   "cmd_large", "geom_heap",  "desc_pool",   "event",        "query_pool",
++   "query_tbl", "img_rt",     "img_other",   "buffer",
++};
++
++static void
++kk_mem_print(void)
++{
++   fprintf(stderr, "[kk-mem] live MiB:");
++   long long heap = 0;
++   for (int i = 1; i < KK_MEM_CAT_COUNT; i++) {
++      long long v = atomic_load(&kk_mem_live[i]);
++      fprintf(stderr, " %s=%.1f(pk %.1f)", kk_mem_names[i], v / 1048576.0,
++              atomic_load(&kk_mem_peak[i]) / 1048576.0);
++      if (i <= KK_MEM_QUERY_TABLE && i != KK_MEM_HOST_IMPORT)
++         heap += v;
++   }
++   fprintf(stderr, " | owned_heaps=%.1f\n", heap / 1048576.0);
++}
++
++void
++kk_mem_account(enum kk_mem_cat cat, int64_t bytes)
++{
++   static int period = -1;
++   static _Atomic double last;
++   if (period < 0) {
++      const char *e = getenv("KK_MEM_STATS");
++      period = e ? (atoi(e) > 0 ? atoi(e) : 5) : 0;
++      if (period)
++         atexit(kk_mem_print);
++   }
++   if (!period || cat == KK_MEM_NONE)
++      return;
++   long long v = atomic_fetch_add(&kk_mem_live[cat], bytes) + bytes;
++   if (bytes > 0) {
++      atomic_fetch_add(&kk_mem_total[cat], bytes);
++      long long pk = atomic_load(&kk_mem_peak[cat]);
++      while (v > pk && !atomic_compare_exchange_weak(&kk_mem_peak[cat], &pk, v))
++         ;
++   }
++   struct timespec ts;
++   clock_gettime(CLOCK_MONOTONIC, &ts);
++   double now = ts.tv_sec + ts.tv_nsec * 1e-9;
++   double l = atomic_load(&last);
++   if (now - l >= period && atomic_compare_exchange_strong(&last, &l, now))
++      kk_mem_print();
++}
++
+ #if DETECT_OS_APPLE
+ #include <mach/mach_init.h>
+ #include <mach/mach_vm.h>
+@@ -20,7 +81,8 @@
+ 
+ VkResult
+ kk_alloc_bo(struct kk_device *dev, struct vk_object_base *log_obj,
+-            uint64_t size_B, uint64_t align_B, struct kk_bo **bo_out)
++            uint64_t size_B, uint64_t align_B, struct kk_bo **bo_out,
++            enum kk_mem_cat cat)
+ {
+    VkResult result = VK_SUCCESS;
+ 
+@@ -59,6 +121,8 @@ kk_alloc_bo(struct kk_device *dev, struct vk_object_base *log_obj,
+       goto fail_alloc;
+    }
+ 
++   bo->cat = cat;
++   kk_mem_account(cat, size_B);
+    bo->mtl_handle = handle;
+    bo->size_B = size_B;
+    bo->map = map;
+@@ -81,6 +145,7 @@ fail_heap:
+ void
+ kk_destroy_bo(struct kk_device *dev, struct kk_bo *bo)
+ {
++   kk_mem_account(bo->cat, -(int64_t)bo->size_B);
+    /* We may only have a mapped buffer, for example if the memory was imported
+     * from a host pointer */
+    if (bo->mtl_handle)
+diff --git a/src/kosmickrisp/vulkan/kk_bo.h b/src/kosmickrisp/vulkan/kk_bo.h
+index d1590b9..4ad2d0e 100644
+--- a/src/kosmickrisp/vulkan/kk_bo.h
++++ b/src/kosmickrisp/vulkan/kk_bo.h
+@@ -17,7 +17,31 @@
+ struct kk_device;
+ struct vk_object_base;
+ 
++/* Owner of a device allocation, for the KK_MEM_STATS counters. */
++enum kk_mem_cat {
++   KK_MEM_NONE = 0,
++   KK_MEM_APP_ALLOC,    /* vkAllocateMemory heaps (guest buffers, images) */
++   KK_MEM_HOST_IMPORT,  /* vkAllocateMemory from a host pointer (no new pages) */
++   KK_MEM_METAL_IMPORT, /* imported MTLHeap */
++   KK_MEM_CMD_POOL,     /* command pool upload/scratch BOs */
++   KK_MEM_CMD_LARGE,    /* command buffer large BOs (GS output etc.) */
++   KK_MEM_GEOM_HEAP,    /* device geometry/tessellation heap */
++   KK_MEM_DESC_POOL,    /* descriptor pools */
++   KK_MEM_EVENT,
++   KK_MEM_QUERY_POOL,
++   KK_MEM_QUERY_TABLE,
++   /* Resources created inside the heaps (size of the layout / buffer), not
++    * additional memory. */
++   KK_MEM_IMG_RT,
++   KK_MEM_IMG_OTHER,
++   KK_MEM_BUFFER,
++   KK_MEM_CAT_COUNT,
++};
++
++void kk_mem_account(enum kk_mem_cat cat, int64_t bytes);
++
+ struct kk_bo {
++   enum kk_mem_cat cat;
+    mtl_heap *mtl_handle;
+    mtl_buffer *map;
+    uint64_t size_B;
+@@ -35,7 +59,8 @@ struct kk_ptr {
+ };
+ 
+ VkResult kk_alloc_bo(struct kk_device *dev, struct vk_object_base *log_obj,
+-                     uint64_t size_B, uint64_t align_B, struct kk_bo **bo_out);
++                     uint64_t size_B, uint64_t align_B, struct kk_bo **bo_out,
++                     enum kk_mem_cat cat);
+ 
+ void kk_destroy_bo(struct kk_device *dev, struct kk_bo *bo);
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_buffer.c b/src/kosmickrisp/vulkan/kk_buffer.c
+index 73fd1f5..a34e146 100644
+--- a/src/kosmickrisp/vulkan/kk_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_buffer.c
+@@ -46,6 +46,7 @@ kk_CreateBuffer(VkDevice device, const VkBufferCreateInfo *pCreateInfo,
+    if (!buffer)
+       return vk_error(dev, VK_ERROR_OUT_OF_HOST_MEMORY);
+ 
++   kk_mem_account(KK_MEM_BUFFER, buffer->vk.size);
+    *pBuffer = kk_buffer_to_handle(buffer);
+ 
+    return VK_SUCCESS;
+@@ -64,6 +65,7 @@ kk_DestroyBuffer(VkDevice device, VkBuffer _buffer,
+    if (buffer->metal.handle)
+       mtl_release(buffer->metal.handle);
+ 
++   kk_mem_account(KK_MEM_BUFFER, -(int64_t)buffer->vk.size);
+    vk_buffer_destroy(&dev->vk, pAllocator, &buffer->vk);
+ }
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 9ba8a71..7d4dacb 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -291,7 +291,8 @@ cs_start_render(struct kk_cmd_buffer *cmd)
+    /* Argument table won't ever change */
+    mtl_render_set_argument_table(
+       cmd->metal.render, cmd->argument_table,
+-      MTL_RENDER_STAGE_VERTEX | MTL_RENDER_STAGE_FRAGMENT);
++      MTL_RENDER_STAGE_VERTEX | MTL_RENDER_STAGE_FRAGMENT |
++         MTL_RENDER_STAGE_MESH);
+ 
+    kk_cmd_buffer_dirty_all_gfx(cmd);
+ }
+@@ -556,6 +557,11 @@ kk_bind_descriptor_sets(struct kk_descriptor_state *desc,
+    desc->root_dirty = true;
+ }
+ 
++/* VK_SHADER_STAGE_ALL_GRAPHICS predates mesh shading and lacks its stages */
++#define KK_SHADER_STAGE_ALL_GRAPHICS                                           \
++   (VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_MESH_BIT_EXT |              \
++    VK_SHADER_STAGE_TASK_BIT_EXT)
++
+ VKAPI_ATTR void VKAPI_CALL
+ kk_CmdBindDescriptorSets2KHR(
+    VkCommandBuffer commandBuffer,
+@@ -563,7 +569,7 @@ kk_CmdBindDescriptorSets2KHR(
+ {
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+ 
+-   if (pBindDescriptorSetsInfo->stageFlags & VK_SHADER_STAGE_ALL_GRAPHICS) {
++   if (pBindDescriptorSetsInfo->stageFlags & KK_SHADER_STAGE_ALL_GRAPHICS) {
+       kk_bind_descriptor_sets(&cmd->state.gfx.descriptors,
+                               pBindDescriptorSetsInfo);
+    }
+@@ -625,7 +631,7 @@ kk_CmdPushDescriptorSet2KHR(
+ {
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+ 
+-   if (pPushDescriptorSetInfo->stageFlags & VK_SHADER_STAGE_ALL_GRAPHICS) {
++   if (pPushDescriptorSetInfo->stageFlags & KK_SHADER_STAGE_ALL_GRAPHICS) {
+       kk_push_descriptor_set(cmd, &cmd->state.gfx.descriptors,
+                              pPushDescriptorSetInfo);
+    }
+@@ -651,7 +657,7 @@ kk_CmdPushConstants2KHR(VkCommandBuffer commandBuffer,
+ {
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+ 
+-   if (pPushConstantsInfo->stageFlags & VK_SHADER_STAGE_ALL_GRAPHICS)
++   if (pPushConstantsInfo->stageFlags & KK_SHADER_STAGE_ALL_GRAPHICS)
+       kk_push_constants(cmd, &cmd->state.gfx.descriptors, pPushConstantsInfo);
+ 
+    if (pPushConstantsInfo->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT)
+@@ -690,7 +696,8 @@ kk_pool_alloc(struct kk_cmd_buffer *cmd, uint32_t size_B, uint32_t alignment_B)
+    if (size_B > KK_CMD_BO_SIZE) {
+       struct kk_bo *buffer = NULL;
+       const VkResult result =
+-         kk_alloc_bo(dev, &cmd->vk.base, size_B, alignment_B, &buffer);
++         kk_alloc_bo(dev, &cmd->vk.base, size_B, alignment_B, &buffer,
++                     KK_MEM_CMD_LARGE);
+       if (result != VK_SUCCESS) {
+          vk_command_buffer_set_error(&cmd->vk, result);
+          return (struct kk_ptr){0};
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 20e5854..80cb1f6 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -258,7 +258,7 @@ struct kk_cmd_buffer {
+       struct kk_graphics_state gfx;
+       struct kk_compute_state cs;
+       struct kk_conditional_rendering_state cond_render;
+-      struct kk_shader *shaders[MESA_SHADER_STAGES];
++      struct kk_shader *shaders[MESA_SHADER_MESH_STAGES];
+       /* Address of the binding 0 for when compute dispatches modify it.
+        * We are trying to be nice to ourselves. */
+       uint64_t root_addr;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 126f94b..eb52cd2 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -841,6 +841,10 @@ kk_rast_prim(struct kk_cmd_buffer *cmd)
+    if (gs)
+       return gs->info.gs.mode;
+ 
++   struct kk_shader *ms = cmd->state.shaders[MESA_SHADER_MESH];
++   if (ms)
++      return ms->info.vs.mesh_prim;
++
+    return vk_topology_to_mesa(
+       cmd->vk.dynamic_graphics_state.ia.primitive_topology);
+ }
+@@ -1033,7 +1037,7 @@ kk_init_heap(const void *data)
+    struct kk_device *dev = kk_cmd_buffer_device(cmd);
+ 
+    size_t size = 128 * 1024 * 1024;
+-   kk_alloc_bo(dev, &dev->vk.base, size, 0, &dev->heap);
++   kk_alloc_bo(dev, &dev->vk.base, size, 0, &dev->heap, KK_MEM_GEOM_HEAP);
+ 
+    struct poly_heap *map = (struct poly_heap *)dev->heap->cpu;
+ 
+@@ -2710,3 +2714,122 @@ kk_CmdDrawIndexedIndirectCount2KHR(VkCommandBuffer commandBuffer,
+ 
+    kk_draw(cmd, &data);
+ }
++
++/* Mesh draws. The mesh shader is the pipeline holder (see
++ * kk_cmd_bind_graphics_shader), there is no input assembly and no per-draw
++ * data; a draw is a grid of mesh threadgroups. `addr` is 0 for a direct draw. */
++static void
++kk_draw_mesh(struct kk_cmd_buffer *cmd, struct mtl_size groups, uint64_t addr,
++             uint32_t stride, uint32_t draw_count, uint64_t count_addr)
++{
++   struct kk_shader *ms = cmd->state.shaders[MESA_SHADER_MESH];
++   if (unlikely(ms == NULL))
++      return;
++
++   kk_flush_gfx_state(cmd);
++
++   const bool cond = cmd->state.cond_render.enabled;
++   if (addr == 0 && cond) {
++      /* Conditional rendering patches an indirect command */
++      const uint32_t direct[3] = {groups.x, groups.y, groups.z};
++      struct kk_ptr upload = kk_pool_upload(cmd, direct, sizeof(direct), 4u);
++      if (unlikely(!upload.gpu))
++         return;
++      addr = upload.gpu;
++      stride = sizeof(direct);
++      draw_count = 1;
++   }
++
++   if (addr != 0 && (count_addr != 0 || cond)) {
++      const uint32_t out_stride = sizeof(VkDrawMeshTasksIndirectCommandEXT);
++      /* kk_pool_alloc takes a 32-bit size: a draw count that would wrap the
++       * product must not allocate a short buffer the patch kernel then
++       * writes draw_count entries into. */
++      const uint64_t patched_size = (uint64_t)out_stride * draw_count;
++      if (unlikely(patched_size > UINT32_MAX))
++         return;
++      struct kk_ptr patched = kk_pool_alloc(cmd, (uint32_t)patched_size, 4u);
++      if (unlikely(!patched.gpu))
++         return;
++
++      uint64_t in_addr = addr;
++      uint32_t in_stride_el = stride / sizeof(uint32_t);
++      const uint32_t out_stride_el = out_stride / sizeof(uint32_t);
++      struct kk_grid grid = kk_grid_1d(draw_count);
++      if (count_addr != 0) {
++         libkk_predicate_indirect_gt_draw_id(cmd, grid, true, patched.gpu,
++                                             in_addr, count_addr,
++                                             out_stride_el, in_stride_el);
++         in_addr = patched.gpu;
++         in_stride_el = out_stride_el;
++      }
++      if (cond) {
++         if (cmd->state.cond_render.inverted) {
++            libkk_predicate_indirect_eq_zero(cmd, grid, true, patched.gpu,
++                                             in_addr,
++                                             cmd->state.cond_render.address,
++                                             out_stride_el, in_stride_el);
++         } else {
++            libkk_predicate_indirect_neq_zero(cmd, grid, true, patched.gpu,
++                                              in_addr,
++                                              cmd->state.cond_render.address,
++                                              out_stride_el, in_stride_el);
++         }
++      }
++      addr = patched.gpu;
++      stride = out_stride;
++
++      /* The predicate kernels run in a compute pass of their own */
++      if (cmd->state.gfx.need_to_start_render_pass)
++         kk_flush_gfx_state(cmd);
++   }
++
++   mtl_render_encoder *enc = cs_get_render(cmd);
++   const struct mtl_size threads = ms->info.vs.mesh_local_size;
++   if (addr == 0) {
++      mtl_draw_mesh_threadgroups(enc, groups, threads);
++   } else {
++      for (uint32_t i = 0; i < draw_count; i++)
++         mtl_draw_mesh_threadgroups_indirect(enc, addr + (uint64_t)i * stride,
++                                             threads);
++   }
++}
++
++VKAPI_ATTR void VKAPI_CALL
++kk_CmdDrawMeshTasksEXT(VkCommandBuffer commandBuffer, uint32_t groupCountX,
++                       uint32_t groupCountY, uint32_t groupCountZ)
++{
++   /* Metal validation dislikes empty calls */
++   if (groupCountX == 0 || groupCountY == 0 || groupCountZ == 0)
++      return;
++
++   VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_draw_mesh(cmd,
++                (struct mtl_size){groupCountX, groupCountY, groupCountZ}, 0, 0,
++                1, 0);
++}
++
++VKAPI_ATTR void VKAPI_CALL
++kk_CmdDrawMeshTasksIndirect2EXT(VkCommandBuffer commandBuffer,
++                                const VkDrawIndirect2InfoKHR *pInfo)
++{
++   if (pInfo->drawCount == 0)
++      return;
++
++   VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_draw_mesh(cmd, (struct mtl_size){0, 0, 0}, pInfo->addressRange.address,
++                pInfo->addressRange.stride, pInfo->drawCount, 0);
++}
++
++VKAPI_ATTR void VKAPI_CALL
++kk_CmdDrawMeshTasksIndirectCount2EXT(VkCommandBuffer commandBuffer,
++                                     const VkDrawIndirectCount2InfoKHR *pInfo)
++{
++   if (pInfo->maxDrawCount == 0)
++      return;
++
++   VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_draw_mesh(cmd, (struct mtl_size){0, 0, 0}, pInfo->addressRange.address,
++                pInfo->addressRange.stride, pInfo->maxDrawCount,
++                pInfo->countAddressRange.address);
++}
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_meta.c b/src/kosmickrisp/vulkan/kk_cmd_meta.c
+index 9163df5..de7df0b 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_meta.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_meta.c
+@@ -69,7 +69,7 @@ struct kk_meta_save {
+    struct vk_vertex_input_state _dynamic_vi;
+    struct vk_sample_locations_state _dynamic_sl;
+    struct vk_dynamic_graphics_state dynamic;
+-   struct kk_shader *shaders[MESA_SHADER_STAGES];
++   struct kk_shader *shaders[MESA_SHADER_MESH_STAGES];
+    struct {
+       union {
+          struct {
+@@ -103,6 +103,10 @@ kk_meta_begin(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
+       for (uint32_t stage = 0u; stage < MESA_SHADER_COMPUTE; ++stage) {
+          save->shaders[stage] = cmd->state.shaders[stage];
+       }
++      /* Meta draws use a vertex pipeline; a bound mesh shader (tracked in the
++       * vertex slot as well) comes back in kk_meta_end */
++      save->shaders[MESA_SHADER_MESH] = cmd->state.shaders[MESA_SHADER_MESH];
++      cmd->state.shaders[MESA_SHADER_MESH] = NULL;
+ 
+       save->pipeline.gfx.ds = cmd->state.gfx.depth_stencil_state;
+       save->pipeline.gfx.occlusion = cmd->state.gfx.occlusion.mode;
+@@ -177,6 +181,7 @@ kk_meta_end(struct kk_cmd_buffer *cmd, struct kk_meta_save *save,
+          cmd->state.shaders[stage] = save->shaders[stage];
+       }
+       cmd->state.dirty_shaders |= BITFIELD_MASK(MESA_SHADER_COMPUTE);
++      cmd->state.shaders[MESA_SHADER_MESH] = save->shaders[MESA_SHADER_MESH];
+ 
+       if (cmd->state.gfx.is_depth_stencil_dynamic)
+          mtl_release(cmd->state.gfx.depth_stencil_state);
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_pool.c b/src/kosmickrisp/vulkan/kk_cmd_pool.c
+index e2c2fc8..2340873 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_pool.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_pool.c
+@@ -26,7 +26,8 @@ kk_cmd_bo_create(struct kk_cmd_pool *pool, struct kk_cmd_bo **bo_out)
+       return vk_error(pool, VK_ERROR_OUT_OF_HOST_MEMORY);
+ 
+    const VkResult result =
+-      kk_alloc_bo(dev, &pool->vk.base, KK_CMD_BO_SIZE, 0, &bo->bo);
++      kk_alloc_bo(dev, &pool->vk.base, KK_CMD_BO_SIZE, 0, &bo->bo,
++                  KK_MEM_CMD_POOL);
+    if (result != VK_SUCCESS) {
+       vk_free(&pool->vk.alloc, bo);
+       return vk_error(pool, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+index c817d18..ff62c43 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
++++ b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+@@ -521,7 +521,8 @@ kk_CreateDescriptorPool(VkDevice _device,
+    mem_size += kk_min_cbuf_alignment() * pCreateInfo->maxSets;
+ 
+    if (mem_size) {
+-      result = kk_alloc_bo(dev, &dev->vk.base, mem_size, 0u, &pool->bo);
++      result = kk_alloc_bo(dev, &dev->vk.base, mem_size, 0u, &pool->bo,
++                         KK_MEM_DESC_POOL);
+       if (result != VK_SUCCESS) {
+          kk_destroy_descriptor_pool(dev, pAllocator, pool);
+          return result;
+diff --git a/src/kosmickrisp/vulkan/kk_device_memory.c b/src/kosmickrisp/vulkan/kk_device_memory.c
+index 797175e..c2e5c16 100644
+--- a/src/kosmickrisp/vulkan/kk_device_memory.c
++++ b/src/kosmickrisp/vulkan/kk_device_memory.c
+@@ -130,6 +130,7 @@ kk_AllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pAllocateInfo,
+             mtl_new_buffer_with_length(mem->bo->mtl_handle, mem->vk.size, 0u);
+          mem->bo->size_B = mtl_heap_get_size(mem->bo->mtl_handle);
+          kk_device_add_heap_to_residency_set(dev, mem->bo->mtl_handle);
++         mem->bo->cat = KK_MEM_METAL_IMPORT;
+       } else if (import_host) {
+          /* We can't create a heap from a host pointer. The imported memory will
+           * only be usable for buffers */
+@@ -137,13 +138,16 @@ kk_AllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pAllocateInfo,
+             dev->mtl_handle, host_info->pHostPointer, mem->vk.size);
+          mem->bo->size_B = mtl_buffer_get_length(mem->bo->map);
+          kk_device_add_buffer_to_residency_set(dev, mem->bo->map);
++         mem->bo->cat = KK_MEM_HOST_IMPORT;
+       }
+ 
++      kk_mem_account(mem->bo->cat, mem->bo->size_B);
+       mem->bo->gpu = mtl_buffer_get_gpu_address(mem->bo->map);
+       mem->bo->cpu = mtl_get_contents(mem->bo->map);
+    } else {
+       result =
+-         kk_alloc_bo(dev, &dev->vk.base, aligned_size, alignment, &mem->bo);
++         kk_alloc_bo(dev, &dev->vk.base, aligned_size, alignment, &mem->bo,
++                  KK_MEM_APP_ALLOC);
+       if (result != VK_SUCCESS)
+          goto fail_alloc;
+    }
+diff --git a/src/kosmickrisp/vulkan/kk_event.c b/src/kosmickrisp/vulkan/kk_event.c
+index 3e6db31..49f0ed9 100644
+--- a/src/kosmickrisp/vulkan/kk_event.c
++++ b/src/kosmickrisp/vulkan/kk_event.c
+@@ -31,7 +31,7 @@ kk_CreateEvent(VkDevice device, const VkEventCreateInfo *pCreateInfo,
+ 
+    /* TODO_KOSMICKRISP Bring back the heap. */
+    result = kk_alloc_bo(dev, &dev->vk.base, KK_EVENT_MEM_SIZE,
+-                        KK_EVENT_MEM_SIZE, &event->bo);
++                        KK_EVENT_MEM_SIZE, &event->bo, KK_MEM_EVENT);
+    if (result != VK_SUCCESS) {
+       vk_object_free(&dev->vk, pAllocator, event);
+       return result;
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index dd4ad75..a7afa26 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -572,6 +572,19 @@ kk_GetPhysicalDeviceSparseImageFormatProperties2(
+    return;
+ }
+ 
++/* KK_MEM_STATS: layout size of every live image (inside the app heaps). */
++static void
++kk_image_account(const struct kk_image *image, int sign)
++{
++   uint64_t size = 0;
++   for (uint8_t plane = 0; plane < image->plane_count; plane++)
++      size += image->planes[plane].layout.size_B;
++   const bool rt =
++      image->vk.usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
++                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
++   kk_mem_account(rt ? KK_MEM_IMG_RT : KK_MEM_IMG_OTHER, sign * (int64_t)size);
++}
++
+ static VkResult
+ kk_image_init(struct kk_device *dev, struct kk_image *image,
+               const VkImageCreateInfo *pCreateInfo)
+@@ -615,6 +628,7 @@ kk_image_init(struct kk_device *dev, struct kk_image *image,
+                            &image->planes[plane].layout);
+    }
+ 
++   kk_image_account(image, 1);
+    return VK_SUCCESS;
+ }
+ 
+@@ -642,6 +656,7 @@ static void
+ kk_image_finish(struct kk_device *dev, struct kk_image *image,
+                 const VkAllocationCallbacks *pAllocator)
+ {
++   kk_image_account(image, -1);
+    for (uint8_t plane = 0; plane < image->plane_count; plane++) {
+       kk_image_plane_finish(dev, &image->planes[plane], image->vk.create_flags,
+                             pAllocator);
+diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
+index 3b54ffd..8d44b3c 100644
+--- a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
++++ b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
+@@ -410,6 +410,8 @@ try_lower_intrin(nir_builder *b, nir_intrinsic_instr *intrin,
+       UNREACHABLE("Should have been lowered by nir_lower_cs_intrinsics()");
+ 
+    case nir_intrinsic_load_base_workgroup_id:
++      /* cs.base_group aliases the graphics draw state in the root table */
++      assert(b->shader->info.stage == MESA_SHADER_COMPUTE);
+       return lower_sysval_to_root_table(b, intrin, cs.base_group);
+ 
+    case nir_intrinsic_load_blend_const_color_rgba:
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index a0b882c..e4e9cd6 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -189,10 +189,16 @@ kk_get_device_extensions(const struct kk_instance *instance,
+       .EXT_load_store_op_none = true,
+       .EXT_map_memory_placed = true,
+       .EXT_memory_budget = true,
++      .EXT_mesh_shader = true,
+       .EXT_multi_draw = true,
+       .EXT_mutable_descriptor_type = true,
+       .EXT_nested_command_buffer = true,
+       .EXT_post_depth_coverage = true,
++      /* Off by default: AnyPS5 switches to host (pervertex) interpolation
++       * when it sees the extension, and pervertexKHR is not supported. The
++       * BaryCoord builtins compile without it (KK_BARYCENTRIC_EXT=1 to
++       * advertise). */
++      .KHR_fragment_shader_barycentric = getenv("KK_BARYCENTRIC_EXT") != NULL,
+       .EXT_primitive_restart_index = true,
+       .EXT_primitive_topology_list_restart = true,
+       .EXT_provoking_vertex = true,
+@@ -461,6 +467,12 @@ kk_get_device_features(
+       /* VK_EXT_depth_clip_enable */
+       .depthClipEnable = true,
+ 
++      /* VK_KHR_fragment_shader_barycentric: BaryCoord* builtins only. The
++       * pervertexKHR input decoration (NIR load_input_vertex) has no Metal
++       * equivalent and still fails pipeline creation. */
++      .fragmentShaderBarycentric =
++         supported_extensions->KHR_fragment_shader_barycentric,
++
+       /* VK_EXT_extended_dynamic_state3 */
+       .extendedDynamicState3DepthClampEnable = true,
+       .extendedDynamicState3DepthClipEnable = true,
+@@ -477,6 +489,13 @@ kk_get_device_features(
+       /* VK_EXT_image_view_min_lod */
+       .minLod = supported_extensions->EXT_image_view_min_lod,
+ 
++      /* VK_EXT_mesh_shader: Metal mesh functions. No task (object) stage yet. */
++      .meshShader = true,
++      .taskShader = false,
++      .multiviewMeshShader = false,
++      .primitiveFragmentShadingRateMeshShader = false,
++      .meshShaderQueries = false,
++
+       /* VK_EXT_map_memory_placed */
+       .memoryMapPlaced = true,
+       .memoryMapRangePlaced = false,
+@@ -676,7 +695,8 @@ kk_get_device_properties(
+       /* Vulkan 1.1 properties */
+       .subgroupSize = 32,
+       .subgroupSupportedStages =
+-         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
++         VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
++         VK_SHADER_STAGE_MESH_BIT_EXT,
+       .subgroupSupportedOperations =
+          VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_VOTE_BIT |
+          VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT |
+@@ -840,6 +860,39 @@ kk_get_device_properties(
+       /* VK_EXT_legacy_vertex_attributes */
+       .nativeUnalignedPerformance = true,
+ 
++      /* VK_EXT_mesh_shader. Mesh outputs are staged in threadgroup memory
++       * (msl_nir_lower_mesh), so output and shared memory share one budget. */
++      .maxTaskWorkGroupTotalCount = 0,
++      .maxTaskWorkGroupCount = {0, 0, 0},
++      .maxTaskWorkGroupInvocations = 0,
++      .maxTaskWorkGroupSize = {0, 0, 0},
++      .maxTaskPayloadSize = 0,
++      .maxTaskSharedMemorySize = 0,
++      .maxTaskPayloadAndSharedMemorySize = 0,
++      .maxMeshWorkGroupTotalCount = 1u << 22,
++      .maxMeshWorkGroupCount = {65535, 65535, 65535},
++      .maxMeshWorkGroupInvocations = KK_MAX_MESH_WORKGROUP_INVOCATIONS,
++      .maxMeshWorkGroupSize = {KK_MAX_MESH_WORKGROUP_INVOCATIONS,
++                               KK_MAX_MESH_WORKGROUP_INVOCATIONS,
++                               KK_MAX_MESH_WORKGROUP_INVOCATIONS},
++      .maxMeshSharedMemorySize = KK_MAX_MESH_SHARED_MEMORY,
++      .maxMeshPayloadAndSharedMemorySize = KK_MAX_MESH_SHARED_MEMORY,
++      .maxMeshOutputMemorySize = KK_MAX_MESH_OUTPUT_MEMORY,
++      .maxMeshPayloadAndOutputMemorySize = KK_MAX_MESH_OUTPUT_MEMORY,
++      .maxMeshOutputComponents = 128,
++      .maxMeshOutputVertices = 256,
++      .maxMeshOutputPrimitives = 256,
++      .maxMeshOutputLayers = 2048,
++      .maxMeshMultiviewViewCount = 1,
++      .meshOutputPerVertexGranularity = 1,
++      .meshOutputPerPrimitiveGranularity = 1,
++      .maxPreferredTaskWorkGroupInvocations = 0,
++      .maxPreferredMeshWorkGroupInvocations = 64,
++      .prefersLocalInvocationVertexOutput = true,
++      .prefersLocalInvocationPrimitiveOutput = true,
++      .prefersCompactVertexOutput = false,
++      .prefersCompactPrimitiveOutput = false,
++
+       /* VK_EXT_map_memory_placed */
+       .minPlacedMemoryMapAlignment = os_page_size,
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_private.h b/src/kosmickrisp/vulkan/kk_private.h
+index b58bd21..9b3975e 100644
+--- a/src/kosmickrisp/vulkan/kk_private.h
++++ b/src/kosmickrisp/vulkan/kk_private.h
+@@ -15,6 +15,14 @@
+ 
+ #include <assert.h>
+ 
++/* VK_EXT_mesh_shader limits (Metal mesh functions, outputs staged in
++ * threadgroup memory unless msl_nir_lower_mesh can emit them directly) */
++#define KK_MAX_MESH_WORKGROUP_INVOCATIONS 256
++#define KK_MAX_MESH_SHARED_MEMORY         (32 * 1024)
++#define KK_MAX_MESH_OUTPUT_MEMORY         (32 * 1024)
++/* Metal's threadgroup memory: shader workgroup memory plus staged outputs */
++#define KK_MAX_MESH_THREADGROUP_MEMORY    (32 * 1024)
++
+ #define KK_MAX_SETS                      32
+ #define KK_MAX_PUSH_SIZE                 256
+ #define KK_MAX_DYNAMIC_BUFFERS           64
+diff --git a/src/kosmickrisp/vulkan/kk_query_pool.c b/src/kosmickrisp/vulkan/kk_query_pool.c
+index 104d73d..59425ac 100644
+--- a/src/kosmickrisp/vulkan/kk_query_pool.c
++++ b/src/kosmickrisp/vulkan/kk_query_pool.c
+@@ -171,7 +171,8 @@ kk_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *pCreateInfo,
+       bo_size += pool->query_stride * pool->vk.query_count;
+    }
+ 
+-   result = kk_alloc_bo(dev, &dev->vk.base, bo_size, 8, &pool->bo);
++   result = kk_alloc_bo(dev, &dev->vk.base, bo_size, 8, &pool->bo,
++                         KK_MEM_QUERY_POOL);
+    if (result != VK_SUCCESS) {
+       kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool), pAllocator);
+       return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+@@ -200,12 +201,27 @@ kk_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *pCreateInfo,
+       if (!pdev->settings.gpu_capture_enabled) {
+          /* Timestamps are sampled into a Metal counter heap (one entry per query)
+           * and resolved into `bo` after the GPU writes them. */
+-         pool->ts.heap = mtl_new_timestamp_counter_heap(dev->mtl_handle,
+-                                                        pool->vk.query_count);
+-         if (pool->ts.heap == NULL) {
++         uint32_t nheaps =
++            DIV_ROUND_UP(pool->vk.query_count, KK_TS_HEAP_MAX_ENTRIES);
++         pool->ts.heaps = vk_zalloc2(&dev->vk.alloc, pAllocator, nheaps * sizeof(*pool->ts.heaps),
++                                    sizeof(void *),
++                                    VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
++         if (pool->ts.heaps == NULL) {
+             kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool),
+                                 pAllocator);
+-            return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++            return vk_error(dev, VK_ERROR_OUT_OF_HOST_MEMORY);
++         }
++         pool->ts.heap_count = nheaps;
++         for (uint32_t h = 0; h < nheaps; h++) {
++            uint32_t n = MIN2(pool->vk.query_count - h * KK_TS_HEAP_MAX_ENTRIES,
++                              KK_TS_HEAP_MAX_ENTRIES);
++            pool->ts.heaps[h] =
++               mtl_new_timestamp_counter_heap(dev->mtl_handle, n);
++            if (pool->ts.heaps[h] == NULL) {
++               kk_DestroyQueryPool(device, kk_query_pool_to_handle(pool),
++                                   pAllocator);
++               return vk_error(dev, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++            }
+          }
+       } else {
+          mesa_logw(
+@@ -237,8 +253,11 @@ kk_DestroyQueryPool(VkDevice device, VkQueryPool queryPool,
+          kk_query_table_remove(dev, &dev->occlusion_queries, remap_index[i]);
+       }
+    } else if (kk_pool_is_ts(pool)) {
+-      if (pool->ts.heap)
+-         mtl_release(pool->ts.heap);
++      for (uint32_t h = 0; h < pool->ts.heap_count; h++) {
++         if (pool->ts.heaps[h])
++            mtl_release(pool->ts.heaps[h]);
++      }
++      vk_free2(&dev->vk.alloc, pAllocator, pool->ts.heaps);
+    }
+ 
+    kk_destroy_bo(dev, pool->bo);
+@@ -377,12 +396,14 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+       return;
+    }
+ 
+-   assert(pool->ts.heap);
++   assert(pool->ts.heaps);
++   mtl_counter_heap *heap = pool->ts.heaps[query / KK_TS_HEAP_MAX_ENTRIES];
++   uint32_t local = query % KK_TS_HEAP_MAX_ENTRIES;
+    uint32_t count = kk_mv_query_count(cmd);
+    enum mtl_render_stages mtl_stage =
+       kk_pipeline_stages_to_mtl_render_stage(stage);
+ 
+-   uint32_t heap_index = query;
++   uint32_t heap_index = local;
+ 
+    if (cmd->metal.render) {
+       /* If we've already issued a timestamp write for a render stage, reuse it
+@@ -391,7 +412,7 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+       bool reused = false;
+       util_dynarray_foreach(&cmd->ts_stage_map, struct kk_ts_stage_entry,
+                             entry) {
+-         if (entry->stage == mtl_stage && entry->heap == pool->ts.heap) {
++         if (entry->stage == mtl_stage && entry->heap == heap) {
+             heap_index = entry->index;
+             reused = true;
+             break;
+@@ -399,13 +420,12 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+       }
+ 
+       if (!reused) {
+-         struct kk_ts_stage_entry entry = {.heap = pool->ts.heap,
++         struct kk_ts_stage_entry entry = {.heap = heap,
+                                            .stage = mtl_stage,
+-                                           .index = query};
++                                           .index = local};
+          util_dynarray_append(&cmd->ts_stage_map, entry);
+ 
+-         mtl_render_write_timestamp(cmd->metal.render, mtl_stage, pool->ts.heap,
+-                                    query);
++         mtl_render_write_timestamp(cmd->metal.render, mtl_stage, heap, local);
+       }
+    } else {
+       /* compute encoder active or nothing active. If the latter, the write will
+@@ -417,14 +437,14 @@ kk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
+                       kk_query_report_addr(dev, pool, query),
+                       (uint32_t)LIBKK_QUERY_UNAVAILABLE);
+ 
+-      mtl_compute_write_timestamp(cmd->metal.compute, pool->ts.heap, query);
++      mtl_compute_write_timestamp(cmd->metal.compute, heap, local);
+    }
+ 
+    /* Resolve the Metal timestamp value to all multiview query indices so that
+     * they all become available. */
+    for (uint32_t i = 0; i < count; i++) {
+       struct kk_ts_resolve resolve = {
+-         .heap = pool->ts.heap,
++         .heap = heap,
+          .index = heap_index,
+          .dst_addr = kk_query_report_addr(dev, pool, query + i),
+       };
+diff --git a/src/kosmickrisp/vulkan/kk_query_pool.h b/src/kosmickrisp/vulkan/kk_query_pool.h
+index 0670fd5..3c30dfb 100644
+--- a/src/kosmickrisp/vulkan/kk_query_pool.h
++++ b/src/kosmickrisp/vulkan/kk_query_pool.h
+@@ -16,9 +16,15 @@ struct kk_ts_state {
+    /* Metal 4 counter heap backing VK_QUERY_TYPE_TIMESTAMP pools. Timestamps are
+     * sampled into this heap and later resolved into `bo` (see kk_query_pool.c).
+     * NULL for non-timestamp pools. */
+-   mtl_counter_heap *heap;
++   mtl_counter_heap **heaps;
++   uint32_t heap_count;
+ };
+ 
++/* Metal rejects counter heaps larger than 4096 entries ("MTLCounterHeap: Invalid heap size
++ * requested", "Requested Heap size is too large (requested N max is 4096)"), so a timestamp query
++ * pool is backed by ceil(queryCount / 4096) heaps. */
++#define KK_TS_HEAP_MAX_ENTRIES 4096u
++
+ struct kk_oq_state {
+    unsigned queries;
+ };
+diff --git a/src/kosmickrisp/vulkan/kk_query_table.c b/src/kosmickrisp/vulkan/kk_query_table.c
+index 8a0833e..0dd5f44 100644
+--- a/src/kosmickrisp/vulkan/kk_query_table.c
++++ b/src/kosmickrisp/vulkan/kk_query_table.c
+@@ -24,7 +24,8 @@ kk_query_table_grow_locked(struct kk_device *dev, struct kk_query_table *table,
+    assert(new_alloc <= table->max_alloc);
+ 
+    const uint32_t new_mem_size = new_alloc * query_size;
+-   result = kk_alloc_bo(dev, &dev->vk.base, new_mem_size, 256, &bo);
++   result = kk_alloc_bo(dev, &dev->vk.base, new_mem_size, 256, &bo,
++                         KK_MEM_QUERY_TABLE);
+    if (result != VK_SUCCESS)
+       return result;
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 2334342..6e1b736 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -32,6 +32,140 @@
+ #include "vk_nir_convert_ycbcr.h"
+ #include "vk_pipeline.h"
+ 
++#include <compression.h>
++#include <stdatomic.h>
++
++/* MSL source memory (KK_MSL_COMPRESS, KK_MSL_STATS).
++ *
++ * Every shader keeps its MSL text (and the VS a copy of the other stages')
++ * for pipeline creation and for the pipeline cache blob. With the prebuilt
++ * metallib / MTL4 archive path serving the pipelines the text is only read
++ * again on a rebuild, so KK_MSL_COMPRESS=1 keeps an LZFSE copy instead and
++ * decompresses it on demand. The compressed bytes are also what the shader
++ * serializes, so the pipeline cache blob shrinks the same way. KK_MSL_STATS=1
++ * logs the live MSL bytes to stderr. */
++#define KK_MSL_Z_FLAG 0x80000000u
++
++static atomic_llong kk_msl_live_raw, kk_msl_live_z, kk_msl_live_z_raw;
++static atomic_uint kk_msl_events;
++
++static bool
++kk_msl_compress_enabled(void)
++{
++   static int v = -1;
++   if (v < 0) {
++      const char *e = getenv("KK_MSL_COMPRESS");
++      v = e && atoi(e) != 0;
++   }
++   return v;
++}
++
++static void
++kk_msl_stats_print(void)
++{
++   fprintf(stderr,
++           "[kk-msl] live raw %lld B (%.1f MiB), compressed %lld B (%.1f MiB, "
++           "raw-equivalent %.1f MiB)\n",
++           (long long)atomic_load(&kk_msl_live_raw),
++           atomic_load(&kk_msl_live_raw) / 1048576.0,
++           (long long)atomic_load(&kk_msl_live_z),
++           atomic_load(&kk_msl_live_z) / 1048576.0,
++           atomic_load(&kk_msl_live_z_raw) / 1048576.0);
++}
++
++static void
++kk_msl_stats_event(long long raw, long long z, long long z_raw)
++{
++   static int on = -1;
++   if (on < 0) {
++      on = getenv("KK_MSL_STATS") != NULL;
++      if (on)
++         atexit(kk_msl_stats_print);
++   }
++   atomic_fetch_add(&kk_msl_live_raw, raw);
++   atomic_fetch_add(&kk_msl_live_z, z);
++   atomic_fetch_add(&kk_msl_live_z_raw, z_raw);
++   if (on && (atomic_fetch_add(&kk_msl_events, 1) % 512) == 511)
++      kk_msl_stats_print();
++}
++
++static void
++kk_msl_account_raw(const char *code, int sign)
++{
++   if (code)
++      kk_msl_stats_event(sign * (long long)(strlen(code) + 1), 0, 0);
++}
++
++static void
++kk_msl_pack(struct msl_compile_data *d, struct kk_msl_z *z)
++{
++   if (!kk_msl_compress_enabled() || !d->code || z->data)
++      return;
++   const uint32_t raw_len = strlen(d->code) + 1;
++   void *buf = malloc(raw_len);
++   if (!buf)
++      return;
++   size_t n = compression_encode_buffer(buf, raw_len, (const uint8_t *)d->code,
++                                        raw_len, NULL, COMPRESSION_LZFSE);
++   if (n == 0 || n >= raw_len) {
++      free(buf);
++      return;
++   }
++   void *small = realloc(buf, n);
++   z->data = small ? small : buf;
++   z->len = n;
++   z->raw_len = raw_len;
++   kk_msl_stats_event(-(long long)raw_len, n, raw_len);
++   ralloc_free(d->code);
++   d->code = NULL;
++}
++
++/* Source text of a stage: the live string or a temporary decompressed copy
++ * returned in *tmp (free with free()). NULL on failure. */
++static const char *
++kk_msl_text(const struct msl_compile_data *d, const struct kk_msl_z *z,
++            char **tmp)
++{
++   *tmp = NULL;
++   if (d->code)
++      return d->code;
++   if (!z->data)
++      return NULL;
++   char *out = malloc(z->raw_len);
++   if (!out)
++      return NULL;
++   size_t n = compression_decode_buffer((uint8_t *)out, z->raw_len, z->data,
++                                        z->len, NULL, COMPRESSION_LZFSE);
++   if (n != z->raw_len) {
++      free(out);
++      return NULL;
++   }
++   *tmp = out;
++   return out;
++}
++
++static void
++kk_msl_release(struct msl_compile_data *d, struct kk_msl_z *z)
++{
++   kk_msl_account_raw(d->code, -1);
++   if (z->data)
++      kk_msl_stats_event(0, -(long long)z->len, -(long long)z->raw_len);
++   free(z->data);
++   memset(z, 0, sizeof(*z));
++   ralloc_free(d->code);
++   d->code = NULL;
++}
++
++static void
++kk_shader_pack_msl(struct kk_shader *shader)
++{
++   if (!kk_msl_compress_enabled())
++      return;
++   for (unsigned i = 0; i < ARRAY_SIZE(shader->msl_data); i++)
++      kk_msl_pack(&shader->msl_data[i], &shader->msl_z[i]);
++   kk_msl_pack(&shader->gs_main, &shader->gs_main_z);
++}
++
+ static const nir_shader_compiler_options *
+ kk_get_nir_options(struct vk_physical_device *vk_pdev, mesa_shader_stage stage,
+                    UNUSED const struct vk_pipeline_robustness_state *rs)
+@@ -77,10 +211,16 @@ kk_preprocess_nir(UNUSED struct vk_physical_device *vk_pdev, nir_shader *nir,
+    msl_preprocess_nir(nir);
+ 
+    /* Cannot be part of msl_preprocess_nir since clc does not expose
+-    * has_base_workgroup_id */
++    * has_base_workgroup_id.
++    *
++    * Only compute has a base workgroup (vkCmdDispatchBase). A mesh shader's
++    * gl_WorkGroupID starts at zero, and its root table is the graphics one,
++    * where the words of cs.base_group hold draw.buffer_strides[0..2]: with a
++    * base, every mesh draw recorded after a draw that read vertex buffers got
++    * its workgroup id shifted by those bindings' strides. */
+    nir_lower_compute_system_values_options csv_options = {
+       .has_base_global_invocation_id = 0,
+-      .has_base_workgroup_id = true,
++      .has_base_workgroup_id = nir->info.stage == MESA_SHADER_COMPUTE,
+    };
+    NIR_PASS(_, nir, nir_lower_compute_system_values, &csv_options);
+ }
+@@ -201,7 +341,7 @@ kk_hash_graphics_state(struct vk_physical_device *device,
+    struct mesa_blake3 blake3_ctx;
+    _mesa_blake3_init(&blake3_ctx);
+ 
+-   if (stages & VK_SHADER_STAGE_VERTEX_BIT) {
++   if ((stages & VK_SHADER_STAGE_VERTEX_BIT) && state->ia && state->vi) {
+       struct kk_vs_key key;
+       kk_populate_vs_key(&key, state);
+       _mesa_blake3_update(&blake3_ctx, &key, sizeof(key));
+@@ -509,6 +649,9 @@ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
+                state->ms->alpha_to_one_enable);
+    }
+ 
++   /* Metal only exposes pixel-center barycentrics: lower the other flavours. */
++   NIR_PASS(_, nir, msl_nir_lower_barycentric_coord);
++
+    /* msl_nir_lower_sample_shading needs to go before blending since
+     * nir_lower_blend will always set uses_sample_shading to true if there's any
+     * output read. I believe we do not need to lower it always, that is why it
+@@ -747,8 +890,10 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+    NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_mem_ubo,
+             kk_buffer_addr_format(rs->uniform_buffers));
+ 
+-   NIR_PASS(_, nir, nir_lower_io, nir_var_shader_in | nir_var_shader_out,
+-            type_size_vec4,
++   /* Mesh outputs stay variables until msl_nir_lower_mesh() below */
++   const bool mesh = nir->info.stage == MESA_SHADER_MESH;
++   NIR_PASS(_, nir, nir_lower_io,
++            nir_var_shader_in | (mesh ? 0 : nir_var_shader_out), type_size_vec4,
+             nir_lower_io_lower_64bit_to_32 |
+                nir_lower_io_use_interpolated_input_intrinsics);
+ 
+@@ -758,6 +903,37 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+    NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_mem_shared,
+             nir_address_format_32bit_offset);
+ 
++   if (mesh) {
++      /* The shader's own workgroup memory is laid out (and possibly aliased
++       * through explicit layout) above. The mesh outputs become workgroup
++       * memory behind it, with their own plain layout. */
++      NIR_PASS(_, nir, nir_remove_dead_variables, nir_var_mem_shared, NULL);
++      NIR_PASS(_, nir, msl_nir_lower_mesh, KK_MAX_MESH_THREADGROUP_MEMORY);
++      /* Direct outputs are function-local copies; array ones (parameter
++       * arrays, clip distances) are lowered like any local array (as
++       * msl_preprocess_nir does). No-ops when every output is staged. */
++      NIR_PASS(_, nir, nir_lower_indirect_derefs_to_if_else_trees,
++               nir_var_function_temp, UINT32_MAX);
++      NIR_PASS(_, nir, nir_split_array_vars, nir_var_function_temp);
++      nir->info.shared_memory_explicit_layout = false;
++      nir->info.shared_size = align(nir->info.shared_size, 16);
++      NIR_PASS(_, nir, nir_lower_vars_to_explicit_types, nir_var_mem_shared,
++               shared_var_info);
++      NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_mem_shared,
++               nir_address_format_32bit_offset);
++      NIR_PASS(_, nir, nir_lower_compute_system_values, NULL);
++
++      /* KK_MESH_DEBUG: one line per mesh shader (Metal allows 32 KiB of
++       * threadgroup memory for the shader's own plus the staged outputs) */
++      if (getenv("KK_MESH_DEBUG"))
++         fprintf(stderr,
++                 "[kk-mesh] %u x %u x %u threads, %u vertices, %u primitives, "
++                 "%u B threadgroup memory\n",
++                 nir->info.workgroup_size[0], nir->info.workgroup_size[1],
++                 nir->info.workgroup_size[2], nir->info.mesh.max_vertices_out,
++                 nir->info.mesh.max_primitives_out, nir->info.shared_size);
++   }
++
+    if (nir->info.zero_initialize_shared_memory && nir->info.shared_size > 0) {
+       /* QMD::SHARED_MEMORY_SIZE requires an alignment of 256B so it's safe to
+        * align everything up to 16B so we can write whole vec4s.
+@@ -831,6 +1007,14 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+ 
+ static const struct vk_shader_ops kk_shader_ops;
+ 
++/* The first stage of a graphics pipeline holds the Metal pipeline: the vertex
++ * shader, or the mesh shader of a mesh pipeline (which uses info.vs too). */
++static inline bool
++kk_stage_holds_pipeline(mesa_shader_stage stage)
++{
++   return stage == MESA_SHADER_VERTEX || stage == MESA_SHADER_MESH;
++}
++
+ static void
+ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+                   const VkAllocationCallbacks *pAllocator)
+@@ -842,7 +1026,7 @@ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+    if (shader->info.stage == MESA_SHADER_COMPUTE) {
+       mtl_release(pipe->cs);
+       pipe->cs = NULL;
+-   } else if (shader->info.stage == MESA_SHADER_VERTEX) {
++   } else if (kk_stage_holds_pipeline(shader->info.stage)) {
+       /* Pre-render compute pipelines. */
+       for (uint32_t i = 0u; i < pipe->gfx.pre_render_count; ++i) {
+          mtl_release(pipe->gfx.pre_render[i]);
+@@ -860,20 +1044,14 @@ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+       for (uint32_t i = 0u; i < pipe->gfx.pre_render_count; ++i)
+          mtl_release(pipe->gfx.pre_render[i]);
+ 
+-      /* Serialization data. */
+-      u_foreach_bit(i, shader->info.vs.additional_stages_bits) {
+-         struct msl_compile_data *data = &shader->msl_data[i];
+-         ralloc_free((void *)data->entrypoint_name);
+-         ralloc_free((void *)data->code);
+-      }
+    }
+ 
+-   struct msl_compile_data *data = &shader->msl_data[shader->info.stage];
+-   ralloc_free((void *)data->entrypoint_name);
+-   ralloc_free((void *)data->code);
+-
++   for (unsigned i = 0; i < ARRAY_SIZE(shader->msl_data); i++) {
++      ralloc_free((void *)shader->msl_data[i].entrypoint_name);
++      kk_msl_release(&shader->msl_data[i], &shader->msl_z[i]);
++   }
+    ralloc_free((void *)shader->gs_main.entrypoint_name);
+-   ralloc_free((void *)shader->gs_main.code);
++   kk_msl_release(&shader->gs_main, &shader->gs_main_z);
+ 
+    vk_shader_free(&dev->vk, pAllocator, &shader->vk);
+ }
+@@ -928,6 +1106,13 @@ gather_shader_info(struct kk_shader *shader, nir_shader *nir,
+       shader->info.cs.local_size.x = nir->info.workgroup_size[0];
+       shader->info.cs.local_size.y = nir->info.workgroup_size[1];
+       shader->info.cs.local_size.z = nir->info.workgroup_size[2];
++   } else if (nir->info.stage == MESA_SHADER_MESH) {
++      /* Cull distances are folded into primitive_culled by the mesh shader */
++      shader->info.num_cull_distances = 0;
++      shader->info.vs.mesh_local_size.x = nir->info.workgroup_size[0];
++      shader->info.vs.mesh_local_size.y = nir->info.workgroup_size[1];
++      shader->info.vs.mesh_local_size.z = nir->info.workgroup_size[2];
++      shader->info.vs.mesh_prim = nir->info.mesh.primitive_type;
+    }
+ }
+ 
+@@ -1031,6 +1216,7 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+    }
+ 
+    data->code = nir_to_msl(nir, &translate_options);
++   kk_msl_account_raw(data->code, 1);
+    const char *entrypoint_name = nir_shader_get_entrypoint(nir)->function->name;
+ 
+    /* We need to steal so it doesn't get destroyed with the nir. Needs to happen
+@@ -1074,7 +1260,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+       prev_stage ? prev_stage->info.num_cull_distances : 0;
+    /* A GS lowers clip and cull distances on its rasterization VS instead; the
+     * stage feeding it has none after linking */
+-   if (stage != MESA_SHADER_GEOMETRY)
++   if (stage != MESA_SHADER_GEOMETRY && stage != MESA_SHADER_MESH)
+       msl_nir_lower_clip_cull_distance(nir, num_cull_distances);
+ 
+    /* When using poly to emulate tessellation or GS, the VS and TCS are turned
+@@ -1282,14 +1468,20 @@ get_empty_nir(struct kk_device *dev, mesa_shader_stage stage,
+ static VkResult
+ kk_compile_compute_pipeline(struct kk_device *device,
+                             const struct msl_compile_data *data,
++                            const struct kk_msl_z *z,
+                             uint32_t local_size_threads,
+                             mtl_compute_pipeline_state **pipe)
+ {
+    struct kk_physical_device *pdev = kk_device_physical(device);
+ 
++   char *tmp;
++   const char *code = kk_msl_text(data, z, &tmp);
++   if (code == NULL)
++      return VK_ERROR_INVALID_SHADER_NV;
+    mtl_library *library = mtl_new_library(
+-      device->mtl_compiler_handle, data->code, pdev->info.msl_version,
++      device->mtl_compiler_handle, code, pdev->info.msl_version,
+       MTL_MATH_MODE_FAST, MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
++   free(tmp);
+    if (library == NULL)
+       return VK_ERROR_INVALID_SHADER_NV;
+ 
+@@ -1410,6 +1602,7 @@ static void
+ kk_msl_copy(struct msl_compile_data *dst, const struct msl_compile_data *src)
+ {
+    dst->code = ralloc_strdup(NULL, src->code);
++   kk_msl_account_raw(dst->code, 1);
+    dst->entrypoint_name = ralloc_strdup(NULL, src->entrypoint_name);
+ }
+ 
+@@ -1486,7 +1679,10 @@ gather_graphics_pipeline_create_info(
+       }
+    }
+ 
+-   uint8_t topology = state->ia->primitive_topology;
++   /* Mesh pipelines have no input assembly; the topology is part of the mesh
++    * function's output type. */
++   uint8_t topology = state->ia ? state->ia->primitive_topology
++                                : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    if (info->vs.additional_stages_bits & BITFIELD_BIT(MESA_SHADER_TESS_CTRL)) {
+       /* TODO_KOSMICKRISP Hackity hack */
+       struct kk_shader *tesc = shaders[1];
+@@ -1527,7 +1723,8 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+ 
+    VkResult result = VK_SUCCESS;
+    struct kk_pipeline_handles *pipe = &vs->pipeline;
+-   mesa_shader_stage vs_stage = MESA_SHADER_VERTEX;
++   const bool mesh = vs->info.stage == MESA_SHADER_MESH;
++   mesa_shader_stage vs_stage = mesh ? MESA_SHADER_MESH : MESA_SHADER_VERTEX;
+ 
+    /* When tessellation or geometry shaders are present, the pair that will be
+     * used for the Metal render pipeline will be the fragment shader and the
+@@ -1540,7 +1737,7 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+                                       ? vs->info.vs.tess_local_thread_size
+                                       : KK_POLY_WG_SIZE;
+       result = kk_compile_compute_pipeline(device, &vs->msl_data[vs_stage],
+-                                           local_thread_size,
++                                           &vs->msl_z[vs_stage], local_thread_size,
+                                            &pipe->gfx.pre_render[i]);
+ 
+       if (result != VK_SUCCESS)
+@@ -1553,18 +1750,42 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    if (vs->info.vs.additional_stages_bits &
+        BITFIELD_BIT(MESA_SHADER_GEOMETRY)) {
+       result = kk_compile_compute_pipeline(
+-         device, &vs->gs_main, KK_POLY_WG_SIZE,
++         device, &vs->gs_main, &vs->gs_main_z, KK_POLY_WG_SIZE,
+          &pipe->gfx.pre_render[pipe->gfx.pre_render_count++]);
+       if (result != VK_SUCCESS)
+          return VK_ERROR_INVALID_SHADER_NV;
+    }
+ 
+    const struct msl_compile_data *vs_data = &vs->msl_data[vs_stage];
++   char *vs_tmp, *fs_tmp;
++   const char *vs_code = kk_msl_text(vs_data, &vs->msl_z[vs_stage], &vs_tmp);
++   const char *fs_code =
++      kk_msl_text(&vs->msl_data[MESA_SHADER_FRAGMENT],
++                  &vs->msl_z[MESA_SHADER_FRAGMENT], &fs_tmp);
++   if (!vs_code || !fs_code) {
++      free(vs_tmp);
++      free(fs_tmp);
++      return VK_ERROR_INVALID_SHADER_NV;
++   }
++   /* KK_MESH_DEBUG=2: the output structs of every mesh function (Metal allows
++    * 32 KiB for max_vertices x vertex struct + max_primitives x primitive
++    * struct, "Total mesh size") */
++   const char *mesh_debug = getenv("KK_MESH_DEBUG");
++   if (mesh_debug && atoi(mesh_debug) >= 2) {
++      const char *begin = strstr(vs_code, "struct MeshVertexOut");
++      const char *end = begin ? strstr(begin, "using KKMesh") : NULL;
++      end = end ? strchr(end, '\n') : NULL;
++      if (end)
++         fprintf(stderr, "[kk-mesh] %.*s\n", (int)(end - begin), begin);
++   }
+    mtl_library *vertex_library = mtl_new_library(
+-      device->mtl_compiler_handle, vs_data->code, pdev->info.msl_version,
++      device->mtl_compiler_handle, vs_code, pdev->info.msl_version,
+       MTL_MATH_MODE_FAST, MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
+-   if (vertex_library == NULL)
++   free(vs_tmp);
++   if (vertex_library == NULL) {
++      free(fs_tmp);
+       return VK_ERROR_INVALID_SHADER_NV;
++   }
+ 
+    mtl_function_descriptor *vertex_function =
+       mtl_new_library_function_descriptor(vertex_library,
+@@ -1572,8 +1793,9 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+ 
+    const struct msl_compile_data *fs_data = &vs->msl_data[MESA_SHADER_FRAGMENT];
+    mtl_library *fragment_library = mtl_new_library(
+-      device->mtl_compiler_handle, fs_data->code, pdev->info.msl_version,
++      device->mtl_compiler_handle, fs_code, pdev->info.msl_version,
+       MTL_MATH_MODE_FAST, MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
++   free(fs_tmp);
+    if (fragment_library == NULL) {
+       result = VK_ERROR_INVALID_SHADER_NV;
+       goto destroy_vertex;
+@@ -1583,15 +1805,24 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+                                           fs_data->entrypoint_name);
+ 
+    mtl_render_pipeline_descriptor *pipeline_descriptor =
+-      mtl_new_render_pipeline_descriptor();
+-   mtl_render_pipeline_descriptor_set_vertex_shader(pipeline_descriptor,
+-                                                    vertex_function);
++      mesh ? mtl_new_mesh_render_pipeline_descriptor()
++           : mtl_new_render_pipeline_descriptor();
++   if (mesh) {
++      mtl_render_pipeline_descriptor_set_mesh_shader(
++         pipeline_descriptor, vertex_function,
++         vs->info.vs.mesh_local_size.x * vs->info.vs.mesh_local_size.y *
++            vs->info.vs.mesh_local_size.z);
++   } else {
++      mtl_render_pipeline_descriptor_set_vertex_shader(pipeline_descriptor,
++                                                       vertex_function);
++   }
+    mtl_render_pipeline_descriptor_set_fragment_shader(pipeline_descriptor,
+                                                       fragment_function);
+ 
+    /* Layered rendering in Metal requires setting primitive topology class */
+-   mtl_render_pipeline_descriptor_set_input_primitive_topology(
+-      pipeline_descriptor, vs->info.vs.topology);
++   if (!mesh)
++      mtl_render_pipeline_descriptor_set_input_primitive_topology(
++         pipeline_descriptor, vs->info.vs.topology);
+ 
+    /* If color attachments are reordered there might be unused / invalid gaps
+     * in the array so need to check them all, not just first
+@@ -1714,6 +1945,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+    /* Lower shaders, notably lowering IO. This is a prerequisite for intershader
+     * optimization. */
+    const struct vk_pipeline_robustness_state *vertex_robustness = &rs_none;
++   bool mesh_too_big = false;
+    for (uint32_t i = 0u; i < shader_count; ++i) {
+       const struct vk_shader_compile_info *info = &infos[i];
+       nir_shader *nir = info->nir;
+@@ -1727,12 +1959,42 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+       kk_lower_nir(dev, nir, emulated_stage, info->robustness,
+                    info->set_layout_count, info->set_layouts, state, features);
+ 
++      /* The staged mesh outputs live in the same threadgroup memory as the
++       * shader's own workgroup memory (msl_nir_lower_mesh), and Metal gives a
++       * threadgroup 32 KiB for both. The advertised limits are the Vulkan
++       * minimums, each alone up to 32 KiB, so the sum can exceed it. The
++       * lowering then emits the outputs without the staged copy where the
++       * shader's writes allow it; what is left over the limit fails the
++       * pipeline cleanly here instead of handing Metal a function it rejects.
++       * (Metal has a second limit this does not check: 32 KiB for the mesh
++       * itself, max vertices x vertex struct + max primitives x primitive
++       * struct; pipeline creation reports "Total mesh size".) */
++      if (nir->info.stage == MESA_SHADER_MESH &&
++          nir->info.shared_size > KK_MAX_MESH_THREADGROUP_MEMORY) {
++         fprintf(stderr,
++                 "[kk-mesh] mesh shader needs %u B of threadgroup memory "
++                 "(workgroup memory + staged outputs for %u vertices and %u "
++                 "primitives), Metal allows %u B: pipeline creation fails "
++                 "(KK_MESH_DEBUG=1 says which outputs had to be staged)\n",
++                 nir->info.shared_size, nir->info.mesh.max_vertices_out,
++                 nir->info.mesh.max_primitives_out,
++                 KK_MAX_MESH_THREADGROUP_MEMORY);
++         mesh_too_big = true;
++      }
++
+       if (nir->info.stage == MESA_SHADER_VERTEX)
+          vertex_robustness = info->robustness;
+ 
+       nir_shaders[i] = nir;
+    }
+ 
++   if (mesh_too_big) {
++      for (uint32_t i = 0u; i < shader_count; ++i)
++         ralloc_free(nir_shaders[i]);
++      memset(shaders_out, 0, shader_count * sizeof(*shaders_out));
++      return VK_ERROR_INVALID_SHADER_NV;
++   }
++
+    /* Since we don't support GPL nor shader objects and Metal render pipelines
+     * require both vertex and fragment, we may need to provide a pass-through
+     * fragment. */
+@@ -1797,6 +2059,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+                                     s->info.cs.local_size.z;
+       result =
+          kk_compile_compute_pipeline(dev, &s->msl_data[MESA_SHADER_COMPUTE],
++                                     &s->msl_z[MESA_SHADER_COMPUTE],
+                                      local_size_threads, &s->pipeline.cs);
+    } else {
+       gather_graphics_pipeline_create_info(state, shaders, total_shaders);
+@@ -1815,6 +2078,9 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+       /* Memset the output array */
+       memset(shaders_out, 0, shader_count * sizeof(*shaders_out));
+    } else {
++      /* The pipelines exist: keep only compressed MSL (KK_MSL_COMPRESS). */
++      for (uint32_t i = 0; i < shader_count; i++)
++         kk_shader_pack_msl(shaders[i]);
+       memcpy(shaders_out, shaders, shader_count * sizeof(*shaders_out));
+    }
+ 
+@@ -1826,20 +2092,28 @@ static bool
+ kk_has_gs_main(const struct kk_shader_info *info)
+ {
+    return info->stage == MESA_SHADER_GEOMETRY ||
+-          (info->stage == MESA_SHADER_VERTEX &&
++          (kk_stage_holds_pipeline(info->stage) &&
+            (info->vs.additional_stages_bits &
+             BITFIELD_BIT(MESA_SHADER_GEOMETRY)));
+ }
+ 
+ static void
+-kk_msl_serialize(const struct msl_compile_data *data, struct blob *blob)
++kk_msl_serialize(const struct msl_compile_data *data,
++                 const struct kk_msl_z *z, struct blob *blob)
+ {
+    uint32_t entrypoint_length = strlen(data->entrypoint_name) + 1;
+-   uint32_t code_length = strlen(data->code) + 1;
+    blob_write_uint32(blob, entrypoint_length);
+-   blob_write_uint32(blob, code_length);
+-   blob_write_bytes(blob, data->entrypoint_name, entrypoint_length);
+-   blob_write_bytes(blob, data->code, code_length);
++   if (z->data) {
++      blob_write_uint32(blob, z->raw_len | KK_MSL_Z_FLAG);
++      blob_write_uint32(blob, z->len);
++      blob_write_bytes(blob, data->entrypoint_name, entrypoint_length);
++      blob_write_bytes(blob, z->data, z->len);
++   } else {
++      uint32_t code_length = strlen(data->code) + 1;
++      blob_write_uint32(blob, code_length);
++      blob_write_bytes(blob, data->entrypoint_name, entrypoint_length);
++      blob_write_bytes(blob, data->code, code_length);
++   }
+ }
+ 
+ static bool
+@@ -1849,33 +2123,51 @@ kk_shader_serialize(struct vk_device *vk_dev, const struct vk_shader *vk_shader,
+    struct kk_shader *shader = container_of(vk_shader, struct kk_shader, vk);
+ 
+    blob_write_bytes(blob, &shader->info, sizeof(shader->info));
+-   kk_msl_serialize(&shader->msl_data[shader->info.stage], blob);
+-   if (shader->info.stage == MESA_SHADER_VERTEX) {
++   kk_msl_serialize(&shader->msl_data[shader->info.stage],
++                    &shader->msl_z[shader->info.stage], blob);
++   if (kk_stage_holds_pipeline(shader->info.stage)) {
+       u_foreach_bit(stage, shader->info.vs.additional_stages_bits) {
+-         kk_msl_serialize(&shader->msl_data[stage], blob);
++         kk_msl_serialize(&shader->msl_data[stage], &shader->msl_z[stage], blob);
+       }
+    }
+    if (kk_has_gs_main(&shader->info))
+-      kk_msl_serialize(&shader->gs_main, blob);
++      kk_msl_serialize(&shader->gs_main, &shader->gs_main_z, blob);
+ 
+    return !blob->out_of_memory;
+ }
+ 
+ static VkResult
+-kk_msl_deserialize(struct blob_reader *blob, struct msl_compile_data *data)
++kk_msl_deserialize(struct blob_reader *blob, struct msl_compile_data *data,
++                   struct kk_msl_z *z)
+ {
+    const uint32_t entrypoint_length = blob_read_uint32(blob);
+-   const uint32_t code_length = blob_read_uint32(blob);
++   uint32_t code_length = blob_read_uint32(blob);
++   const bool packed = (code_length & KK_MSL_Z_FLAG) != 0;
++   code_length &= ~KK_MSL_Z_FLAG;
++   const uint32_t z_length = packed ? blob_read_uint32(blob) : 0;
++   if (blob->overrun)
++      return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
++
+    data->entrypoint_name = ralloc_array(NULL, char, entrypoint_length);
+    if (data->entrypoint_name == NULL)
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+-
+-   data->code = ralloc_array(NULL, char, code_length);
+-   if (data->code == NULL)
+-      return VK_ERROR_OUT_OF_HOST_MEMORY;
+-
+    blob_copy_bytes(blob, (void *)data->entrypoint_name, entrypoint_length);
+-   blob_copy_bytes(blob, (void *)data->code, code_length);
++
++   if (packed) {
++      z->data = malloc(z_length);
++      if (z->data == NULL)
++         return VK_ERROR_OUT_OF_HOST_MEMORY;
++      z->len = z_length;
++      z->raw_len = code_length;
++      blob_copy_bytes(blob, z->data, z_length);
++      kk_msl_stats_event(0, z_length, code_length);
++   } else {
++      data->code = ralloc_array(NULL, char, code_length);
++      if (data->code == NULL)
++         return VK_ERROR_OUT_OF_HOST_MEMORY;
++      blob_copy_bytes(blob, (void *)data->code, code_length);
++      kk_msl_account_raw(data->code, 1);
++   }
+ 
+    if (blob->overrun)
+       return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+@@ -1901,22 +2193,24 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+    if (shader == NULL)
+       return vk_error(dev, VK_ERROR_OUT_OF_HOST_MEMORY);
+ 
+-   VkResult result = kk_msl_deserialize(blob, &shader->msl_data[info.stage]);
++   VkResult result = kk_msl_deserialize(blob, &shader->msl_data[info.stage],
++                                      &shader->msl_z[info.stage]);
+    if (result != VK_SUCCESS)
+       goto fail;
+ 
+    shader->info = info;
+ 
+-   if (shader->info.stage == MESA_SHADER_VERTEX) {
++   if (kk_stage_holds_pipeline(shader->info.stage)) {
+       u_foreach_bit(stage, shader->info.vs.additional_stages_bits) {
+-         result = kk_msl_deserialize(blob, &shader->msl_data[stage]);
++         result = kk_msl_deserialize(blob, &shader->msl_data[stage],
++                                   &shader->msl_z[stage]);
+          if (result != VK_SUCCESS)
+             goto fail;
+       }
+    }
+ 
+    if (kk_has_gs_main(&info)) {
+-      result = kk_msl_deserialize(blob, &shader->gs_main);
++      result = kk_msl_deserialize(blob, &shader->gs_main, &shader->gs_main_z);
+       if (result != VK_SUCCESS)
+          goto fail;
+    }
+@@ -1926,15 +2220,17 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+                                     shader->info.cs.local_size.y *
+                                     shader->info.cs.local_size.z;
+       result = kk_compile_compute_pipeline(
+-         dev, &shader->msl_data[MESA_SHADER_COMPUTE], local_size_threads,
++         dev, &shader->msl_data[MESA_SHADER_COMPUTE],
++         &shader->msl_z[MESA_SHADER_COMPUTE], local_size_threads,
+          &shader->pipeline.cs);
+-   } else if (info.stage == MESA_SHADER_VERTEX) {
++   } else if (kk_stage_holds_pipeline(info.stage)) {
+       result = kk_compile_graphics_pipeline(dev, shader);
+    }
+ 
+    if (result != VK_SUCCESS)
+       goto fail;
+ 
++   kk_shader_pack_msl(shader);
+    *shader_out = &shader->vk;
+ 
+    return VK_SUCCESS;
+@@ -1951,10 +2247,34 @@ kk_cmd_bind_compute_shader(struct kk_cmd_buffer *cmd, struct kk_shader *shader)
+ }
+ 
+ static void
+-kk_cmd_bind_graphics_shader(struct kk_cmd_buffer *cmd,
+-                            const mesa_shader_stage stage,
++kk_cmd_bind_graphics_shader(struct kk_cmd_buffer *cmd, mesa_shader_stage stage,
+                             struct kk_shader *shader)
+ {
++   /* A mesh shader is the pipeline holder of its pipeline, like a vertex
++    * shader. It is tracked in the vertex slot too so that everything keyed on
++    * "the first stage" keeps working; the mesh slot tells the two apart. The
++    * runtime binds the stages in order (vertex before mesh) and passes NULL
++    * for the stages a pipeline lacks. */
++   if (stage == MESA_SHADER_MESH) {
++      struct kk_shader *old = cmd->state.shaders[MESA_SHADER_MESH];
++      cmd->state.shaders[MESA_SHADER_MESH] = shader;
++      cmd->state.dirty_shaders |= BITFIELD_BIT(MESA_SHADER_MESH);
++      if (shader == NULL) {
++         if (old != NULL && cmd->state.shaders[MESA_SHADER_VERTEX] == old)
++            cmd->state.shaders[MESA_SHADER_VERTEX] = NULL;
++         return;
++      }
++      stage = MESA_SHADER_VERTEX;
++   } else if (stage == MESA_SHADER_VERTEX && shader == NULL) {
++      /* Unbinding the vertex stage must not drop a mesh shader bound in the
++       * same call sequence */
++      if (cmd->state.shaders[MESA_SHADER_MESH] == NULL ||
++          cmd->state.shaders[MESA_SHADER_VERTEX] !=
++             cmd->state.shaders[MESA_SHADER_MESH])
++         cmd->state.shaders[MESA_SHADER_VERTEX] = NULL;
++      return;
++   }
++
+    cmd->state.shaders[stage] = shader;
+    cmd->state.dirty_shaders |= BITFIELD_BIT(stage);
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index b603943..9cf8274 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -66,6 +66,11 @@ struct kk_shader_info {
+ 
+          uint32_t tess_local_thread_size;
+ 
++         /* Workgroup size of a mesh shader (the pipeline holder of a mesh
++          * pipeline), zero for a vertex shader. */
++         struct mtl_size mesh_local_size;
++         enum mesa_prim mesh_prim;
++
+          /* Data needed to start render pass and bind pipeline. */
+          uint32_t attribs_read;
+          uint32_t sample_count;
+@@ -137,15 +142,26 @@ struct msl_compile_data {
+    char *entrypoint_name;
+ };
+ 
++/* LZFSE-compressed copy of an MSL source (KK_MSL_COMPRESS=1). When set, the
++ * matching msl_compile_data.code is NULL and the text is rebuilt on demand
++ * for pipeline creation. */
++struct kk_msl_z {
++   void *data;
++   uint32_t len;
++   uint32_t raw_len; /* strlen(code) + 1 */
++};
++
+ struct kk_shader {
+    struct vk_shader vk;
+ 
+    struct kk_pipeline_handles pipeline;
+    struct kk_shader_info info;
+-   struct msl_compile_data msl_data[MESA_SHADER_STAGES];
++   struct msl_compile_data msl_data[MESA_SHADER_MESH_STAGES];
+    /* Compute pass of a GS. Its rasterization VS is in
+     * msl_data[MESA_SHADER_GEOMETRY]. */
+    struct msl_compile_data gs_main;
++   struct kk_msl_z msl_z[MESA_SHADER_MESH_STAGES];
++   struct kk_msl_z gs_main_z;
+ };
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(kk_shader, vk.base, VkShaderEXT,
+diff --git a/src/kosmickrisp/vulkan/kk_sync.c b/src/kosmickrisp/vulkan/kk_sync.c
+index f44200c..c75da08 100644
+--- a/src/kosmickrisp/vulkan/kk_sync.c
++++ b/src/kosmickrisp/vulkan/kk_sync.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <stdlib.h>
+ #include "kk_sync.h"
+ 
+ #include "kk_device.h"
+@@ -65,6 +66,25 @@ kk_timeline_wait(struct vk_device *device, struct vk_sync *sync,
+     * when we should stop waiting and convert to ms for Metal to be happy
+     * (Similar to what dzn does).
+     */
++   /* Poll fast path: the signaled value is a plain property read, while
++    * waitUntilSignaledValue:timeoutMS: enters the kernel even with a zero
++    * timeout. vkGetFenceStatus and zero-timeout waits are polls, so answer
++    * them from the signaled value and only enter the kernel to really block.
++    * KK_FENCE_POLL=0 restores the kernel wait for every call.
++    */
++   static int fence_poll = -1;
++   if (fence_poll < 0) {
++      const char *env = getenv("KK_FENCE_POLL");
++      fence_poll = !(env && env[0] == '0');
++   }
++   if (fence_poll) {
++      if (mtl_shared_event_get_signaled_value(timeline->mtl_handle) >=
++          wait_value)
++         return VK_SUCCESS;
++      if (abs_timeout_ns == 0)
++         return VK_TIMEOUT;
++   }
++
+    uint64_t timeout_ms = 0u;
+    if (abs_timeout_ns == OS_TIMEOUT_INFINITE) {
+       timeout_ms = OS_TIMEOUT_INFINITE;
+diff --git a/src/kosmickrisp/vulkan/meson.build b/src/kosmickrisp/vulkan/meson.build
+index 421b671..dbbf4a9 100644
+--- a/src/kosmickrisp/vulkan/meson.build
++++ b/src/kosmickrisp/vulkan/meson.build
+@@ -177,7 +177,7 @@ libkk = static_library(
+ libvulkan_kosmickrisp = shared_library(
+   'vulkan_kosmickrisp',
+   link_whole: [libkk],
+-  link_args: [ld_args_build_id, '-Wl,-undefined,dynamic_lookup'],
++  link_args: [ld_args_build_id, '-Wl,-undefined,dynamic_lookup', '-lcompression'],
+   gnu_symbol_visibility : 'hidden',
+   install : true,
+ )

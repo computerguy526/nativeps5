@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 11:22:48 +0000
+Subject: [PATCH] kosmickrisp: gpusafe watchdog: no false alarm on a commit
+ registered during the scan
+
+kk_safe_find_overdue subtracted the unsigned start time of a slot from a
+`now` taken before the scan. A commit registered after that instant has
+start > now, the difference wrapped to ~2^64 ns and the watchdog ended the
+game with _exit(70) on a brand-new command buffer (seen in a world map run:
+the flagged commit was 0 ms old, frames were flowing at 17 ms).
+
+- a slot newer than `now` is never overdue (kk_safe_slot_overdue);
+- the watchdog confirms the same commit again after 50 ms before it stops
+  the process (the ring is written without a lock);
+- the flight summary prints the overdue commit's age and whether it is
+  still pending;
+- SIGUSR2 is raised only when the host installed a handler (the default
+  action ended a host without one by the signal instead of exit code 70).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_safety.c      | 19 ++++++++++++++++---
+ src/kosmickrisp/vulkan/kk_safety_core.h | 12 ++++++++++--
+ 2 files changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_safety.c b/src/kosmickrisp/vulkan/kk_safety.c
+index a50d48a..f9a1c0e 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.c
++++ b/src/kosmickrisp/vulkan/kk_safety.c
+@@ -401,7 +401,9 @@ dump_flight(int overdue)
+       shown++;
+    }
+    if (overdue >= 0)
+-      fprintf(stderr, "[kk-safe] overdue commit #%llu\n", (unsigned long long)g_ring[overdue].seq);
++      fprintf(stderr, "[kk-safe] overdue commit #%llu, committed %.0f ms ago, %s\n",
++              (unsigned long long)g_ring[overdue].seq, (t - g_ring[overdue].start_ns) / 1e6,
++              g_ring[overdue].pending ? "still pending" : "completed meanwhile");
+    fflush(stderr);
+ }
+ 
+@@ -423,14 +425,25 @@ watchdog_main(void *arg)
+          continue;
+       int o = kk_safe_find_overdue(g_ring, now_ns(), limit);
+       if (o >= 0) {
++         /* Confirm on the same commit after a pause: the ring is written without a lock (a slot
++          * can be reused or completed while it is scanned), and a false alarm ends the game. */
++         uint64_t seq = __atomic_load_n(&g_ring[o].seq, __ATOMIC_ACQUIRE);
++         struct timespec c = {0, 50 * 1000 * 1000};
++         nanosleep(&c, NULL);
++         struct kk_safe_slot again = g_ring[o];
++         if (again.seq != seq || !kk_safe_slot_overdue(&again, now_ns(), limit))
++            continue;
+          atomic_store(&g_halted, 1); /* no new submissions */
+          fprintf(stderr,
+                  "[kk-safe] GPU WATCHDOG: command buffer incomplete after %.1f s; stopping new work. NOTE: exiting does NOT "
+                  "stop the committed GPU work (it ends by itself: loop cap %llu, %llu submissions aborted so far)\n",
+                  g_wd_s, (unsigned long long)kk_msl_loop_cap(), (unsigned long long)atomic_load(&g_loop_aborts));
+          dump_flight(o);
+-         /* Let the host (Kyty) print its own flight ring from a SIGUSR2 handler, then leave. */
+-         kill(getpid(), SIGUSR2);
++         /* Let the host (Kyty) print its own flight ring from a SIGUSR2 handler, then leave. Only
++          * when the host installed one: the default action would end the process by the signal. */
++         struct sigaction sa;
++         if (sigaction(SIGUSR2, NULL, &sa) == 0 && sa.sa_handler != SIG_DFL && sa.sa_handler != SIG_IGN)
++            kill(getpid(), SIGUSR2);
+          struct timespec w = {0, 300 * 1000 * 1000};
+          nanosleep(&w, NULL);
+          _exit(70);
+diff --git a/src/kosmickrisp/vulkan/kk_safety_core.h b/src/kosmickrisp/vulkan/kk_safety_core.h
+index e22b20d..0364cf4 100644
+--- a/src/kosmickrisp/vulkan/kk_safety_core.h
++++ b/src/kosmickrisp/vulkan/kk_safety_core.h
+@@ -53,6 +53,15 @@ struct kk_safe_slot {
+    uint32_t pending;   /* 1 until the completion handler ran */
+    uint32_t n_disp, n_render, cs_len, cs_local, rt;
+ };
++/* True when the slot has been pending for more than limit_ns at now_ns. A slot registered after
++ * `now_ns` was taken (start_ns > now_ns: the scan races with commits) is NOT overdue: the unsigned
++ * difference would wrap to ~2^64 ns and fire the watchdog on a brand-new commit. */
++static inline bool
++kk_safe_slot_overdue(const struct kk_safe_slot *s, uint64_t now_ns, uint64_t limit_ns)
++{
++   uint64_t start = s->start_ns;
++   return s->seq && s->pending && now_ns > start && now_ns - start > limit_ns;
++}
+ /* Index of the oldest slot pending longer than limit_ns, or -1. */
+ static inline int
+ kk_safe_find_overdue(const struct kk_safe_slot *ring, uint64_t now_ns, uint64_t limit_ns)
+@@ -60,8 +69,7 @@ kk_safe_find_overdue(const struct kk_safe_slot *ring, uint64_t now_ns, uint64_t
+    int best = -1;
+    for (unsigned i = 0; i < KK_SAFE_RING; i++) {
+       const struct kk_safe_slot *s = &ring[i];
+-      if (s->seq && s->pending && now_ns - s->start_ns > limit_ns &&
+-          (best < 0 || s->seq < ring[best].seq))
++      if (kk_safe_slot_overdue(s, now_ns, limit_ns) && (best < 0 || s->seq < ring[best].seq))
+          best = (int)i;
+    }
+    return best;

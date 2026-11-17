@@ -1,0 +1,787 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 21:37:15 +0000
+Subject: [PATCH] kosmickrisp: render pass load/store statistics, pass merge,
+ encoder barrier and load diagnostics
+
+KK_RP_STATS=<s>: per period the renderings, Metal render encoders and the
+attachment bytes behind each load and store action.
+
+KK_RP_MERGE=1: vkCmdEndRendering keeps the render encoder open; the next
+vkCmdBeginRendering of the command buffer continues it when it targets the
+same attachments (clears become clear draws), so nothing is stored and
+loaded in between. A barrier in between is judged like a barrier inside
+the rendering; compute, copies, labels, timestamps and the end of the
+command buffer close the encoder first.
+
+KK_NARROW_ENCODER_BARRIER=1: the barrier at the end of a render encoder
+does not hold back the vertex/object/mesh stages of later encoders.
+
+KK_RP_NOLOAD_DIAG=1: diagnostic only, LOAD becomes DONT_CARE.
+
+KK_RP_LIVE_FILE=<path> (merge=0|1 narrow=0|1 noload=0|1) switches them at
+run time. All off by default: the driver then records the same Metal
+commands as before.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c | 468 ++++++++++++++++++++++++-
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h |  50 +++
+ src/kosmickrisp/vulkan/kk_cmd_draw.c   |  22 +-
+ 3 files changed, 520 insertions(+), 20 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 7d4dacb..3b46450 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -21,6 +21,7 @@
+ #include "kosmickrisp/bridge/mtl_encoder.h"
+ #include "kosmickrisp/bridge/vk_to_mtl_map.h"
+ 
++#include "util/os_time.h"
+ #include "vk_alloc.h"
+ #include "vk_common_entrypoints.h"
+ #include "vk_device.h"
+@@ -259,6 +260,218 @@ kk_encoder_update_debug(struct kk_cmd_buffer *cmd, mtl_command_encoder *encoder)
+       mtl_encoder_push_debug_group(encoder, label->pLabelName);
+ }
+ 
++/* Render pass statistics and pass merging.
++ *
++ * KK_RP_STATS=<seconds>: one stderr line per period with the number of
++ * renderings / Metal render encoders and the attachment bytes each load and
++ * store action moves (a tile based GPU reads every LOAD attachment into tile
++ * memory and writes every STORE attachment back, per encoder).
++ *
++ * KK_RP_MERGE=1: a rendering that ends is kept open; when the next rendering
++ * of the command buffer targets exactly the same attachments it continues
++ * the same Metal encoder. KK_RP_LIVE_FILE=<path> (content "merge=0|1") flips
++ * it at run time for in-run A/B measurements. */
++static uint64_t kk_rp_stats[KK_RP_STAT_COUNT];
++static int kk_rp_stats_period = -1;
++static int kk_rp_merge_state = -1;
++/* KK_NARROW_ENCODER_BARRIER=1: the barrier at the end of a render encoder
++ * does not hold back the vertex/object/mesh stages of later encoders, so
++ * their binning can overlap this pass's fragment work. Only valid when no
++ * later geometry stage reads what this pass's fragment stage wrote. */
++static int kk_rp_narrow_state;
++/* KK_RP_NOLOAD_DIAG=1: DIAGNOSTIC ONLY (wrong pictures): every LOAD of the
++ * first encoder of a rendering becomes DONT_CARE, to measure what the loads
++ * cost. */
++static int kk_rp_noload_state;
++static const char *kk_rp_live_file;
++
++static void
++kk_rp_init(void)
++{
++   const char *e = getenv("KK_RP_STATS");
++   int period = e ? atoi(e) : 0;
++   e = getenv("KK_RP_MERGE");
++   int merge = e && atoi(e) > 0;
++   kk_rp_live_file = getenv("KK_RP_LIVE_FILE");
++   __atomic_store_n(&kk_rp_merge_state, merge, __ATOMIC_RELAXED);
++   e = getenv("KK_NARROW_ENCODER_BARRIER");
++   __atomic_store_n(&kk_rp_narrow_state, e && atoi(e) > 0, __ATOMIC_RELAXED);
++   e = getenv("KK_RP_NOLOAD_DIAG");
++   __atomic_store_n(&kk_rp_noload_state, e && atoi(e) > 0, __ATOMIC_RELAXED);
++   __atomic_store_n(&kk_rp_stats_period, period > 0 ? period : 0,
++                    __ATOMIC_RELEASE);
++}
++
++bool
++kk_rp_stats_enabled(void)
++{
++   int period = __atomic_load_n(&kk_rp_stats_period, __ATOMIC_ACQUIRE);
++   if (unlikely(period < 0)) {
++      kk_rp_init();
++      period = __atomic_load_n(&kk_rp_stats_period, __ATOMIC_ACQUIRE);
++   }
++   return period > 0;
++}
++
++bool
++kk_rp_merge_enabled(void)
++{
++   if (unlikely(__atomic_load_n(&kk_rp_stats_period, __ATOMIC_ACQUIRE) < 0))
++      kk_rp_init();
++   return __atomic_load_n(&kk_rp_merge_state, __ATOMIC_RELAXED) > 0;
++}
++
++bool
++kk_rp_noload_diag(void)
++{
++   return __atomic_load_n(&kk_rp_noload_state, __ATOMIC_RELAXED) > 0;
++}
++
++static void
++kk_rp_live_key(const char *buf, const char *key, int *state)
++{
++   const char *m = strstr(buf, key);
++   if (!m)
++      return;
++   int v = m[strlen(key)] == '1';
++   if (__atomic_exchange_n(state, v, __ATOMIC_RELAXED) != v)
++      fprintf(stderr, "[kk-rp] live: %s%d\n", key, v);
++}
++
++void
++kk_rp_stat_add(enum kk_rp_stat stat, uint64_t value)
++{
++   __atomic_fetch_add(&kk_rp_stats[stat], value, __ATOMIC_RELAXED);
++}
++
++/* Called once per rendering: periodic report and live switch. */
++static void
++kk_rp_tick(void)
++{
++   static uint64_t last_report, last_live;
++   static uint32_t calls;
++   bool stats = kk_rp_stats_enabled();
++   if (!stats && !kk_rp_live_file)
++      return;
++   if ((__atomic_fetch_add(&calls, 1, __ATOMIC_RELAXED) & 63u) != 0)
++      return;
++   uint64_t now = os_time_get_nano();
++   if (kk_rp_live_file &&
++       now - __atomic_load_n(&last_live, __ATOMIC_RELAXED) > 250000000ull) {
++      __atomic_store_n(&last_live, now, __ATOMIC_RELAXED);
++      FILE *f = fopen(kk_rp_live_file, "r");
++      if (f) {
++         char buf[64] = {0};
++         if (fgets(buf, sizeof(buf), f)) {
++            kk_rp_live_key(buf, "merge=", &kk_rp_merge_state);
++            kk_rp_live_key(buf, "narrow=", &kk_rp_narrow_state);
++            kk_rp_live_key(buf, "noload=", &kk_rp_noload_state);
++         }
++         fclose(f);
++      }
++   }
++   if (!stats)
++      return;
++   uint64_t last = __atomic_load_n(&last_report, __ATOMIC_RELAXED);
++   uint64_t period = (uint64_t)kk_rp_stats_period * 1000000000ull;
++   if (last == 0) {
++      __atomic_compare_exchange_n(&last_report, &last, now, false,
++                                  __ATOMIC_RELAXED, __ATOMIC_RELAXED);
++      return;
++   }
++   if (now - last < period ||
++       !__atomic_compare_exchange_n(&last_report, &last, now, false,
++                                    __ATOMIC_RELAXED, __ATOMIC_RELAXED))
++      return;
++   uint64_t v[KK_RP_STAT_COUNT];
++   for (unsigned i = 0; i < KK_RP_STAT_COUNT; i++)
++      v[i] = __atomic_exchange_n(&kk_rp_stats[i], 0, __ATOMIC_RELAXED);
++   double secs = (double)(now - last) * 1e-9;
++   double mb = 1.0 / (1024.0 * 1024.0 * secs);
++   fprintf(stderr,
++           "[kk-rp] %.1f s merge=%d narrow=%d noload=%d: renderings %.0f/s, encoders %.0f/s "
++           "(restarts %.0f/s, merged %.0f/s), MiB/s load %.0f clear %.0f "
++           "noload %.0f store %.0f nostore %.0f, merge saved %.0f; ended: "
++           "deferred %.0f/s direct %.0f/s (no encoder %.0f, post writes %.0f, "
++           "timestamps %.0f); deferred closed by: mismatch %.0f "
++           "compute %.0f barrier %.0f end %.0f label %.0f /s\n",
++           secs, kk_rp_merge_enabled(),
++           __atomic_load_n(&kk_rp_narrow_state, __ATOMIC_RELAXED),
++           __atomic_load_n(&kk_rp_noload_state, __ATOMIC_RELAXED),
++           v[KK_RP_STAT_PASSES] / secs,
++           v[KK_RP_STAT_ENCODERS] / secs, v[KK_RP_STAT_RESTARTS] / secs,
++           v[KK_RP_STAT_MERGED] / secs, v[KK_RP_STAT_LOAD_BYTES] * mb,
++           v[KK_RP_STAT_CLEAR_BYTES] * mb, v[KK_RP_STAT_NOLOAD_BYTES] * mb,
++           v[KK_RP_STAT_STORE_BYTES] * mb, v[KK_RP_STAT_NOSTORE_BYTES] * mb,
++           v[KK_RP_STAT_MERGE_SAVED_BYTES] * mb, v[KK_RP_STAT_DEFERRED] / secs,
++           v[KK_RP_STAT_NOT_DEFERRED] / secs,
++           v[KK_RP_STAT_ND_NO_ENCODER] / secs,
++           v[KK_RP_STAT_ND_POST_WRITES] / secs,
++           v[KK_RP_STAT_ND_TIMESTAMPS] / secs,
++           v[KK_RP_STAT_FLUSH0 + KK_RP_FLUSH_MISMATCH] / secs,
++           v[KK_RP_STAT_FLUSH0 + KK_RP_FLUSH_COMPUTE] / secs,
++           v[KK_RP_STAT_FLUSH0 + KK_RP_FLUSH_BARRIER] / secs,
++           v[KK_RP_STAT_FLUSH0 + KK_RP_FLUSH_END] / secs,
++           v[KK_RP_STAT_FLUSH0 + KK_RP_FLUSH_LABEL] / secs);
++}
++
++uint64_t
++kk_rp_attachment_bytes(const struct kk_rendering_state *render,
++                       const struct kk_attachment *att,
++                       VkImageAspectFlags aspect)
++{
++   if (!att->iview)
++      return 0;
++   uint32_t layers =
++      render->view_mask ? util_bitcount(render->view_mask) : render->layer_count;
++   uint64_t px = (uint64_t)(render->area.offset.x + render->area.extent.width) *
++                 (render->area.offset.y + render->area.extent.height) *
++                 MAX2(layers, 1u) * MAX2(render->samples, 1u);
++   uint32_t bpp;
++   if (aspect == VK_IMAGE_ASPECT_STENCIL_BIT)
++      bpp = 1;
++   else if (aspect == VK_IMAGE_ASPECT_DEPTH_BIT)
++      bpp = (att->vk_format == VK_FORMAT_D16_UNORM ||
++             att->vk_format == VK_FORMAT_D16_UNORM_S8_UINT)
++               ? 2
++               : 4;
++   else
++      bpp = vk_format_get_blocksize(att->vk_format);
++   return px * bpp;
++}
++
++uint64_t
++kk_rp_total_bytes(const struct kk_rendering_state *render)
++{
++   uint64_t bytes = 0;
++   for (uint32_t i = 0; i < render->color_att_count; i++)
++      bytes += kk_rp_attachment_bytes(render, &render->color_att[i],
++                                      VK_IMAGE_ASPECT_COLOR_BIT);
++   bytes += kk_rp_attachment_bytes(render, &render->depth_att,
++                                   VK_IMAGE_ASPECT_DEPTH_BIT);
++   bytes += kk_rp_attachment_bytes(render, &render->stencil_att,
++                                   VK_IMAGE_ASPECT_STENCIL_BIT);
++   return bytes;
++}
++
++static void
++kk_rp_stat_load(const struct kk_rendering_state *render,
++                const struct kk_attachment *att, VkImageAspectFlags aspect,
++                bool restart)
++{
++   if (!att->iview)
++      return;
++   bool load = restart || render->force_attachment_load ||
++               att->load_op == VK_ATTACHMENT_LOAD_OP_LOAD ||
++               att->load_op == VK_ATTACHMENT_LOAD_OP_NONE;
++   enum kk_rp_stat stat =
++      load ? KK_RP_STAT_LOAD_BYTES
++           : att->load_op == VK_ATTACHMENT_LOAD_OP_CLEAR
++                ? KK_RP_STAT_CLEAR_BYTES
++                : KK_RP_STAT_NOLOAD_BYTES;
++   kk_rp_stat_add(stat, kk_rp_attachment_bytes(render, att, aspect));
++}
++
+ void
+ cs_start_render(struct kk_cmd_buffer *cmd)
+ {
+@@ -272,6 +485,22 @@ cs_start_render(struct kk_cmd_buffer *cmd)
+    cmd->metal.render = mtl_new_render_command_encoder_with_descriptor(
+       cmd->metal.cmd_buf, state->render_pass_descriptor);
+ 
++   if (kk_rp_stats_enabled()) {
++      struct kk_rendering_state *render = &state->render;
++      bool restart = render->encoder_started;
++      kk_rp_stat_add(KK_RP_STAT_ENCODERS, 1);
++      if (restart)
++         kk_rp_stat_add(KK_RP_STAT_RESTARTS, 1);
++      for (uint32_t i = 0; i < render->color_att_count; i++)
++         kk_rp_stat_load(render, &render->color_att[i],
++                         VK_IMAGE_ASPECT_COLOR_BIT, restart);
++      kk_rp_stat_load(render, &render->depth_att, VK_IMAGE_ASPECT_DEPTH_BIT,
++                      restart);
++      kk_rp_stat_load(render, &render->stencil_att,
++                      VK_IMAGE_ASPECT_STENCIL_BIT, restart);
++   }
++   state->render.encoder_started = true;
++
+    kk_encoder_update_debug(cmd, cmd->metal.render);
+    /* Starting a new render pass means we already flushed and no barrier is
+     * needed. */
+@@ -316,6 +545,8 @@ cs_get_render(struct kk_cmd_buffer *cmd)
+ mtl_compute_encoder *
+ cs_get_compute(struct kk_cmd_buffer *cmd)
+ {
++   kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_COMPUTE);
++
+    /* If we are inside render, we need to force a restart later */
+    if (cmd->metal.render) {
+       kk_apply_attachment_store_ops(cmd, true);
+@@ -334,10 +565,14 @@ cs_get_compute(struct kk_cmd_buffer *cmd)
+ }
+ 
+ static void
+-end_encoder(struct kk_cmd_buffer *cmd, mtl_command_encoder *encoder)
++end_encoder(struct kk_cmd_buffer *cmd, mtl_command_encoder *encoder,
++            bool render)
+ {
+    /* TODO_KOSMICKRISP This is probably overkill */
+-   mtl_barrier_after_stages(encoder, MTL_STAGE_ALL, MTL_STAGE_ALL);
++   enum mtl_stages before = MTL_STAGE_ALL;
++   if (render && __atomic_load_n(&kk_rp_narrow_state, __ATOMIC_RELAXED) > 0)
++      before &= ~(MTL_STAGE_VERTEX | MTL_STAGE_OBJECTS | MTL_STAGE_MESH);
++   mtl_barrier_after_stages(encoder, MTL_STAGE_ALL, before);
+    mtl_end_encoding(encoder);
+    mtl_release(encoder);
+ 
+@@ -371,9 +606,11 @@ cs_end(struct kk_cmd_buffer *cmd)
+ {
+    assert(cmd);
+ 
++   kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_END);
++
+    /* Render first as it may open a compute encoder for post render writes. */
+    if (cmd->metal.render) {
+-      end_encoder(cmd, cmd->metal.render);
++      end_encoder(cmd, cmd->metal.render, true);
+       cmd->metal.render = NULL;
+ 
+       /* The stage map is only valid for the current render encoder */
+@@ -382,7 +619,7 @@ cs_end(struct kk_cmd_buffer *cmd)
+    }
+ 
+    if (cmd->metal.compute) {
+-      end_encoder(cmd, cmd->metal.compute);
++      end_encoder(cmd, cmd->metal.compute, false);
+       cmd->metal.compute = NULL;
+    }
+ }
+@@ -409,8 +646,28 @@ kk_cmd_bind_root_to_argument_table(struct kk_cmd_buffer *cmd, uint64_t addr)
+  * no split is needed.
+  */
+ static bool
+-kk_barrier_requires_encoder_split(struct kk_cmd_buffer *cmd,
+-                                  const VkDependencyInfo *dep)
++kk_render_has_image(const struct kk_rendering_state *render,
++                    const struct vk_image *image)
++{
++   for (uint32_t i = 0; i < render->color_att_count; i++) {
++      if (render->color_att[i].iview &&
++          render->color_att[i].iview->vk.image == image)
++         return true;
++   }
++   return (render->depth_att.iview &&
++           render->depth_att.iview->vk.image == image) ||
++          (render->stencil_att.iview &&
++           render->stencil_att.iview->vk.image == image);
++}
++
++/* `deferred`: the rendering has been ended by the application and its encoder
++ * is only kept open for a possible merge. Image barriers on images that are
++ * not attachments of it and whose source access is attachment output only
++ * cannot be about anything this encoder wrote and are skipped. */
++static bool
++kk_barrier_requires_encoder_split(struct kk_rendering_state *render,
++                                  const VkDependencyInfo *dep, bool deferred,
++                                  bool *relevant)
+ {
+    const VkAccessFlags2 texture_read_access =
+       VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+@@ -426,7 +683,6 @@ kk_barrier_requires_encoder_split(struct kk_cmd_buffer *cmd,
+    const VkAccessFlags2 storage_write_access =
+       VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+       VK_ACCESS_2_MEMORY_WRITE_BIT;
+-   struct kk_rendering_state *render = &cmd->state.gfx.render;
+    const bool has_ds =
+       render->depth_att.iview != NULL || render->stencil_att.iview != NULL;
+ 
+@@ -439,7 +695,16 @@ kk_barrier_requires_encoder_split(struct kk_cmd_buffer *cmd,
+       src |= dep->pBufferMemoryBarriers[i].srcAccessMask;
+       dst |= dep->pBufferMemoryBarriers[i].dstAccessMask;
+    }
++   *relevant = dep->memoryBarrierCount > 0 || dep->bufferMemoryBarrierCount > 0;
+    for (uint32_t i = 0; i < dep->imageMemoryBarrierCount; i++) {
++      if (deferred) {
++         VK_FROM_HANDLE(vk_image, image, dep->pImageMemoryBarriers[i].image);
++         if (!(dep->pImageMemoryBarriers[i].srcAccessMask &
++               storage_write_access) &&
++             !kk_render_has_image(render, image))
++            continue;
++      }
++      *relevant = true;
+       src |= dep->pImageMemoryBarriers[i].srcAccessMask;
+       dst |= dep->pImageMemoryBarriers[i].dstAccessMask;
+    }
+@@ -472,14 +737,27 @@ kk_CmdPipelineBarrier2(VkCommandBuffer commandBuffer,
+        * the barrier and if we are using depth/stencil or not, we may have to
+        * break the render pass. See comment in kk_barrier_requires_encoder_split
+        */
++      bool relevant;
+       if (cmd->state.gfx.render.samples > 1 ||
+-          kk_barrier_requires_encoder_split(cmd, pDependencyInfo)) {
++          kk_barrier_requires_encoder_split(&cmd->state.gfx.render,
++                                            pDependencyInfo, false,
++                                            &relevant)) {
+          kk_apply_attachment_store_ops(cmd, true);
+          cs_end(cmd);
+          cs_start_render(cmd);
+       } else
+          mtl_barrier_after_encoder_stages(cmd->metal.render, MTL_STAGE_VERTEX,
+                                           MTL_STAGE_FRAGMENT);
++   } else if (cmd->metal.deferred) {
++      /* Same decision as for a barrier inside the rendering: if it would
++       * split the encoder, close it; the next rendering starts a new one. */
++      bool relevant;
++      if (kk_barrier_requires_encoder_split(&cmd->state.gfx.deferred_render,
++                                            pDependencyInfo, true, &relevant))
++         kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_BARRIER);
++      else if (relevant)
++         mtl_barrier_after_encoder_stages(cmd->metal.deferred,
++                                          MTL_STAGE_VERTEX, MTL_STAGE_FRAGMENT);
+    } else if (cmd->metal.compute) {
+       /* We chain encoders, so an intra-encoder barrier is enough here:
+        * no need to tear down and recreate the encoder.
+@@ -934,19 +1212,27 @@ kk_get_attachment_store_op(const struct kk_attachment *attachment,
+    return store_action;
+ }
+ 
+-void
+-kk_apply_attachment_store_ops(struct kk_cmd_buffer *cmd, bool force_store)
++static void
++kk_rp_stat_store(const struct kk_rendering_state *render,
++                 const struct kk_attachment *att, VkImageAspectFlags aspect,
++                 enum mtl_store_action action)
+ {
+-   if (!cmd->metal.render)
+-      return;
++   kk_rp_stat_add(action == MTL_STORE_ACTION_DONT_CARE
++                     ? KK_RP_STAT_NOSTORE_BYTES
++                     : KK_RP_STAT_STORE_BYTES,
++                  kk_rp_attachment_bytes(render, att, aspect));
++}
+ 
+-   struct kk_rendering_state *render = &cmd->state.gfx.render;
+-   mtl_render_encoder *encoder = cs_get_render(cmd);
++static void
++kk_apply_store_ops_to(mtl_render_encoder *encoder,
++                      struct kk_rendering_state *render, bool force_store)
++{
++   const bool stats = kk_rp_stats_enabled();
+ 
+    force_store |= render->force_attachment_store;
+ 
+    for (uint32_t i = 0; i < render->color_att_count; i++) {
+-      uint32_t logical_index = cmd->state.gfx.render.color_map[i];
++      uint32_t logical_index = render->color_map[i];
+ 
+       if (render->color_att[i].iview &&
+           logical_index != MESA_VK_ATTACHMENT_UNUSED) {
+@@ -956,6 +1242,9 @@ kk_apply_attachment_store_ops(struct kk_cmd_buffer *cmd, bool force_store)
+ 
+          mtl_render_set_color_store_action(encoder, store_action,
+                                            logical_index);
++         if (stats)
++            kk_rp_stat_store(render, &render->color_att[i],
++                             VK_IMAGE_ASPECT_COLOR_BIT, store_action);
+       }
+    }
+    enum mtl_store_action depth_store_action = MTL_STORE_ACTION_UNKNOWN;
+@@ -987,6 +1276,9 @@ kk_apply_attachment_store_ops(struct kk_cmd_buffer *cmd, bool force_store)
+          depth_store_action = MTL_STORE_ACTION_STORE_AND_MULTISAMPLE_RESOLVE;
+ 
+       mtl_render_set_depth_store_action(encoder, depth_store_action);
++      if (stats)
++         kk_rp_stat_store(render, &render->depth_att,
++                          VK_IMAGE_ASPECT_DEPTH_BIT, depth_store_action);
+    }
+    if (render->stencil_att.iview) {
+       if (stencil_store_action == MTL_STORE_ACTION_MULTISAMPLE_RESOLVE &&
+@@ -994,9 +1286,152 @@ kk_apply_attachment_store_ops(struct kk_cmd_buffer *cmd, bool force_store)
+          stencil_store_action = MTL_STORE_ACTION_STORE_AND_MULTISAMPLE_RESOLVE;
+ 
+       mtl_render_set_stencil_store_action(encoder, stencil_store_action);
++      if (stats)
++         kk_rp_stat_store(render, &render->stencil_att,
++                          VK_IMAGE_ASPECT_STENCIL_BIT, stencil_store_action);
+    }
+ }
+ 
++void
++kk_apply_attachment_store_ops(struct kk_cmd_buffer *cmd, bool force_store)
++{
++   if (!cmd->metal.render)
++      return;
++
++   kk_apply_store_ops_to(cs_get_render(cmd), &cmd->state.gfx.render,
++                         force_store);
++}
++
++static bool
++kk_attachment_has_resolve(const struct kk_attachment *att)
++{
++   return att->iview && att->resolve_mode != VK_RESOLVE_MODE_NONE;
++}
++
++/* Called from vkCmdEndRendering in place of the store ops + cs_end. Returns
++ * false when the rendering has to be closed now. */
++bool
++kk_cmd_defer_render_end(struct kk_cmd_buffer *cmd)
++{
++   struct kk_graphics_state *gfx = &cmd->state.gfx;
++   struct kk_rendering_state *render = &gfx->render;
++
++   kk_rp_tick();
++   if (!kk_rp_merge_enabled())
++      return false;
++
++   bool ok = cmd->metal.render != NULL && cmd->metal.compute == NULL &&
++             !gfx->need_to_start_render_pass && render->flags == 0 &&
++             render->samples <= 1 && render->fsr_att.iview == NULL &&
++             !render->sample_locations_enable &&
++             (render->color_att_count > 0 || render->depth_att.iview ||
++              render->stencil_att.iview) &&
++             !kk_attachment_has_resolve(&render->depth_att) &&
++             !kk_attachment_has_resolve(&render->stencil_att) &&
++             util_dynarray_num_elements(&cmd->post_render_writes,
++                                        struct libkk_imm_write) == 0 &&
++             util_dynarray_num_elements(&cmd->ts_stage_map,
++                                        struct kk_ts_stage_entry) == 0 &&
++             util_dynarray_num_elements(&cmd->ts_resolves,
++                                        struct kk_ts_resolve) == 0;
++   for (uint32_t i = 0; ok && i < render->color_att_count; i++) {
++      ok = render->color_map[i] == i &&
++           !kk_attachment_has_resolve(&render->color_att[i]);
++   }
++   if (!ok) {
++      kk_rp_stat_add(KK_RP_STAT_NOT_DEFERRED, 1);
++      if (cmd->metal.render == NULL || gfx->need_to_start_render_pass)
++         kk_rp_stat_add(KK_RP_STAT_ND_NO_ENCODER, 1);
++      else if (util_dynarray_num_elements(&cmd->post_render_writes,
++                                          struct libkk_imm_write) != 0)
++         kk_rp_stat_add(KK_RP_STAT_ND_POST_WRITES, 1);
++      else if (util_dynarray_num_elements(&cmd->ts_stage_map,
++                                          struct kk_ts_stage_entry) != 0 ||
++               util_dynarray_num_elements(&cmd->ts_resolves,
++                                          struct kk_ts_resolve) != 0)
++         kk_rp_stat_add(KK_RP_STAT_ND_TIMESTAMPS, 1);
++      return false;
++   }
++
++   kk_rp_stat_add(KK_RP_STAT_DEFERRED, 1);
++   gfx->deferred_render = *render;
++   cmd->metal.deferred = cmd->metal.render;
++   cmd->metal.render = NULL;
++   return true;
++}
++
++void
++kk_cmd_flush_deferred_render(struct kk_cmd_buffer *cmd,
++                             enum kk_rp_flush_reason reason)
++{
++   if (likely(!cmd->metal.deferred))
++      return;
++
++   mtl_render_encoder *encoder = cmd->metal.deferred;
++   cmd->metal.deferred = NULL;
++   kk_rp_stat_add(KK_RP_STAT_FLUSH0 + reason, 1);
++   kk_apply_store_ops_to(encoder, &cmd->state.gfx.deferred_render, false);
++   end_encoder(cmd, encoder, true);
++   util_dynarray_clear(&cmd->ts_stage_map);
++}
++
++static bool
++kk_attachment_same_target(const struct kk_attachment *a,
++                          const struct kk_attachment *b)
++{
++   return a->iview == b->iview && !kk_attachment_has_resolve(b);
++}
++
++/* Called from vkCmdBeginRendering once the new rendering state is known and
++ * before its encoder would start. Returns true when the deferred encoder has
++ * become the encoder of the new rendering; otherwise the deferred encoder is
++ * closed. The caller then treats every attachment as loaded and turns clears
++ * into clear draws. */
++bool
++kk_cmd_merge_deferred_render(struct kk_cmd_buffer *cmd)
++{
++   struct kk_graphics_state *gfx = &cmd->state.gfx;
++   struct kk_rendering_state *render = &gfx->render;
++   const struct kk_rendering_state *old = &gfx->deferred_render;
++   const struct vk_dynamic_graphics_state *dyn =
++      &cmd->vk.dynamic_graphics_state;
++
++   if (!cmd->metal.deferred)
++      return false;
++
++   bool same = render->flags == 0 && render->fsr_att.iview == NULL &&
++               render->area.offset.x == old->area.offset.x &&
++               render->area.offset.y == old->area.offset.y &&
++               render->area.extent.width == old->area.extent.width &&
++               render->area.extent.height == old->area.extent.height &&
++               render->layer_count == old->layer_count &&
++               render->view_mask == old->view_mask &&
++               render->color_att_count == old->color_att_count &&
++               kk_attachment_same_target(&old->depth_att, &render->depth_att) &&
++               kk_attachment_same_target(&old->stencil_att,
++                                         &render->stencil_att);
++   for (uint32_t i = 0; same && i < render->color_att_count; i++) {
++      same = dyn->cal.color_map[i] == i &&
++             kk_attachment_same_target(&old->color_att[i],
++                                       &render->color_att[i]);
++   }
++   if (!same) {
++      kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_MISMATCH);
++      return false;
++   }
++
++   kk_rp_stat_add(KK_RP_STAT_MERGED, 1);
++   kk_rp_stat_add(KK_RP_STAT_MERGE_SAVED_BYTES, 2 * kk_rp_total_bytes(old));
++   cmd->metal.render = cmd->metal.deferred;
++   cmd->metal.deferred = NULL;
++   render->samples = old->samples;
++   render->write_available = old->write_available;
++   render->ds_write_available = old->ds_write_available;
++   render->storage_write_available = old->storage_write_available;
++   render->encoder_started = true;
++   return true;
++}
++
+ bool
+ kk_attachment_do_renderpass_resolve(const struct kk_attachment *attachment,
+                                     bool rendering_to_whole_framebuffer,
+@@ -1099,6 +1534,7 @@ kk_CmdBeginDebugUtilsLabelEXT(VkCommandBuffer _commandBuffer,
+ 
+    vk_common_CmdBeginDebugUtilsLabelEXT(_commandBuffer, pLabelInfo);
+ 
++   kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_LABEL);
+    if (cmd->metal.render)
+       mtl_encoder_push_debug_group(cmd->metal.render, pLabelInfo->pLabelName);
+    else if (cmd->metal.compute)
+@@ -1114,6 +1550,7 @@ kk_CmdEndDebugUtilsLabelEXT(VkCommandBuffer _commandBuffer)
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, _commandBuffer);
+    vk_common_CmdEndDebugUtilsLabelEXT(_commandBuffer);
+ 
++   kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_LABEL);
+    if (cmd->metal.render)
+       mtl_encoder_pop_debug_group(cmd->metal.render);
+    else if (cmd->metal.compute)
+@@ -1153,6 +1590,7 @@ kk_CmdInsertDebugUtilsLabelEXT(VkCommandBuffer _commandBuffer,
+     * The Metal debug signpost does not need this, and it interferes
+     * with propagating the begin/end debug regions to all of the
+     * Metal command buffers and encoders. */
++   kk_cmd_flush_deferred_render(cmd, KK_RP_FLUSH_LABEL);
+    if (cmd->metal.render)
+       mtl_encoder_insert_debug_signpost(cmd->metal.render,
+                                         pLabelInfo->pLabelName);
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 80cb1f6..9d72431 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -133,6 +133,10 @@ struct kk_rendering_state {
+    VkSampleLocationEXT sample_locations[KK_MAX_SAMPLES];
+    bool force_attachment_store;
+    bool rendering_to_whole_framebuffer;
++   /* Load actions of the first encoder of this rendering are forced to LOAD */
++   bool force_attachment_load;
++   /* A Metal encoder has been started for this rendering */
++   bool encoder_started;
+ };
+ 
+ /* Dirty tracking bits for state not tracked by vk_dynamic_graphics_state or
+@@ -145,6 +149,8 @@ enum kk_dirty {
+ 
+ struct kk_graphics_state {
+    struct kk_rendering_state render;
++   /* Rendering state of cmd->metal.deferred (see kk_cmd_defer_render_end) */
++   struct kk_rendering_state deferred_render;
+    struct kk_descriptor_state descriptors;
+    struct kk_per_draw_data per_draw_data;
+ 
+@@ -242,6 +248,10 @@ struct kk_cmd_buffer {
+       mtl_command_buffer *cmd_buf;
+       mtl_render_encoder *render;
+       mtl_compute_encoder *compute;
++      /* Render encoder of a rendering the application already ended, kept
++       * open so the next rendering can continue it when it targets the same
++       * attachments (no store + load of every attachment in between). */
++      mtl_render_encoder *deferred;
+    } metal;
+    /* Pending timestamp resolves (struct kk_ts_resolve), flushed at cs_end. */
+    struct util_dynarray ts_resolves;
+@@ -316,6 +326,46 @@ void cs_start_render(struct kk_cmd_buffer *cmd);
+ mtl_render_encoder *cs_get_render(struct kk_cmd_buffer *cmd);
+ mtl_compute_encoder *cs_get_compute(struct kk_cmd_buffer *cmd);
+ void cs_end(struct kk_cmd_buffer *cmd);
++
++enum kk_rp_flush_reason {
++   KK_RP_FLUSH_MISMATCH,
++   KK_RP_FLUSH_COMPUTE,
++   KK_RP_FLUSH_BARRIER,
++   KK_RP_FLUSH_END,
++   KK_RP_FLUSH_LABEL,
++   KK_RP_FLUSH_COUNT,
++};
++enum kk_rp_stat {
++   KK_RP_STAT_PASSES,
++   KK_RP_STAT_ENCODERS,
++   KK_RP_STAT_RESTARTS,
++   KK_RP_STAT_MERGED,
++   KK_RP_STAT_DEFERRED,
++   KK_RP_STAT_NOT_DEFERRED,
++   KK_RP_STAT_ND_NO_ENCODER,
++   KK_RP_STAT_ND_POST_WRITES,
++   KK_RP_STAT_ND_TIMESTAMPS,
++   KK_RP_STAT_LOAD_BYTES,
++   KK_RP_STAT_CLEAR_BYTES,
++   KK_RP_STAT_NOLOAD_BYTES,
++   KK_RP_STAT_STORE_BYTES,
++   KK_RP_STAT_NOSTORE_BYTES,
++   KK_RP_STAT_MERGE_SAVED_BYTES,
++   KK_RP_STAT_FLUSH0,
++   KK_RP_STAT_COUNT = KK_RP_STAT_FLUSH0 + KK_RP_FLUSH_COUNT,
++};
++bool kk_rp_stats_enabled(void);
++void kk_rp_stat_add(enum kk_rp_stat stat, uint64_t value);
++bool kk_rp_merge_enabled(void);
++bool kk_rp_noload_diag(void);
++uint64_t kk_rp_attachment_bytes(const struct kk_rendering_state *render,
++                                const struct kk_attachment *att,
++                                VkImageAspectFlags aspect);
++uint64_t kk_rp_total_bytes(const struct kk_rendering_state *render);
++void kk_cmd_flush_deferred_render(struct kk_cmd_buffer *cmd,
++                                  enum kk_rp_flush_reason reason);
++bool kk_cmd_defer_render_end(struct kk_cmd_buffer *cmd);
++bool kk_cmd_merge_deferred_render(struct kk_cmd_buffer *cmd);
+ void kk_cmd_bind_root_to_argument_table(struct kk_cmd_buffer *cmd,
+                                         uint64_t addr);
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index e1ccfb1..4d472ba 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -152,6 +152,9 @@ kk_fill_common_attachment_description(
+          ? MTL_LOAD_ACTION_LOAD
+          : vk_attachment_load_op_to_mtl_load_action(info->load_op);
+ 
++   if (unlikely(kk_rp_noload_diag()) && load_action == MTL_LOAD_ACTION_LOAD)
++      load_action = MTL_LOAD_ACTION_DONT_CARE;
++
+    mtl_render_pass_attachment_descriptor_set_load_action(descriptor,
+                                                          load_action);
+    mtl_render_pass_attachment_descriptor_set_store_action(
+@@ -377,6 +380,14 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+    render->force_attachment_store =
+       !is_whole_framebuffer || (render->flags & VK_RENDERING_SUSPENDING_BIT);
+ 
++   /* Continue the encoder of the previous rendering when it has the same
++    * attachments: nothing is stored or loaded, clears become clear draws. */
++   const bool merged = !no_framebuffer && kk_cmd_merge_deferred_render(cmd);
++   if (merged)
++      force_attachment_load = true;
++   render->force_attachment_load = force_attachment_load;
++   kk_rp_stat_add(KK_RP_STAT_PASSES, 1);
++
+    kk_set_color_attachments(pass_descriptor, render, dyn, force_attachment_load,
+                             is_whole_framebuffer);
+ 
+@@ -445,7 +456,7 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+    /* Rendering with no attachments requires pushing the start of the render
+     * pass to first pipeline binding to know sample count. */
+    cmd->state.gfx.render_pass_descriptor = pass_descriptor;
+-   if (!no_framebuffer)
++   if (!no_framebuffer && !merged)
+       cs_start_render(cmd);
+ 
+    /* Store descriptor in case we need to restart the pass at pipeline barrier,
+@@ -632,10 +643,11 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+       .pStencilAttachment = &vk_stencil_att,
+    };
+ 
+-   kk_apply_attachment_store_ops(cmd, false);
+-
+-   /* Clean up previous encoder */
+-   cs_end(cmd);
++   /* Clean up previous encoder, unless the next rendering may continue it */
++   if (need_meta_resolve || !kk_cmd_defer_render_end(cmd)) {
++      kk_apply_attachment_store_ops(cmd, false);
++      cs_end(cmd);
++   }
+    mtl_release(cmd->state.gfx.render_pass_descriptor);
+    cmd->state.gfx.render_pass_descriptor = NULL;
+ 

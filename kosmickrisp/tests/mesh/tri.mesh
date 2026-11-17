@@ -1,0 +1,17 @@
+#version 450
+#extension GL_EXT_mesh_shader : require
+// One invocation writes a whole triangle: per-vertex colour, per-primitive colour from a push constant.
+layout(local_size_x = 1) in;
+layout(triangles, max_vertices = 3, max_primitives = 1) out;
+layout(location = 0) out vec4 vColor[];
+layout(location = 1) perprimitiveEXT out vec4 pColor[];
+layout(push_constant) uniform PC { vec4 tint; } pc;
+void main() {
+    SetMeshOutputsEXT(3, 1);
+    gl_MeshVerticesEXT[0].gl_Position = vec4(-0.8, -0.8, 0.5, 1.0);
+    gl_MeshVerticesEXT[1].gl_Position = vec4( 0.8, -0.8, 0.5, 1.0);
+    gl_MeshVerticesEXT[2].gl_Position = vec4( 0.0,  0.8, 0.5, 1.0);
+    vColor[0] = vec4(1, 0, 0, 1); vColor[1] = vec4(0, 1, 0, 1); vColor[2] = vec4(0, 0, 1, 1);
+    pColor[0] = pc.tint;
+    gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);
+}

@@ -1,0 +1,34 @@
+#version 450
+#extension GL_EXT_mesh_shader : require
+// The limits the AGC recompiler needs: 256 invocations, 256 output vertices and primitives, several
+// kilobytes of workgroup memory, clip and cull distances. Invocation i writes vertex i; the first
+// invocation of each triangle writes its primitive. 85 triangles in a 16 x 6 grid.
+layout(local_size_x = 256) in;
+layout(triangles, max_vertices = 256, max_primitives = 256) out;
+layout(location = 0) out vec4 vColor[];
+layout(location = 1) perprimitiveEXT out vec4 pColor[];
+layout(location = 2) out vec4 extra0[];
+layout(location = 3) out vec4 extra1[];
+out gl_MeshPerVertexEXT { vec4 gl_Position; float gl_ClipDistance[1]; float gl_CullDistance[1]; } gl_MeshVerticesEXT[];
+shared vec4 scratch[288];   // 4.5 KiB; with the staged outputs the shader stays inside Metal's 32 KiB of threadgroup memory
+void main() {
+    const uint i = gl_LocalInvocationIndex;
+    SetMeshOutputsEXT(255, 85);
+    scratch[i] = vec4(float(i));
+    scratch[256u + (i & 31u)] = vec4(1.0);
+    barrier();
+    if (i >= 255u) return;
+    const uint t = i / 3u, k = i % 3u;
+    const float x0 = -1.0 + float(t & 15u) / 8.0, y0 = -1.0 + float(t >> 4u) / 3.0;
+    const vec2 corner = k == 0u ? vec2(0.0, 0.0) : k == 1u ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    gl_MeshVerticesEXT[i].gl_Position = vec4(x0 + corner.x / 8.0, y0 + corner.y / 3.0, 0.5, 1.0);
+    gl_MeshVerticesEXT[i].gl_ClipDistance[0] = t % 5u == 4u ? -1.0 : 1.0;   // every fifth triangle is clipped away
+    gl_MeshVerticesEXT[i].gl_CullDistance[0] = t % 7u == 6u ? -1.0 : 1.0;   // every seventh is culled
+    vColor[i] = scratch[t * 3u] == vec4(float(t * 3u)) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
+    extra0[i] = scratch[256u + (i & 31u)];
+    extra1[i] = vec4(0.0);
+    if (k == 0u) {
+        gl_PrimitiveTriangleIndicesEXT[t] = uvec3(i, i + 1u, i + 2u);
+        pColor[t] = vec4(0.0, 0.0, float(t & 1u), 1.0);
+    }
+}

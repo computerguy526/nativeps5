@@ -1,0 +1,2384 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 11:22:48 +0000
+Subject: [PATCH] kosmickrisp: compute loop cap (default on), AccessRevoked
+ classifier, first-OOM dump
+
+On macOS committed Metal command buffers keep running after the process
+exits (NXNative issue #2664), so the gpusafe watchdog + _exit does not stop
+a runaway shader loop. Loops that end by themselves do.
+
+Loop cap: port of the design of NXNative commit bb574c7 "chain/compute:
+contain runaway loops and report capped kernels"
+(https://github.com/seedds/nxnative, MIT, Copyright (c) 2026 seedds;
+co-authored by FifteenPen, computerguy526 and uncraftablexd, PRs #2254 and
+#2709) to the NIR -> MSL path:
+- application compute kernels only; KK_LOOP_CAP = loop-condition checks per
+  kernel invocation, default 2^18, 0 = off (replaces the opt-in per-loop
+  KK_LOOP_CAP of the previous commit); the budget is shared by all loops of
+  the kernel (KK prints one function per kernel);
+- the first thread that exhausts its budget stores 1 to a GPU-side abort
+  word of the command buffer and records its loop site (atomic min) in the
+  kernel's hit word; other loops poll the abort word every 1024 checks;
+- a loop containing an execution barrier (directly, nested, or through a
+  callee) has a private counter that restarts at each loop entry and never
+  reads the abort word;
+- the loop state (16 bytes per kernel per command buffer, pool owned by
+  kk_safety) is bound at argument table slot 3; the completion handler logs
+  "[RED] loop cap hit: submission, kernel <msl blake3>, loop site" once per
+  kernel.
+
+gpusafe fixes, following NXNative's gpu_lost_check / res_top_once:
+- AccessRevoked only for MTL4CommandQueueErrorDomain, searched through
+  underlying errors to depth 3 (an innocent victim's IOGPU code 5 no longer
+  counts); recorded waiter events are raised before the exit;
+  KK_TEST_GPU_LOST=<n> / KK_TEST_OOM=<n> inject the feedback without a GPU
+  fault; KK_QUEUE_ERROR_EXIT=0 halts without exiting;
+- the first OutOfMemory failure dumps KK's memory by owner, the 24 largest
+  allocation sizes, Metal's allocated / recommended sizes and the residency
+  set totals (KK_OOM_DUMP=0 off);
+- the residency limit is set at the first commit when the guards were
+  initialized by a dispatch recorded earlier (it stayed 0 = off).
+
+Tests: src/kosmickrisp/compiler/tests/loopcap_nir_test.c (target
+kk_loopcap_nir_test, GPU-free); work/s3/kk-safe/test/run_unit.sh;
+work/kyty/loopcap/run_gpu.sh (bounded on-GPU).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_command_queue.h    |   3 +
+ src/kosmickrisp/bridge/mtl_command_queue.m    |  21 +
+ src/kosmickrisp/bridge/mtl_error_classify.h   |  75 +++
+ src/kosmickrisp/bridge/mtl_residency_set.h    |   3 +
+ src/kosmickrisp/bridge/mtl_residency_set.m    |  18 +
+ src/kosmickrisp/bridge/mtl_types.h            |   7 +
+ .../bridge/stubs/mtl_command_queue.c          |   5 +
+ .../bridge/stubs/mtl_residency_set.c          |  12 +
+ src/kosmickrisp/compiler/meson.build          |  11 +
+ src/kosmickrisp/compiler/msl_loop_cap.c       | 172 ++++++
+ src/kosmickrisp/compiler/msl_loop_cap.h       |  65 +++
+ src/kosmickrisp/compiler/msl_private.h        |   4 +
+ src/kosmickrisp/compiler/nir_to_msl.c         |  90 ++-
+ src/kosmickrisp/compiler/nir_to_msl.h         |  11 +-
+ .../compiler/tests/loopcap_nir_test.c         | 552 ++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_bo.c                |   8 +
+ src/kosmickrisp/vulkan/kk_bo.h                |   1 +
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c        |   7 +-
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h        |   3 +
+ src/kosmickrisp/vulkan/kk_cmd_dispatch.c      |  33 +-
+ src/kosmickrisp/vulkan/kk_physical_device.c   |   2 +-
+ src/kosmickrisp/vulkan/kk_queue.c             |  15 +-
+ src/kosmickrisp/vulkan/kk_safety.c            | 409 ++++++++++++-
+ src/kosmickrisp/vulkan/kk_safety.h            |  46 +-
+ src/kosmickrisp/vulkan/kk_safety_core.h       | 126 ++++
+ src/kosmickrisp/vulkan/kk_shader.c            |  26 +-
+ src/kosmickrisp/vulkan/kk_shader.h            |   8 +
+ 27 files changed, 1680 insertions(+), 53 deletions(-)
+ create mode 100644 src/kosmickrisp/bridge/mtl_error_classify.h
+ create mode 100644 src/kosmickrisp/compiler/msl_loop_cap.c
+ create mode 100644 src/kosmickrisp/compiler/msl_loop_cap.h
+ create mode 100644 src/kosmickrisp/compiler/tests/loopcap_nir_test.c
+
+diff --git a/src/kosmickrisp/bridge/mtl_command_queue.h b/src/kosmickrisp/bridge/mtl_command_queue.h
+index 11b2ba2..bfb6b58 100644
+--- a/src/kosmickrisp/bridge/mtl_command_queue.h
++++ b/src/kosmickrisp/bridge/mtl_command_queue.h
+@@ -42,4 +42,7 @@ void mtl_command_queue_wait_for_drawable(mtl_command_queue *queue,
+ void mtl_command_queue_signal_drawable(mtl_command_queue *queue,
+                                        void *drawable);
+ 
++/* nps5 gpusafe test hook (KK_TEST_GPU_LOST) */
++void mtl_feedback_data_set_synthetic_revoked(struct mtl_feedback_data *data);
++
+ #endif /* MTL_COMMAND_QUEUE_H */
+\ No newline at end of file
+diff --git a/src/kosmickrisp/bridge/mtl_command_queue.m b/src/kosmickrisp/bridge/mtl_command_queue.m
+index c8ed5bb..bc703c6 100644
+--- a/src/kosmickrisp/bridge/mtl_command_queue.m
++++ b/src/kosmickrisp/bridge/mtl_command_queue.m
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "mtl_command_queue.h"
++#include "mtl_error_classify.h"
+ 
+ #include <Metal/MTLDevice.h>
+ #include <Metal/MTLCommandQueue.h>
+@@ -37,6 +38,8 @@ mtl_commit_options_add_feedback_handler(mtl_commit_options *options,
+                .error = error
+                            ? (enum mtl_command_queue_error)error.code
+                            : MTL_COMMAND_QUEUE_ERROR_NONE,
++               .access_revoked = kk_mtl_error_access_revoked(error),
++               .out_of_memory = kk_mtl_error_out_of_memory(error),
+             };
+             callback(&feedback_data);
+          }
+@@ -128,3 +131,21 @@ mtl_command_queue_signal_drawable(mtl_command_queue *queue, void *drawable)
+       [q signalDrawable:d];
+    }
+ }
++
++/* nps5 gpusafe, KK_TEST_GPU_LOST: fills `data` as a revoked GPU access would
++ * (synthetic NSError through the real classifier; no GPU fault). The message
++ * points to static storage. */
++void
++mtl_feedback_data_set_synthetic_revoked(struct mtl_feedback_data *data)
++{
++   @autoreleasepool {
++      static char message[160];
++      NSError *error = kk_mtl_error_synthetic_revoked();
++      snprintf(message, sizeof(message), "%s",
++               error.underlyingErrors.firstObject.localizedDescription.UTF8String);
++      data->error = (enum mtl_command_queue_error)error.code;
++      data->error_message = message;
++      data->access_revoked = kk_mtl_error_access_revoked(error);
++      data->out_of_memory = kk_mtl_error_out_of_memory(error);
++   }
++}
+diff --git a/src/kosmickrisp/bridge/mtl_error_classify.h b/src/kosmickrisp/bridge/mtl_error_classify.h
+new file mode 100644
+index 0000000..8822a9a
+--- /dev/null
++++ b/src/kosmickrisp/bridge/mtl_error_classify.h
+@@ -0,0 +1,75 @@
++/*
++ * nps5 gpusafe: classification of a Metal 4 commit feedback error.
++ *
++ * Follows NXNative's gpu_err_has / gpu_lost_check (dm/gfx/nvn/nvn_mtl.m, MIT,
++ * Copyright (c) 2026 seedds): Metal 4 reports a commit's error as
++ * MTL4CommandQueueErrorTimeout with the command buffer's own error underneath
++ * (NSUnderlyingErrorKey, NSMultipleUnderlyingErrorsKey), so the error is
++ * searched to depth 3. Only MTL4CommandQueueErrorDomain counts: the IOGPU error
++ * of an innocent victim underneath has code 5 too and is not a revoked access.
++ *
++ * Objective-C only (included by mtl_command_queue.m and the unit test).
++ * SPDX-License-Identifier: MIT
++ */
++#ifndef MTL_ERROR_CLASSIFY_H
++#define MTL_ERROR_CLASSIFY_H 1
++
++#import <Foundation/Foundation.h>
++
++#define KK_MTL4_QUEUE_ERROR_DOMAIN       @"MTL4CommandQueueErrorDomain"
++#define KK_MTL4_QUEUE_ERROR_TIMEOUT      1
++#define KK_MTL4_QUEUE_ERROR_OUT_OF_MEMORY 3
++#define KK_MTL4_QUEUE_ERROR_ACCESS_REVOKED 5
++#define KK_MTL_ERROR_MAX_DEPTH           3
++
++static inline bool
++kk_mtl_error_has(NSError *e, NSInteger code, int depth)
++{
++   if (!e || depth > KK_MTL_ERROR_MAX_DEPTH)
++      return false;
++   if (e.code == code && [e.domain isEqualToString:KK_MTL4_QUEUE_ERROR_DOMAIN])
++      return true;
++   for (NSError *u in e.underlyingErrors)
++      if (kk_mtl_error_has(u, code, depth + 1))
++         return true;
++   return false;
++}
++
++static inline bool
++kk_mtl_error_access_revoked(NSError *e)
++{
++   return kk_mtl_error_has(e, KK_MTL4_QUEUE_ERROR_ACCESS_REVOKED, 0);
++}
++
++static inline bool
++kk_mtl_error_out_of_memory(NSError *e)
++{
++   return kk_mtl_error_has(e, KK_MTL4_QUEUE_ERROR_OUT_OF_MEMORY, 0);
++}
++
++/* The shape macOS reports for a revoked access (NXNative issue #1326 logs): a
++ * top-level timeout without text, the revoked error underneath (single and
++ * multiple key), an IOGPU error under that. For KK_TEST_GPU_LOST. */
++static inline NSError *
++kk_mtl_error_synthetic_revoked(void)
++{
++   NSError *iogpu = [NSError errorWithDomain:@"IOGPUCommandQueueErrorDomain"
++                                        code:4
++                                    userInfo:nil];
++   NSError *revoked = [NSError
++      errorWithDomain:KK_MTL4_QUEUE_ERROR_DOMAIN
++                 code:KK_MTL4_QUEUE_ERROR_ACCESS_REVOKED
++             userInfo:@{
++                NSLocalizedDescriptionKey :
++                   @"KK_TEST_GPU_LOST: Ignored (for causing prior/excessive GPU errors)",
++                NSUnderlyingErrorKey : iogpu
++             }];
++   return [NSError errorWithDomain:KK_MTL4_QUEUE_ERROR_DOMAIN
++                              code:KK_MTL4_QUEUE_ERROR_TIMEOUT
++                          userInfo:@{
++                             NSUnderlyingErrorKey : revoked,
++                             NSMultipleUnderlyingErrorsKey : @[ revoked ]
++                          }];
++}
++
++#endif
+diff --git a/src/kosmickrisp/bridge/mtl_residency_set.h b/src/kosmickrisp/bridge/mtl_residency_set.h
+index 8591b3c..8e9daa5 100644
+--- a/src/kosmickrisp/bridge/mtl_residency_set.h
++++ b/src/kosmickrisp/bridge/mtl_residency_set.h
+@@ -17,5 +17,8 @@ void mtl_residency_set_remove_allocation(mtl_residency_set *residency_set,
+ void mtl_residency_set_commit(mtl_residency_set *residency_set);
+ void mtl_residency_set_request_residency(mtl_residency_set *residency_set);
+ void mtl_residency_set_end_residency(mtl_residency_set *residency_set);
++/* nps5 gpusafe: totals of the committed set (OOM dump) */
++uint64_t mtl_residency_set_allocated_size(mtl_residency_set *residency_set);
++uint64_t mtl_residency_set_allocation_count(mtl_residency_set *residency_set);
+ 
+ #endif /* MTL_RESIDENCY_SET_H */
+\ No newline at end of file
+diff --git a/src/kosmickrisp/bridge/mtl_residency_set.m b/src/kosmickrisp/bridge/mtl_residency_set.m
+index eeca751..185c615 100644
+--- a/src/kosmickrisp/bridge/mtl_residency_set.m
++++ b/src/kosmickrisp/bridge/mtl_residency_set.m
+@@ -76,3 +76,21 @@ mtl_residency_set_end_residency(mtl_residency_set *residency_set)
+       [set endResidency];
+    }
+ }
++
++uint64_t
++mtl_residency_set_allocated_size(mtl_residency_set *residency_set)
++{
++   @autoreleasepool {
++      id<MTLResidencySet> set = (id<MTLResidencySet>)residency_set;
++      return set.allocatedSize;
++   }
++}
++
++uint64_t
++mtl_residency_set_allocation_count(mtl_residency_set *residency_set)
++{
++   @autoreleasepool {
++      id<MTLResidencySet> set = (id<MTLResidencySet>)residency_set;
++      return set.allocationCount;
++   }
++}
+diff --git a/src/kosmickrisp/bridge/mtl_types.h b/src/kosmickrisp/bridge/mtl_types.h
+index 26a9794..d594bec 100644
+--- a/src/kosmickrisp/bridge/mtl_types.h
++++ b/src/kosmickrisp/bridge/mtl_types.h
+@@ -10,6 +10,8 @@
+ #ifndef KK_MTL_TYPES_H
+ #define KK_MTL_TYPES_H 1
+ 
++#include <stdbool.h>
++#include <stdint.h>
+ #include <stddef.h> /* For size_t definition */
+ 
+ /** HANDLES */
+@@ -394,6 +396,11 @@ struct mtl_feedback_data {
+    double gpu_start;
+    double gpu_end;
+    enum mtl_command_queue_error error;
++   /* nps5 gpusafe (mtl_error_classify.h): the error or one of its underlying
++    * errors (depth 3) is MTL4CommandQueueErrorDomain AccessRevoked / OutOfMemory.
++    * `error` alone is the top-level code without its domain. */
++   bool access_revoked;
++   bool out_of_memory;
+ };
+ 
+ #endif /* KK_MTL_TYPES_H */
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_command_queue.c b/src/kosmickrisp/bridge/stubs/mtl_command_queue.c
+index e5687e5..8980424 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_command_queue.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_command_queue.c
+@@ -65,3 +65,8 @@ void
+ mtl_command_queue_signal_drawable(mtl_command_queue *queue, void *drawable)
+ {
+ }
++
++void
++mtl_feedback_data_set_synthetic_revoked(struct mtl_feedback_data *data)
++{
++}
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_residency_set.c b/src/kosmickrisp/bridge/stubs/mtl_residency_set.c
+index f860727..20fd9ae 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_residency_set.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_residency_set.c
+@@ -38,3 +38,15 @@ void
+ mtl_residency_set_end_residency(mtl_residency_set *residency_set)
+ {
+ }
++
++uint64_t
++mtl_residency_set_allocated_size(mtl_residency_set *residency_set)
++{
++   return 0u;
++}
++
++uint64_t
++mtl_residency_set_allocation_count(mtl_residency_set *residency_set)
++{
++   return 0u;
++}
+diff --git a/src/kosmickrisp/compiler/meson.build b/src/kosmickrisp/compiler/meson.build
+index 8e079d3..9641373 100644
+--- a/src/kosmickrisp/compiler/meson.build
++++ b/src/kosmickrisp/compiler/meson.build
+@@ -4,6 +4,7 @@
+ 
+ libmsl_compiler_files = files(
+     'nir_to_msl.c',
++    'msl_loop_cap.c',
+     'msl_type_inference.c',
+     'msl_iomap.c',
+     'msl_nir_gather_common.c',
+@@ -36,3 +37,13 @@ idep_msl_to_nir = declare_dependency(
+   link_with : libmsl_compiler,
+ )
+ 
++
++# nps5 loopcap: GPU-free unit test of the compute loop cap (not built by
++# default: meson compile -C <build> kk_loopcap_nir_test)
++kk_loopcap_nir_test = executable(
++  'kk_loopcap_nir_test',
++  files('tests/loopcap_nir_test.c'),
++  include_directories : [inc_include, inc_src],
++  dependencies : [idep_nir, idep_mesautil, idep_vulkan_util, idep_msl_to_nir],
++  build_by_default : false,
++)
+diff --git a/src/kosmickrisp/compiler/msl_loop_cap.c b/src/kosmickrisp/compiler/msl_loop_cap.c
+new file mode 100644
+index 0000000..61946a9
+--- /dev/null
++++ b/src/kosmickrisp/compiler/msl_loop_cap.c
+@@ -0,0 +1,172 @@
++/*
++ * nps5 loopcap: loop numbering and barrier propagation for the compute loop
++ * cap. See msl_loop_cap.h (design: NXNative bb574c7, MIT, (c) 2026 seedds,
++ * co-authored by FifteenPen, computerguy526, uncraftablexd).
++ * SPDX-License-Identifier: MIT
++ */
++#include "msl_loop_cap.h"
++
++#include "util/hash_table.h"
++#include "util/ralloc.h"
++
++struct lc_state {
++   void *mem_ctx;
++   struct msl_loop_sites *out;
++   unsigned capacity;
++   /* nir_function_impl * -> (void *)1 no barrier, (void *)2 barrier,
++    * (void *)3 being visited */
++   struct hash_table *impls;
++};
++
++static bool lc_list_has_barrier(struct lc_state *st, struct exec_list *list);
++
++static bool
++lc_impl_has_barrier(struct lc_state *st, nir_function_impl *impl)
++{
++   /* A callee we cannot see may wait at a barrier. */
++   if (!impl)
++      return true;
++   struct hash_entry *e = _mesa_hash_table_search(st->impls, impl);
++   if (e) {
++      /* 3 = recursion (not valid in SPIR-V): the outer visit decides. */
++      return (uintptr_t)e->data == 2;
++   }
++   _mesa_hash_table_insert(st->impls, impl, (void *)(uintptr_t)3);
++   /* Loops of callees are not numbered: only the entry point's loops are
++    * printed (NIR is inlined before nir_to_msl). */
++   struct msl_loop_sites *saved = st->out;
++   st->out = NULL;
++   bool barrier = lc_list_has_barrier(st, &impl->body);
++   st->out = saved;
++   e = _mesa_hash_table_search(st->impls, impl);
++   e->data = (void *)(uintptr_t)(barrier ? 2 : 1);
++   return barrier;
++}
++
++static bool
++lc_instr_is_barrier(struct lc_state *st, nir_instr *instr)
++{
++   if (instr->type == nir_instr_type_intrinsic) {
++      nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++      /* SCOPE_NONE is a memory barrier only (atomic_thread_fence). */
++      return intr->intrinsic == nir_intrinsic_barrier &&
++             nir_intrinsic_execution_scope(intr) != SCOPE_NONE;
++   }
++   if (instr->type == nir_instr_type_call)
++      return lc_impl_has_barrier(st, nir_instr_as_call(instr)->callee->impl);
++   return false;
++}
++
++static bool
++lc_node_has_barrier(struct lc_state *st, nir_cf_node *node)
++{
++   switch (node->type) {
++   case nir_cf_node_block: {
++      bool barrier = false;
++      nir_foreach_instr(instr, nir_cf_node_as_block(node))
++         barrier |= lc_instr_is_barrier(st, instr);
++      return barrier;
++   }
++   case nir_cf_node_if: {
++      nir_if *nif = nir_cf_node_as_if(node);
++      bool a = lc_list_has_barrier(st, &nif->then_list);
++      bool b = lc_list_has_barrier(st, &nif->else_list);
++      return a || b;
++   }
++   case nir_cf_node_loop: {
++      nir_loop *loop = nir_cf_node_as_loop(node);
++      unsigned idx = 0;
++      if (st->out) {
++         /* Number before the body: sites follow the order of the MSL text. */
++         if (st->out->count == st->capacity) {
++            st->capacity = st->capacity ? st->capacity * 2 : 16;
++            st->out->sites = reralloc(st->mem_ctx, st->out->sites,
++                                      struct msl_loop_site, st->capacity);
++         }
++         idx = st->out->count++;
++         st->out->sites[idx] = (struct msl_loop_site){
++            .loop = loop,
++            .site = idx + 1,
++         };
++      }
++      bool barrier = lc_list_has_barrier(st, &loop->body);
++      if (nir_loop_has_continue_construct(loop))
++         barrier |= lc_list_has_barrier(st, &loop->continue_list);
++      if (st->out) {
++         st->out->sites[idx].barrier = barrier;
++         st->out->barrier_count += barrier;
++      }
++      return barrier;
++   }
++   default:
++      return false;
++   }
++}
++
++static bool
++lc_list_has_barrier(struct lc_state *st, struct exec_list *list)
++{
++   bool barrier = false;
++   foreach_list_typed(nir_cf_node, node, node, list)
++      barrier |= lc_node_has_barrier(st, node);
++   return barrier;
++}
++
++void
++msl_loop_cap_analyze(nir_function_impl *impl, void *mem_ctx,
++                     struct msl_loop_sites *out)
++{
++   memset(out, 0, sizeof(*out));
++   struct lc_state st = {
++      .mem_ctx = mem_ctx,
++      .out = out,
++      .impls = _mesa_pointer_hash_table_create(mem_ctx),
++   };
++   _mesa_hash_table_insert(st.impls, impl, (void *)(uintptr_t)3);
++   lc_list_has_barrier(&st, &impl->body);
++
++   /* The array no longer moves: index it by loop. */
++   out->by_loop = _mesa_pointer_hash_table_create(mem_ctx);
++   for (unsigned i = 0; i < out->count; i++)
++      _mesa_hash_table_insert(out->by_loop, out->sites[i].loop, &out->sites[i]);
++}
++
++const struct msl_loop_site *
++msl_loop_cap_find(const struct msl_loop_sites *sites, const nir_loop *loop)
++{
++   if (!sites->by_loop)
++      return NULL;
++   struct hash_entry *e = _mesa_hash_table_search(sites->by_loop, loop);
++   return e ? e->data : NULL;
++}
++
++char *
++msl_loop_cap_helpers(void *mem_ctx, uint32_t cap)
++{
++   /* The counter saturates at the budget, so every later check of a capped
++    * (or aborted) invocation fails at once. Only reaching the own budget
++    * records a site; seeing another thread's abort does not. */
++   return ralloc_asprintf(
++      mem_ctx,
++      "struct kk_loop_state\n"
++      "{\n"
++      "    ulong abort;\n"
++      "    atomic_uint hit;\n"
++      "};\n"
++      "static inline __attribute__((always_inline)) bool kk_lg_cap(thread uint& n, device kk_loop_state& s, uint site)\n"
++      "{\n"
++      "    if (n >= %uu) return false;\n"
++      "    if (++n < %uu) return true;\n"
++      "    atomic_fetch_min_explicit(&s.hit, site, memory_order_relaxed);\n"
++      "    atomic_store_explicit((device atomic_uint*)s.abort, 1u, memory_order_relaxed);\n"
++      "    return false;\n"
++      "}\n"
++      "static inline __attribute__((always_inline)) bool kk_lg_go(thread uint& n, device kk_loop_state& s, uint site)\n"
++      "{\n"
++      "    if (!kk_lg_cap(n, s, site)) return false;\n"
++      "    if ((n & %uu) != 0u || atomic_load_explicit((device atomic_uint*)s.abort, memory_order_relaxed) == 0u) return true;\n"
++      "    n = %uu;\n"
++      "    return false;\n"
++      "}\n",
++      cap, cap, KK_LOOP_ABORT_EVERY - 1u, cap);
++}
+diff --git a/src/kosmickrisp/compiler/msl_loop_cap.h b/src/kosmickrisp/compiler/msl_loop_cap.h
+new file mode 100644
+index 0000000..45b3dee
+--- /dev/null
++++ b/src/kosmickrisp/compiler/msl_loop_cap.h
+@@ -0,0 +1,65 @@
++/*
++ * nps5 loopcap: compute loop containment for KosmicKrisp's NIR -> MSL path.
++ *
++ * Port of the design of NXNative commit bb574c7 "chain/compute: contain runaway
++ * loops and report capped kernels" (https://github.com/seedds/nxnative, MIT,
++ * Copyright (c) 2026 seedds; co-authored by FifteenPen, computerguy526 and
++ * uncraftablexd, PRs #2254 and #2709). Their rewrite works on SPIRV-Cross MSL
++ * text (dm/gfx/tools/dmsh_rewrite.py compute_loops); this one works on NIR.
++ *
++ * Why: on macOS committed GPU work keeps running after the process exits
++ * (NXNative issue #2664), so a watchdog that exits the process does not stop a
++ * runaway shader loop. A loop that ends by itself does.
++ *
++ * - Compute kernels only. A budget of `cap` loop-condition checks per kernel
++ *   invocation, shared by all its loops (nested and consecutive).
++ * - The first thread that exhausts its budget stores 1 to a GPU-side abort
++ *   word of the submission and records its loop site (atomic min) in the
++ *   kernel's hit word. Other loops poll the abort word every
++ *   KK_LOOP_ABORT_EVERY checks.
++ * - A loop that contains an execution barrier (directly, in a nested block or
++ *   loop, or through a callee) gets a private counter that starts at zero at
++ *   every loop entry and never reads the abort word: threads of a workgroup
++ *   must not leave a barrier loop on different iterations.
++ *
++ * SPDX-License-Identifier: MIT
++ */
++#ifndef MSL_LOOP_CAP_H
++#define MSL_LOOP_CAP_H 1
++
++#include "nir.h"
++
++#define KK_LOOP_CAP_DEFAULT  (1u << 18)
++#define KK_LOOP_ABORT_EVERY  1024u
++/* Argument table slot of the kernel's loop state (root 0, samplers 1, per draw 2). */
++#define KK_LOOP_STATE_SLOT   3u
++/* Loop state layout: u64 GPU address of the submission's abort word, then the
++ * kernel's hit word (atomic u32, UINT32_MAX = no cap hit), 4 bytes padding. */
++#define KK_LOOP_STATE_BYTES  16u
++#define KK_LOOP_STATE_HIT    8u
++
++struct msl_loop_site {
++   const nir_loop *loop;
++   uint32_t site;  /* 1-based, pre-order = order of appearance in the MSL */
++   bool barrier;   /* contains an execution barrier: private budget, no abort poll */
++};
++
++struct msl_loop_sites {
++   struct msl_loop_site *sites; /* ralloc'd, by site - 1 */
++   unsigned count;
++   unsigned barrier_count;
++   struct hash_table *by_loop;  /* nir_loop * -> struct msl_loop_site * */
++};
++
++/* Numbers the loops of `impl` and marks the ones containing an execution
++ * barrier. Everything is allocated from mem_ctx. */
++void msl_loop_cap_analyze(nir_function_impl *impl, void *mem_ctx,
++                          struct msl_loop_sites *out);
++
++const struct msl_loop_site *
++msl_loop_cap_find(const struct msl_loop_sites *sites, const nir_loop *loop);
++
++/* The MSL helpers (struct kk_loop_state, kk_lg_cap, kk_lg_go) for a budget. */
++char *msl_loop_cap_helpers(void *mem_ctx, uint32_t cap);
++
++#endif
+diff --git a/src/kosmickrisp/compiler/msl_private.h b/src/kosmickrisp/compiler/msl_private.h
+index 4b8f851..d24a0b1 100644
+--- a/src/kosmickrisp/compiler/msl_private.h
++++ b/src/kosmickrisp/compiler/msl_private.h
+@@ -8,6 +8,7 @@
+ 
+ #include "util/string_buffer.h"
+ #include "nir.h"
++#include "msl_loop_cap.h"
+ 
+ struct io_slot_info {
+    nir_alu_type type;
+@@ -34,6 +35,9 @@ struct nir_to_msl_ctx {
+    bool uses_per_draw_data;
+    /* Math mode of the open pragma block (KK_MSL_OPT_GROUP_PRAGMA) or NULL */
+    const char *open_math_mode;
++   /* nps5 loopcap: budget (0 = no guard in this shader) and its loop sites */
++   uint32_t loop_cap;
++   struct msl_loop_sites loop_sites;
+    unsigned short indentlevel;
+    struct io_slot_info inputs_info[NUM_TOTAL_VARYING_SLOTS];
+    struct io_slot_info outputs_info[NUM_TOTAL_VARYING_SLOTS];
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 4144608..3000ad9 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -7,6 +7,7 @@
+ #include <stdlib.h>
+ #include "nir_to_msl.h"
+ #include "msl_private.h"
++#include "msl_loop_cap.h"
+ #include "nir.h"
+ #include "nir_builder.h"
+ 
+@@ -119,10 +120,15 @@ emit_inputs(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+    P_IND(ctx, "constant SamplerTable &sampler_table [[buffer(1)]]");
+    if (ctx->uses_per_draw_data) {
+       P(ctx, ",\n");
+-      P_IND(ctx, "constant Buffer &per_draw [[buffer(2)]]\n");
+-   } else {
+-      P(ctx, "\n");
++      P_IND(ctx, "constant Buffer &per_draw [[buffer(2)]]");
++   }
++   /* nps5 loopcap: the kernel's loop state (abort word address + hit word) */
++   if (ctx->loop_cap) {
++      P(ctx, ",\n");
++      P_IND(ctx, "device kk_loop_state &kk_loop [[buffer(%u)]]",
++            KK_LOOP_STATE_SLOT);
+    }
++   P(ctx, "\n");
+ }
+ 
+ static const char *
+@@ -2380,17 +2386,39 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+    case nir_cf_node_loop: {
+       nir_loop *loop = nir_cf_node_as_loop(node);
+       assert(!nir_loop_has_continue_construct(loop));
++      /* nps5 loopcap (design: NXNative bb574c7): a compute kernel's loops
++       * spend one budget of loop-condition checks; a loop with an execution
++       * barrier has a private budget and never polls the abort word. */
++      const struct msl_loop_site *site =
++         ctx->loop_cap ? msl_loop_cap_find(&ctx->loop_sites, loop) : NULL;
++      char guard[96] = "";
++      if (site && site->barrier) {
++         P_IND(ctx, "{ uint kk_lg_b%u = 0u;\n", site->site);
++         snprintf(guard, sizeof(guard), "kk_lg_cap(kk_lg_b%u, kk_loop, %uu)",
++                  site->site, site->site);
++      } else if (site) {
++         snprintf(guard, sizeof(guard), "kk_lg_go(kk_lg, kk_loop, %uu)",
++                  site->site);
++      }
+       /* KK_WORKAROUND_2 */
+       if (ctx->disabled_workarounds & BITFIELD64_BIT(2)) {
+-         P_IND(ctx, "while (true) {\n");
++         if (site) {
++            P_IND(ctx, "while (%s) {\n", guard);
++         } else {
++            P_IND(ctx, "while (true) {\n");
++         }
++      } else if (site) {
++         P_IND(ctx,
++               "for (uint64_t no_crash = 0u; no_crash < %" PRIu64
++               " && %s; ++no_crash) {\n",
++               UINT64_MAX, guard);
+       } else {
+-         /* nps5 gpusafe: the bound is UINT64_MAX (= unbounded) unless KK_LOOP_CAP=<n> is set (opt-in:
+-          * a loop that runs n iterations falls through, so a shader spinning forever ends with wrong
+-          * results instead of hanging the GPU). */
++         /* Not a hang guard: the bound is UINT64_MAX (Metal compiler crash
++          * workaround). The hang guard is the loop cap above. */
+          P_IND(ctx,
+                "for (uint64_t no_crash = 0u; no_crash < %" PRIu64
+                "; ++no_crash) {\n",
+-               kk_msl_loop_cap() ? kk_msl_loop_cap() : UINT64_MAX);
++               UINT64_MAX);
+       }
+       ctx->indentlevel++;
+       foreach_list_typed(nir_cf_node, node, node, &loop->body) {
+@@ -2398,6 +2426,8 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+       }
+       ctx->indentlevel--;
+       P_IND(ctx, "}\n");
++      if (site && site->barrier)
++         P_IND(ctx, "}\n");
+       break;
+    }
+    case nir_cf_node_function:
+@@ -2405,14 +2435,31 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+    }
+ }
+ 
++/* KK_LOOP_CAP: loop-condition checks per compute kernel invocation. Unset =
++ * KK_LOOP_CAP_DEFAULT (2^18), 0 = off, n = that budget (at most 2^31). */
++uint32_t
++kk_msl_loop_cap_parse(const char *e)
++{
++   if (!e || !e[0])
++      return KK_LOOP_CAP_DEFAULT;
++   char *end;
++   unsigned long long v = strtoull(e, &end, 0);
++   if (end == e)
++      return KK_LOOP_CAP_DEFAULT;
++   if (v > (1ull << 31))
++      v = 1ull << 31;
++   /* A budget of 1 would let no loop run at all: the smallest is 2. */
++   if (v == 1)
++      v = 2;
++   return (uint32_t)v;
++}
++
+ uint64_t
+ kk_msl_loop_cap_value(void)
+ {
+    static int64_t cap = -1;
+-   if (cap < 0) {
+-      const char *e = getenv("KK_LOOP_CAP");
+-      cap = e ? (int64_t)strtoull(e, NULL, 10) : 0;
+-   }
++   if (cap < 0)
++      cap = kk_msl_loop_cap_parse(getenv("KK_LOOP_CAP"));
+    return (uint64_t)cap;
+ }
+ 
+@@ -2823,12 +2870,29 @@ nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options)
+    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
+    msl_gather_info(&ctx, options);
+ 
++   /* nps5 loopcap: compute kernels with at least one loop */
++   options->loop_sites = 0;
++   options->loop_barrier_sites = 0;
++   if (options->loop_cap && shader->info.stage == MESA_SHADER_COMPUTE) {
++      msl_loop_cap_analyze(impl, ctx.text, &ctx.loop_sites);
++      if (ctx.loop_sites.count) {
++         ctx.loop_cap = options->loop_cap;
++         options->loop_sites = ctx.loop_sites.count;
++         options->loop_barrier_sites = ctx.loop_sites.barrier_count;
++      }
++   }
++
+    P(&ctx, "// Generated by Mesa compiler\n");
+    if (shader->info.stage == MESA_SHADER_COMPUTE ||
+        shader->info.stage == MESA_SHADER_TESS_CTRL)
+       P(&ctx, "#include <metal_compute>\n");
+    P(&ctx, "#include <metal_stdlib>\n");
+    P(&ctx, "using namespace metal;\n");
++   if (ctx.loop_cap) {
++      char *helpers = msl_loop_cap_helpers(NULL, ctx.loop_cap);
++      P(&ctx, "%s", helpers);
++      ralloc_free(helpers);
++   }
+ 
+    msl_emit_constant_data(&ctx, shader);
+ 
+@@ -2868,6 +2932,8 @@ nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options)
+ 
+    msl_emit_output_var(&ctx, shader);
+    emit_local_vars(&ctx, shader);
++   if (ctx.loop_cap && ctx.loop_sites.count > ctx.loop_sites.barrier_count)
++      P_IND(&ctx, "uint kk_lg = 0u;\n");
+    predeclare_ssa_values(&ctx, impl);
+    foreach_list_typed(nir_cf_node, node, node, &impl->body) {
+       cf_node_to_metal(&ctx, node);
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index 12e5f42..4ddf747 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -63,9 +63,11 @@ struct vk_color_attachment_location_state;
+  * chain for every active set (tests/simdred_test, 9.9 M checks). */
+ #define KK_MSL_OPT_NATIVE_REDUCE    (1u << 10)
+ /* The bits that keep the shader's results and are the default. */
+-/* KK_LOOP_CAP=<n>: per-loop iteration cap in generated MSL (0 / unset = UINT64_MAX = unbounded). */
++/* nps5 loopcap: KK_LOOP_CAP = loop-condition checks per compute kernel
++ * invocation (unset = 2^18, 0 = off). See msl_loop_cap.h. */
+ #include <stdint.h>
+ uint64_t kk_msl_loop_cap_value(void);
++uint32_t kk_msl_loop_cap_parse(const char *env_value);
+ static inline uint64_t
+ kk_msl_loop_cap(void)
+ {
+@@ -78,6 +80,13 @@ struct nir_to_msl_options {
+    uint64_t disabled_workarounds;
+    uint32_t msl_opt;
+ 
++   /* nps5 loopcap. In: budget of loop-condition checks for a compute kernel
++    * (0 = no guard; ignored for other stages). Out: number of guarded loops
++    * (0 = the MSL takes no loop state) and how many of them hold a barrier. */
++   uint32_t loop_cap;
++   uint32_t loop_sites;
++   uint32_t loop_barrier_sites;
++
+    /* Required to correctly declare fragment outputs. Shader may contain
+     * shrinked writes which can lead to writting less components than the ones
+     * the render target has. This leads to an incorrect calculation of the
+diff --git a/src/kosmickrisp/compiler/tests/loopcap_nir_test.c b/src/kosmickrisp/compiler/tests/loopcap_nir_test.c
+new file mode 100644
+index 0000000..e85ff13
+--- /dev/null
++++ b/src/kosmickrisp/compiler/tests/loopcap_nir_test.c
+@@ -0,0 +1,552 @@
++/*
++ * nps5 loopcap: GPU-free unit test of the compute loop cap (msl_loop_cap.c and
++ * its emission in nir_to_msl.c). Builds NIR with nir_builder; nothing touches
++ * Metal. With an argument it also writes the MSL helpers for a budget to that
++ * file (work/s3/kk-safe/test compiles them as C++ against a model).
++ * SPDX-License-Identifier: MIT
++ */
++#include "nir.h"
++#include "nir_builder.h"
++#include "kosmickrisp/compiler/msl_loop_cap.h"
++#include "kosmickrisp/compiler/nir_to_msl.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++static int checks, failed;
++#define CHECK(c, label)                                                        \
++   do {                                                                        \
++      checks++;                                                                \
++      if (!(c)) {                                                              \
++         failed++;                                                             \
++         fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, label);       \
++      }                                                                        \
++   } while (0)
++
++enum body {
++   BODY_PLAIN,       /* a device store */
++   BODY_BARRIER,     /* workgroup execution barrier */
++   BODY_SUBGROUP,    /* subgroup execution barrier */
++   BODY_MEMBARRIER,  /* memory barrier only (SCOPE_NONE) */
++};
++
++static void
++emit_body(nir_builder *b, enum body body)
++{
++   switch (body) {
++   case BODY_PLAIN:
++      nir_store_global(b, nir_imm_int(b, 7), nir_imm_int64(b, 0x10000),
++                       .align_mul = 4, .write_mask = 1);
++      break;
++   case BODY_BARRIER:
++      nir_barrier(b, .execution_scope = SCOPE_WORKGROUP,
++                  .memory_scope = SCOPE_WORKGROUP,
++                  .memory_modes = nir_var_mem_shared);
++      break;
++   case BODY_SUBGROUP:
++      nir_barrier(b, .execution_scope = SCOPE_SUBGROUP,
++                  .memory_scope = SCOPE_SUBGROUP,
++                  .memory_modes = nir_var_mem_shared);
++      break;
++   case BODY_MEMBARRIER:
++      nir_barrier(b, .execution_scope = SCOPE_NONE,
++                  .memory_scope = SCOPE_DEVICE,
++                  .memory_modes = nir_var_mem_global);
++      break;
++   }
++}
++
++/* for (i = 0; i < bound; i++) { ... }, the bound read from device memory so no
++ * pass can fold the loop. The caller fills the body between begin and end. */
++struct loop {
++   nir_variable *i;
++   nir_def *v;
++};
++static struct loop
++loop_begin(nir_builder *b, unsigned bound_slot)
++{
++   struct loop l;
++   l.i = nir_local_variable_create(b->impl, glsl_uint_type(), "i");
++   nir_store_var(b, l.i, nir_imm_int(b, 0), 1);
++   nir_push_loop(b);
++   l.v = nir_load_var(b, l.i);
++   nir_def *bound = nir_load_global(
++      b, 1, 32, nir_imm_int64(b, 0x20000 + 4 * bound_slot), .align_mul = 4);
++   nir_push_if(b, nir_uge(b, l.v, bound));
++   nir_jump(b, nir_jump_break);
++   nir_pop_if(b, NULL);
++   return l;
++}
++static void
++loop_end(nir_builder *b, struct loop l)
++{
++   nir_store_var(b, l.i, nir_iadd_imm(b, l.v, 1), 1);
++   nir_pop_loop(b, NULL);
++}
++static void
++simple_loop(nir_builder *b, enum body body, unsigned slot)
++{
++   struct loop l = loop_begin(b, slot);
++   emit_body(b, body);
++   loop_end(b, l);
++}
++
++static nir_builder
++new_shader(mesa_shader_stage stage)
++{
++   nir_builder b =
++      nir_builder_init_simple_shader(stage, &kk_nir_options, "loopcap_test");
++   if (stage == MESA_SHADER_COMPUTE) {
++      b.shader->info.workgroup_size[0] = 32;
++      b.shader->info.workgroup_size[1] = 1;
++      b.shader->info.workgroup_size[2] = 1;
++   }
++   return b;
++}
++
++static nir_function *
++new_helper(nir_builder *b, const char *name, nir_builder *hb)
++{
++   nir_function *fn = nir_function_create(b->shader, name);
++   nir_function_impl *impl = nir_function_impl_create(fn);
++   *hb = nir_builder_at(nir_before_impl(impl));
++   return fn;
++}
++
++static void
++analyze(nir_builder *b, struct msl_loop_sites *s)
++{
++   msl_loop_cap_analyze(b->impl, b->shader, s);
++}
++
++/* ---- analysis: numbering ---- */
++static void
++test_numbering(void)
++{
++   nir_builder b = new_shader(MESA_SHADER_COMPUTE);
++   struct msl_loop_sites s;
++   analyze(&b, &s);
++   CHECK(s.count == 0 && s.barrier_count == 0, "no loops: no sites");
++   CHECK(msl_loop_cap_find(&s, NULL) == NULL, "find on an empty table");
++
++   /* loop 1 { loop 2 { } loop 3 { loop 4 } } loop 5 */
++   struct loop l1 = loop_begin(&b, 0);
++   simple_loop(&b, BODY_PLAIN, 1);
++   struct loop l3 = loop_begin(&b, 2);
++   simple_loop(&b, BODY_PLAIN, 3);
++   loop_end(&b, l3);
++   loop_end(&b, l1);
++   simple_loop(&b, BODY_PLAIN, 4);
++   analyze(&b, &s);
++   CHECK(s.count == 5 && s.barrier_count == 0, "five loops, none with a barrier");
++   bool ordered = true, found = true;
++   for (unsigned i = 0; i < s.count; i++) {
++      ordered &= s.sites[i].site == i + 1 && !s.sites[i].barrier;
++      const struct msl_loop_site *f = msl_loop_cap_find(&s, s.sites[i].loop);
++      found &= f && f->site == i + 1;
++   }
++   CHECK(ordered, "sites are 1..n in order");
++   CHECK(found, "every loop is found by pointer");
++   /* pre-order: site 1 is the outermost first loop, 2 and 3 are its children,
++    * 4 is inside 3, 5 follows 1 */
++   const nir_loop *p2 = nir_cf_node_as_loop(s.sites[1].loop->cf_node.parent);
++   const nir_loop *p3 = nir_cf_node_as_loop(s.sites[2].loop->cf_node.parent);
++   const nir_loop *p4 = nir_cf_node_as_loop(s.sites[3].loop->cf_node.parent);
++   CHECK(p2 == s.sites[0].loop && p3 == s.sites[0].loop && p4 == s.sites[2].loop,
++         "numbering is pre-order (the order of the MSL text)");
++   CHECK(s.sites[0].loop->cf_node.parent->type == nir_cf_node_function &&
++         s.sites[4].loop->cf_node.parent->type == nir_cf_node_function,
++         "sites 1 and 5 are top level");
++   ralloc_free(b.shader);
++
++   /* many loops: 3000 in a row and a nest 40 deep */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   for (unsigned i = 0; i < 3000; i++)
++      simple_loop(&b, BODY_PLAIN, i & 15);
++   struct loop nest[40];
++   for (unsigned i = 0; i < 40; i++)
++      nest[i] = loop_begin(&b, i & 15);
++   emit_body(&b, BODY_BARRIER);
++   for (unsigned i = 40; i-- > 0;)
++      loop_end(&b, nest[i]);
++   analyze(&b, &s);
++   CHECK(s.count == 3040, "3040 loops numbered");
++   CHECK(s.barrier_count == 40, "the whole nest around a barrier is marked");
++   bool row_ok = true, nest_ok = true;
++   for (unsigned i = 0; i < 3000; i++)
++      row_ok &= !s.sites[i].barrier && s.sites[i].site == i + 1;
++   for (unsigned i = 3000; i < 3040; i++)
++      nest_ok &= s.sites[i].barrier && s.sites[i].site == i + 1;
++   CHECK(row_ok, "3000 plain loops stay plain");
++   CHECK(nest_ok, "40 nested loops: barrier propagates to every enclosing loop");
++   ralloc_free(b.shader);
++}
++
++/* ---- analysis: barriers ---- */
++static void
++test_barriers(void)
++{
++   struct msl_loop_sites s;
++
++   /* barrier outside any loop; memory barrier inside one; subgroup barrier */
++   nir_builder b = new_shader(MESA_SHADER_COMPUTE);
++   emit_body(&b, BODY_BARRIER);
++   simple_loop(&b, BODY_PLAIN, 0);      /* 1 */
++   simple_loop(&b, BODY_MEMBARRIER, 1); /* 2 */
++   simple_loop(&b, BODY_SUBGROUP, 2);   /* 3 */
++   simple_loop(&b, BODY_BARRIER, 3);    /* 4 */
++   emit_body(&b, BODY_BARRIER);
++   analyze(&b, &s);
++   CHECK(s.count == 4, "four loops");
++   CHECK(!s.sites[0].barrier, "a barrier outside the loop does not mark it");
++   CHECK(!s.sites[1].barrier, "a memory-only barrier (atomic_thread_fence) is not an execution barrier");
++   CHECK(s.sites[2].barrier, "a subgroup barrier marks its loop");
++   CHECK(s.sites[3].barrier, "a workgroup barrier marks its loop");
++   CHECK(s.barrier_count == 2, "barrier count");
++   ralloc_free(b.shader);
++
++   /* barrier in a nested if / else, and in an inner loop */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   struct loop l1 = loop_begin(&b, 0); /* 1: barrier in else of a nested if */
++   nir_push_if(&b, nir_ieq_imm(&b, l1.v, 3));
++   emit_body(&b, BODY_PLAIN);
++   nir_push_else(&b, NULL);
++   nir_push_if(&b, nir_ieq_imm(&b, l1.v, 5));
++   emit_body(&b, BODY_BARRIER);
++   nir_pop_if(&b, NULL);
++   nir_pop_if(&b, NULL);
++   loop_end(&b, l1);
++   struct loop l2 = loop_begin(&b, 1); /* 2: outer of a barrier loop */
++   simple_loop(&b, BODY_PLAIN, 2);     /* 3: plain sibling inside 2 */
++   simple_loop(&b, BODY_BARRIER, 3);   /* 4: the barrier loop */
++   loop_end(&b, l2);
++   simple_loop(&b, BODY_PLAIN, 4);     /* 5 */
++   analyze(&b, &s);
++   CHECK(s.count == 5, "five loops");
++   CHECK(s.sites[0].barrier, "barrier inside a nested else/if marks the loop");
++   CHECK(s.sites[1].barrier, "outer loop of a barrier loop is marked");
++   CHECK(!s.sites[2].barrier, "plain inner sibling is not marked");
++   CHECK(s.sites[3].barrier, "inner barrier loop is marked");
++   CHECK(!s.sites[4].barrier, "a loop after a barrier loop is not marked");
++   ralloc_free(b.shader);
++}
++
++/* ---- analysis: barriers through callees ---- */
++static void
++test_callees(void)
++{
++   struct msl_loop_sites s;
++   nir_builder b = new_shader(MESA_SHADER_COMPUTE);
++   nir_builder hb;
++
++   /* arrive(): a barrier. wrapper(): calls arrive (in an if). plain(): a store
++    * and a loop of its own. chain(): calls plain. */
++   nir_function *arrive = new_helper(&b, "arrive", &hb);
++   emit_body(&hb, BODY_BARRIER);
++   nir_function *wrapper = new_helper(&b, "wrapper", &hb);
++   nir_push_if(&hb, nir_imm_true(&hb));
++   nir_call(&hb, arrive);
++   nir_pop_if(&hb, NULL);
++   nir_function *plain = new_helper(&b, "plain", &hb);
++   simple_loop(&hb, BODY_PLAIN, 0);
++   nir_function *chain = new_helper(&b, "chain", &hb);
++   nir_call(&hb, plain);
++   /* a declaration without a body */
++   nir_function *opaque = nir_function_create(b.shader, "opaque");
++
++   struct loop l;
++   l = loop_begin(&b, 0); /* 1: calls arrive directly */
++   nir_call(&b, arrive);
++   loop_end(&b, l);
++   l = loop_begin(&b, 1); /* 2: calls wrapper -> arrive */
++   nir_call(&b, wrapper);
++   loop_end(&b, l);
++   l = loop_begin(&b, 2); /* 3: calls chain -> plain (no barrier) */
++   nir_call(&b, chain);
++   loop_end(&b, l);
++   l = loop_begin(&b, 3); /* 4: outer */
++   {
++      struct loop in = loop_begin(&b, 4); /* 5: inner calls wrapper in an if */
++      nir_push_if(&b, nir_ieq_imm(&b, in.v, 1));
++      nir_call(&b, wrapper);
++      nir_pop_if(&b, NULL);
++      loop_end(&b, in);
++   }
++   loop_end(&b, l);
++   l = loop_begin(&b, 5); /* 6: calls a function without a body */
++   nir_call(&b, opaque);
++   loop_end(&b, l);
++   nir_call(&b, arrive);   /* a call outside loops */
++   simple_loop(&b, BODY_PLAIN, 6); /* 7 */
++
++   analyze(&b, &s);
++   CHECK(s.count == 7, "only the entry point's loops are numbered (not plain()'s)");
++   CHECK(s.sites[0].barrier, "barrier through a direct callee");
++   CHECK(s.sites[1].barrier, "barrier through a callee of a callee");
++   CHECK(!s.sites[2].barrier, "callees without a barrier do not mark the loop");
++   CHECK(s.sites[3].barrier && s.sites[4].barrier, "callee barrier in an inner loop marks inner and outer");
++   CHECK(s.sites[5].barrier, "an unknown callee is treated as a barrier (conservative)");
++   CHECK(!s.sites[6].barrier, "a barrier call outside the loop does not mark it");
++   CHECK(s.barrier_count == 5, "barrier count through callees");
++   /* same answer when analyzed again (memo table is per call) */
++   struct msl_loop_sites s2;
++   analyze(&b, &s2);
++   bool same = s2.count == s.count;
++   for (unsigned i = 0; same && i < s.count; i++)
++      same = s.sites[i].barrier == s2.sites[i].barrier;
++   CHECK(same, "analysis is repeatable");
++   ralloc_free(b.shader);
++}
++
++/* ---- emission ---- */
++static unsigned
++count(const char *text, const char *needle)
++{
++   unsigned n = 0;
++   for (const char *p = text; (p = strstr(p, needle)); p += strlen(needle))
++      n++;
++   return n;
++}
++
++static bool
++balanced(const char *text)
++{
++   int depth = 0, paren = 0;
++   for (const char *p = text; *p; p++) {
++      depth += (*p == '{') - (*p == '}');
++      paren += (*p == '(') - (*p == ')');
++      if (depth < 0 || paren < 0)
++         return false;
++   }
++   return depth == 0 && paren == 0;
++}
++
++static char *
++translate(nir_builder *b, uint32_t cap, uint64_t disabled, uint32_t *sites,
++          uint32_t *barrier_sites)
++{
++   nir_shader *nir = b->shader;
++   nir_validate_shader(nir, "loopcap test");
++   nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
++   msl_optimize_nir(nir);
++   struct nir_to_msl_options opt = {
++      .mem_ctx = NULL,
++      .disabled_workarounds = disabled | BITFIELD64_BIT(19),
++      .msl_opt = KK_MSL_OPT_DEFAULT,
++      .loop_cap = cap,
++      .loop_sites = 12345,
++      .loop_barrier_sites = 12345,
++   };
++   char *msl = nir_to_msl(nir, &opt);
++   if (getenv("LOOPCAP_SHOW"))
++      printf("---- cap %u, workarounds off %llx ----\n%s\n", cap, (unsigned long long)disabled, msl);
++   if (sites)
++      *sites = opt.loop_sites;
++   if (barrier_sites)
++      *barrier_sites = opt.loop_barrier_sites;
++   return msl;
++}
++
++static void
++build_mixed(nir_builder *b)
++{
++   simple_loop(b, BODY_PLAIN, 0);        /* 1 */
++   struct loop l = loop_begin(b, 1);     /* 2: barrier (through 3) */
++   simple_loop(b, BODY_BARRIER, 2);      /* 3 */
++   simple_loop(b, BODY_PLAIN, 3);        /* 4 */
++   loop_end(b, l);
++}
++
++static void
++test_emission(void)
++{
++   uint32_t sites, bsites;
++
++   /* plain loop, budget 4096 */
++   nir_builder b = new_shader(MESA_SHADER_COMPUTE);
++   simple_loop(&b, BODY_PLAIN, 0);
++   char *msl = translate(&b, 4096, 0, &sites, &bsites);
++   CHECK(sites == 1 && bsites == 0, "one guarded loop reported");
++   CHECK(count(msl, "struct kk_loop_state") == 1, "helpers emitted once");
++   CHECK(strstr(msl, "device kk_loop_state &kk_loop [[buffer(3)]]") != NULL, "loop state argument at slot 3");
++   CHECK(count(msl, "uint kk_lg = 0u;") == 1, "shared counter declared once");
++   CHECK(strstr(msl, "&& kk_lg_go(kk_lg, kk_loop, 1u); ++no_crash) {") != NULL, "loop condition guarded with site 1");
++   CHECK(strstr(msl, "if (n >= 4096u) return false;") && strstr(msl, "if (++n < 4096u) return true;") &&
++         strstr(msl, "n = 4096u;"), "the budget is the one asked for");
++   CHECK(strstr(msl, "(n & 1023u) != 0u") != NULL, "abort polled every 1024 checks");
++   CHECK(count(msl, "atomic_load_explicit((device atomic_uint*)s.abort") == 1 &&
++         count(msl, "atomic_store_explicit((device atomic_uint*)s.abort, 1u") == 1 &&
++         count(msl, "atomic_fetch_min_explicit(&s.hit, site") == 1, "abort is read in kk_lg_go only and written with the hit");
++   CHECK(strstr(msl, "kk_lg_b") == NULL, "no private counter without a barrier loop");
++   CHECK(balanced(msl), "braces and parentheses balance");
++   CHECK(strstr(msl, "kernel void") != NULL, "it is a kernel");
++   ralloc_free(msl);
++
++   /* mixed: 1 plain, 2 barrier outer, 3 barrier inner, 4 plain inner */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   build_mixed(&b);
++   msl = translate(&b, KK_LOOP_CAP_DEFAULT, 0, &sites, &bsites);
++   CHECK(sites == 4 && bsites == 2, "four guarded loops, two with a barrier");
++   CHECK(strstr(msl, "kk_lg_go(kk_lg, kk_loop, 1u)") && strstr(msl, "kk_lg_go(kk_lg, kk_loop, 4u)"), "plain loops use the shared counter and poll");
++   CHECK(strstr(msl, "{ uint kk_lg_b2 = 0u;") && strstr(msl, "kk_lg_cap(kk_lg_b2, kk_loop, 2u)") &&
++         strstr(msl, "{ uint kk_lg_b3 = 0u;") && strstr(msl, "kk_lg_cap(kk_lg_b3, kk_loop, 3u)"),
++         "barrier loops get a private counter declared at the loop entry and never poll");
++   CHECK(!strstr(msl, "kk_lg_go(kk_lg, kk_loop, 2u)") && !strstr(msl, "kk_lg_go(kk_lg, kk_loop, 3u)") &&
++         !strstr(msl, "kk_lg_cap(kk_lg, "), "no barrier loop reads the abort word or the shared counter");
++   /* the inner private counter is declared inside the outer loop's body: fresh at every entry */
++   const char *outer = strstr(msl, "kk_lg_cap(kk_lg_b2, kk_loop, 2u)");
++   const char *inner_decl = strstr(msl, "{ uint kk_lg_b3 = 0u;");
++   const char *inner = strstr(msl, "kk_lg_cap(kk_lg_b3, kk_loop, 3u)");
++   CHECK(outer && inner_decl && inner && outer < inner_decl && inner_decl < inner, "inner private counter restarts at each entry of the inner loop");
++   CHECK(strstr(msl, "if (n >= 262144u) return false;") != NULL, "default budget 2^18");
++   CHECK(count(msl, "threadgroup_barrier(") == 1, "the barrier itself is unchanged");
++   CHECK(balanced(msl), "braces and parentheses balance (barrier blocks closed)");
++   ralloc_free(msl);
++
++   /* only barrier loops: no shared counter */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   simple_loop(&b, BODY_BARRIER, 0);
++   msl = translate(&b, 4096, 0, &sites, &bsites);
++   CHECK(sites == 1 && bsites == 1, "one barrier loop");
++   CHECK(!strstr(msl, "uint kk_lg = 0u;"), "no shared counter when every loop has a barrier");
++   CHECK(balanced(msl), "balanced");
++   ralloc_free(msl);
++
++   /* KK_WORKAROUND_2 disabled: while loops */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   build_mixed(&b);
++   msl = translate(&b, 4096, BITFIELD64_BIT(2), &sites, &bsites);
++   CHECK(strstr(msl, "while (kk_lg_go(kk_lg, kk_loop, 1u)) {") && strstr(msl, "while (kk_lg_cap(kk_lg_b2, kk_loop, 2u)) {"), "while form guarded too");
++   CHECK(!strstr(msl, "while (true)") && !strstr(msl, "no_crash"), "no unguarded loop is left");
++   CHECK(balanced(msl), "balanced");
++   ralloc_free(msl);
++
++   /* cap 0: the old MSL */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   build_mixed(&b);
++   msl = translate(&b, 0, 0, &sites, &bsites);
++   CHECK(sites == 0 && bsites == 0, "cap 0 reports no sites");
++   CHECK(!strstr(msl, "kk_l"), "cap 0: no trace of the guard");
++   CHECK(count(msl, "for (uint64_t no_crash = 0u; no_crash < 18446744073709551615; ++no_crash) {") == 4, "cap 0: the four loops are as before");
++   CHECK(!strstr(msl, "buffer(3)"), "cap 0: no extra argument");
++   char *off = msl;
++
++   /* the guard only adds text: removing it gives the cap-0 MSL byte for byte */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   build_mixed(&b);
++   msl = translate(&b, 4096, 0, NULL, NULL);
++   {
++      char *strip = strdup(msl), *w = strip;
++      const char *helpers = strstr(msl, "struct kk_loop_state");
++      const char *helpers_end = strstr(msl, "    n = 4096u;\n    return false;\n}\n");
++      const char *r = msl;
++      bool ok = helpers && helpers_end;
++      helpers_end = ok ? helpers_end + strlen("    n = 4096u;\n    return false;\n}\n") : NULL;
++      while (ok && *r) {
++         if (r == helpers) {
++            r = helpers_end;
++            continue;
++         }
++#define SKIP(lit)                                                              \
++   if (!strncmp(r, lit, strlen(lit))) {                                        \
++      r += strlen(lit);                                                        \
++      continue;                                                                \
++   }
++         SKIP(",\n    device kk_loop_state &kk_loop [[buffer(3)]]");
++         SKIP("    uint kk_lg = 0u;\n");
++         SKIP(" && kk_lg_go(kk_lg, kk_loop, 1u)");
++         SKIP(" && kk_lg_go(kk_lg, kk_loop, 4u)");
++         SKIP(" && kk_lg_cap(kk_lg_b2, kk_loop, 2u)");
++         SKIP(" && kk_lg_cap(kk_lg_b3, kk_loop, 3u)");
++         if (!strncmp(r, "{ uint kk_lg_b", 14)) {
++            /* the opening line of a barrier block and its indentation */
++            while (w > strip && w[-1] == ' ')
++               w--;
++            r = strchr(r, '\n') + 1;
++            continue;
++         }
++         *w++ = *r++;
++      }
++      *w = 0;
++      /* the two closing braces of the barrier blocks */
++      unsigned extra = count(strip, "}\n") - count(off, "}\n");
++      CHECK(ok && extra == 2, "exactly the two barrier blocks add a closing brace");
++      /* compare ignoring those two lines: drop every line that is only "}" from both */
++      char *a = strip, *c = off;
++      bool same = true;
++      while (same && (*a || *c)) {
++         while (*a == ' ' || *a == '}' || *a == '\n')
++            a++;
++         while (*c == ' ' || *c == '}' || *c == '\n')
++            c++;
++         same = *a == *c;
++         if (*a)
++            a++;
++         if (*c)
++            c++;
++      }
++      CHECK(same, "apart from the guard text the MSL equals the cap-0 MSL");
++      free(strip);
++   }
++   ralloc_free(msl);
++   ralloc_free(off);
++
++   /* compute without loops: unchanged, no argument */
++   b = new_shader(MESA_SHADER_COMPUTE);
++   emit_body(&b, BODY_PLAIN);
++   emit_body(&b, BODY_BARRIER);
++   msl = translate(&b, 4096, 0, &sites, &bsites);
++   CHECK(sites == 0 && !strstr(msl, "kk_l") && !strstr(msl, "buffer(3)"), "loop-free compute shader is unchanged");
++   ralloc_free(msl);
++
++   /* other stages: unchanged even with a budget */
++   b = new_shader(MESA_SHADER_FRAGMENT);
++   simple_loop(&b, BODY_PLAIN, 0);
++   msl = translate(&b, 4096, 0, &sites, &bsites);
++   CHECK(sites == 0 && !strstr(msl, "kk_l") && !strstr(msl, "buffer(3)") && strstr(msl, "no_crash < 18446744073709551615;"),
++         "fragment shader loops are not guarded");
++   ralloc_free(msl);
++}
++
++static void
++test_env(void)
++{
++   CHECK(kk_msl_loop_cap_parse(NULL) == 262144u, "unset: 2^18");
++   CHECK(kk_msl_loop_cap_parse("") == 262144u, "empty: 2^18");
++   CHECK(kk_msl_loop_cap_parse("junk") == 262144u, "not a number: 2^18");
++   CHECK(kk_msl_loop_cap_parse("0") == 0u, "0: off");
++   CHECK(kk_msl_loop_cap_parse("4096") == 4096u, "4096");
++   CHECK(kk_msl_loop_cap_parse("0x1000") == 4096u, "hex");
++   CHECK(kk_msl_loop_cap_parse("1") == 2u, "1 would run nothing: 2");
++   CHECK(kk_msl_loop_cap_parse("99999999999999") == (1u << 31), "clamped to 2^31");
++   CHECK(KK_LOOP_CAP_DEFAULT == (1u << 18) && KK_LOOP_ABORT_EVERY == 1024u && KK_LOOP_STATE_SLOT == 3u &&
++         KK_LOOP_STATE_BYTES == 16u && KK_LOOP_STATE_HIT == 8u, "ABI constants");
++}
++
++int
++main(int argc, char **argv)
++{
++   alarm(60);
++   glsl_type_singleton_init_or_ref();
++   if (argc > 2) {
++      /* <file> <cap>: write the MSL helpers for the model test */
++      char *h = msl_loop_cap_helpers(NULL, (uint32_t)strtoul(argv[2], NULL, 0));
++      FILE *f = fopen(argv[1], "w");
++      if (!f)
++         return 2;
++      fputs(h, f);
++      fclose(f);
++      ralloc_free(h);
++      return 0;
++   }
++   test_env();
++   test_numbering();
++   test_barriers();
++   test_callees();
++   test_emission();
++   glsl_type_singleton_decref();
++   printf("loopcap_nir_test: %d checks, %d failed\n", checks, failed);
++   return failed != 0;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_bo.c b/src/kosmickrisp/vulkan/kk_bo.c
+index dad97b8..93805ef 100644
+--- a/src/kosmickrisp/vulkan/kk_bo.c
++++ b/src/kosmickrisp/vulkan/kk_bo.c
+@@ -8,6 +8,7 @@
+ 
+ #include "kk_device.h"
+ #include "kk_physical_device.h"
++#include "kk_safety.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ 
+@@ -46,9 +47,16 @@ kk_mem_print(void)
+    fprintf(stderr, " | owned_heaps=%.1f\n", heap / 1048576.0);
+ }
+ 
++const char *
++kk_mem_cat_name(enum kk_mem_cat cat)
++{
++   return cat < KK_MEM_CAT_COUNT ? kk_mem_names[cat] : "?";
++}
++
+ void
+ kk_mem_account(enum kk_mem_cat cat, int64_t bytes)
+ {
++   kk_safe_mem_note(cat, bytes); /* nps5 gpusafe: table for the first-OOM dump */
+    static int period = -1;
+    static _Atomic double last;
+    if (period < 0) {
+diff --git a/src/kosmickrisp/vulkan/kk_bo.h b/src/kosmickrisp/vulkan/kk_bo.h
+index 4ad2d0e..6d5d731 100644
+--- a/src/kosmickrisp/vulkan/kk_bo.h
++++ b/src/kosmickrisp/vulkan/kk_bo.h
+@@ -39,6 +39,7 @@ enum kk_mem_cat {
+ };
+ 
+ void kk_mem_account(enum kk_mem_cat cat, int64_t bytes);
++const char *kk_mem_cat_name(enum kk_mem_cat cat);
+ 
+ struct kk_bo {
+    enum kk_mem_cat cat;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 8907e53..e0ac129 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -96,6 +96,7 @@ kk_destroy_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer)
+    struct kk_device *dev = kk_cmd_buffer_device(cmd);
+ 
+    kk_cmd_release_resources(dev, cmd);
++   kk_safe_loop_cmd_reset(&cmd->loop);
+    util_dynarray_fini(&cmd->large_bos);
+    util_dynarray_fini(&cmd->post_render_writes);
+    util_dynarray_fini(&cmd->ts_resolves);
+@@ -135,8 +136,9 @@ kk_create_cmd_buffer(struct vk_command_pool *vk_pool,
+ 
+    {
+       mtl_argument_table_descriptor *desc = mtl_new_argument_table_descriptor();
+-      /* Root at 0, samplers at 1 and per draw data at 2 */
+-      mtl_set_max_buffer_binding_count(desc, 3u);
++      /* Root at 0, samplers at 1, per draw data at 2 and a compute kernel's
++       * loop state at 3 (nps5 loopcap, KK_LOOP_STATE_SLOT) */
++      mtl_set_max_buffer_binding_count(desc, 4u);
+       cmd->argument_table = mtl_new_argument_table(dev->mtl_handle, desc);
+       mtl_set_address(cmd->argument_table, dev->samplers.table.bo->gpu, 1u);
+       mtl_release(desc);
+@@ -174,6 +176,7 @@ kk_reset_cmd_buffer_internal(struct kk_cmd_buffer *cmd)
+    memset(&cmd->state, 0, sizeof(cmd->state));
+    cmd->uses_heap = false;
+    cmd->safe_n_disp = cmd->safe_n_render = cmd->safe_cs_len = cmd->safe_cs_local = cmd->safe_rt = 0;
++   kk_safe_loop_cmd_reset(&cmd->loop);
+ }
+ 
+ static void
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index c86720f..d4e7473 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -8,6 +8,7 @@
+ #ifndef KK_CMD_BUFFER_H
+ #define KK_CMD_BUFFER_H 1
+ 
++#include "kk_safety.h"
+ #include "kk_private.h"
+ 
+ #include "kk_descriptor_set.h"
+@@ -245,6 +246,8 @@ struct kk_cmd_buffer {
+ 
+    /* nps5 gpusafe flight-recorder counters (single-threaded recording) */
+    uint32_t safe_n_disp, safe_n_render, safe_cs_len, safe_cs_local, safe_rt;
++   /* nps5 loopcap: abort word + per-kernel loop states of this command buffer */
++   struct kk_safe_loop_cmd loop;
+ 
+    struct {
+       mtl_command_allocator *allocator;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+index a685239..a489310 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+@@ -13,6 +13,7 @@
+ #include "kk_entrypoints.h"
+ #include "kk_shader.h"
+ #include "kk_safety.h"
++#include "kosmickrisp/compiler/msl_loop_cap.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ 
+@@ -22,11 +23,28 @@ void kk_prof_dispatch(void *cmd, uint32_t msl_len, uint32_t lx, uint32_t ly, uin
+ void kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol, uint32_t dfmt);
+ 
+ 
+-static void
++/* False: the dispatch must be skipped (no loop state for a guarded kernel). */
++static bool
+ kk_flush_compute_state(struct kk_cmd_buffer *cmd)
+ {
+    mtl_compute_encoder *encoder = cs_get_compute(cmd);
+ 
++   /* nps5 loopcap: a kernel with guarded loops reads its loop state (the
++    * submission's abort word address + its own hit word) at slot 3. */
++   const struct kk_shader *cs = cmd->state.shaders[MESA_SHADER_COMPUTE];
++   if (cs->info.cs.loop_sites) {
++      uint64_t state = kk_safe_loop_state(
++         kk_cmd_buffer_device(cmd), &cmd->loop, cs->info.cs.loop_key,
++         cs->info.cs.loop_sites, cs->info.cs.loop_barrier_sites,
++         cs->info.cs.loop_msl_len);
++      if (unlikely(!state))
++         return false;
++      if (state != cmd->loop.bound_gpu) {
++         mtl_set_address(cmd->argument_table, state, KK_LOOP_STATE_SLOT);
++         cmd->loop.bound_gpu = state;
++      }
++   }
++
+    // Fill Metal argument buffer with descriptor set addresses
+    struct kk_descriptor_state *desc = &cmd->state.cs.descriptors;
+ 
+@@ -40,6 +58,7 @@ kk_flush_compute_state(struct kk_cmd_buffer *cmd)
+ 
+    mtl_compute_set_pipeline_state(
+       encoder, cmd->state.shaders[MESA_SHADER_COMPUTE]->pipeline.cs);
++   return true;
+ }
+ 
+ static void
+@@ -107,7 +126,8 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+       kk_predicate_compute(cmd, patched.gpu, patched.gpu);
+ 
+       /* Flush compute state after predication dispatch */
+-      kk_flush_compute_state(cmd);
++      if (!kk_flush_compute_state(cmd))
++         return;
+       mtl_dispatch_threadgroups_with_indirect_buffer(encoder, patched.gpu,
+                                                      local_size);
+    } else {
+@@ -117,7 +137,8 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+          .z = groupCountZ * local_size.z,
+       };
+ 
+-      kk_flush_compute_state(cmd);
++      if (!kk_flush_compute_state(cmd))
++         return;
+       mtl_dispatch_threads(encoder, grid_size, local_size);
+    }
+ }
+@@ -153,7 +174,8 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+       kk_predicate_compute(cmd, patched.gpu, pInfo->addressRange.address);
+ 
+       /* Flush compute state after predication dispatch */
+-      kk_flush_compute_state(cmd);
++      if (!kk_flush_compute_state(cmd))
++         return;
+       mtl_dispatch_threadgroups_with_indirect_buffer(encoder, patched.gpu,
+                                                      local_size);
+    } else {
+@@ -169,7 +191,8 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+             addr = clamped.gpu;
+          }
+       }
+-      kk_flush_compute_state(cmd);
++      if (!kk_flush_compute_state(cmd))
++         return;
+       mtl_dispatch_threadgroups_with_indirect_buffer(encoder, addr, local_size);
+    }
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 2ad4fef..e4c439e 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1033,7 +1033,7 @@ kk_physical_device_init_pipeline_cache(struct kk_physical_device *pdev)
+     * options must not be reused. */
+    _mesa_blake3_update(&blake3_ctx, &pdev->settings.msl_opt,
+                        sizeof(pdev->settings.msl_opt));
+-   if (kk_msl_loop_cap()) { /* opt-in loop cap changes the MSL: new cache key (default unchanged) */
++   if (kk_msl_loop_cap()) { /* the loop cap changes compute MSL: the budget is part of the key (KK_LOOP_CAP=0: the key without it) */
+       uint64_t cap = kk_msl_loop_cap();
+       _mesa_blake3_update(&blake3_ctx, &cap, sizeof(cap));
+    }
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index 2c66b68..84fdd3a 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -228,12 +228,16 @@ static void
+ kk_safe_callback(struct mtl_feedback_data *data)
+ {
+    struct kk_safe_wrap *w = data->user_data;
+-   kk_safe_commit_done(w->tk, data);
++   /* Loop cap attribution and error classification first; the wrapped handler then marks the
++    * device lost and releases its command buffer; only then may the process stop. */
++   bool stop = kk_safe_commit_done(w->tk, data);
+    data->user_data = w->data;
+    mtl_feedback_handler_callback cb = w->cb;
+    free(w->tk);
+    free(w);
+    cb(data);
++   if (stop)
++      kk_safe_stop_now();
+ }
+ 
+ static void
+@@ -312,6 +316,9 @@ kk_queue_commit(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+             callback = kk_safe_callback;
+             user_data = sw;
+          } else {
++            /* reads nothing: just gives the loop states back */
++            struct mtl_feedback_data none = {0};
++            kk_safe_commit_done(tk, &none);
+             free(tk);
+          }
+       }
+@@ -447,8 +454,10 @@ kk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
+       struct vk_sync_signal *signal = &submit->signals[i];
+       struct kk_sync_timeline *sync =
+          container_of(signal->sync, struct kk_sync_timeline, base);
+-      mtl_signal_event(queue->mtl_handle, sync->mtl_handle,
+-                       signal->signal_value);
++      /* nps5 gpusafe: remembered so a waiter can be released if the GPU access is revoked */
++      if (kk_safe_note_signal(sync->mtl_handle, signal->signal_value))
++         mtl_signal_event(queue->mtl_handle, sync->mtl_handle,
++                          signal->signal_value);
+    }
+ 
+    return VK_SUCCESS;
+diff --git a/src/kosmickrisp/vulkan/kk_safety.c b/src/kosmickrisp/vulkan/kk_safety.c
+index 2dfd0fb..a50d48a 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.c
++++ b/src/kosmickrisp/vulkan/kk_safety.c
+@@ -5,6 +5,15 @@
+  *   KK_QUEUE_ERROR_EXIT                       0 disables the AccessRevoked (_exit 74) and OOM-window (_exit 72) exits
+  *   KK_OOM_MAX / KK_OOM_WINDOW_S              32 / 60
+  *   KK_WIRED_GUARD                            0 off; KK_WIRED_LIMIT_MB overrides recommendedMaxWorkingSetSize*0.9 -> _exit(73)
++ *   KK_LOOP_CAP                               compute loop budget (262144; 0 off), see compiler/msl_loop_cap.h
++ *   KK_OOM_DUMP                               0 disables the allocation table and the first-OOM dump
++ *   KK_TEST_GPU_LOST=<n> / KK_TEST_OOM=<n>    tests: from the n-th commit on the feedback reports a synthetic
++ *                                             AccessRevoked (and the GPU signals no event) / OutOfMemory. No GPU fault.
++ * IMPORTANT (NXNative issue #2664): on macOS committed command buffers keep running after the process exits, so
++ * _exit() does not stop a runaway shader. The loop cap is what ends it; the exits only stop new work.
++ * The AccessRevoked classification, the waiter release, the OOM dump and the loop cap follow NXNative
++ * (https://github.com/seedds/nxnative, MIT, Copyright (c) 2026 seedds; loop cap commit bb574c7 co-authored by
++ * FifteenPen, computerguy526, uncraftablexd).
+  * SPDX-License-Identifier: MIT */
+ #include "kk_safety.h"
+ 
+@@ -14,6 +23,8 @@
+ #include "kk_queue.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
++#include "kosmickrisp/compiler/msl_loop_cap.h"
++#include "kosmickrisp/compiler/nir_to_msl.h"
+ 
+ #include <pthread.h>
+ #include <signal.h>
+@@ -25,10 +36,9 @@
+ #include <unistd.h>
+ 
+ struct kk_safe_token {
+-   struct kk_safe_slot *slot;
++   struct kk_safe_slot *slot; /* NULL: not in the flight ring */
+    uint64_t seq;
+-   mtl_feedback_handler_callback cb;
+-   void *data;
++   struct kk_safe_loop_cmd loop;
+ };
+ 
+ static struct kk_safe_slot g_ring[KK_SAFE_RING];
+@@ -49,6 +59,31 @@ static pthread_mutex_t g_counter_lock = PTHREAD_MUTEX_INITIALIZER;
+ static _Atomic uint64_t g_last_wired_check;
+ static bool g_clamp_logged;
+ 
++/* loopcap */
++#define KK_LOOP_CHUNK_SLOTS 4096u
++#define KK_LOOP_MAX_CHUNKS  64u
++static struct kk_bo *g_loop_chunk[KK_LOOP_MAX_CHUNKS];
++static unsigned g_loop_chunks;
++static uint32_t *g_loop_free;
++static unsigned g_loop_nfree;
++static pthread_mutex_t g_loop_lock = PTHREAD_MUTEX_INITIALIZER;
++static struct kk_safe_keyset g_loop_reported;
++static _Atomic uint64_t g_loop_hits, g_loop_aborts;
++static bool g_loop_nostate_logged;
++
++/* AccessRevoked / waiter release / tests */
++static _Atomic int g_lost;
++static int g_stop_code;
++static struct kk_safe_signals g_signals;
++static pthread_mutex_t g_sig_lock = PTHREAD_MUTEX_INITIALIZER;
++static uint64_t g_test_lost, g_test_oom;
++
++/* first-OOM dump */
++static struct kk_safe_memtab g_memtab;
++static pthread_mutex_t g_mem_lock = PTHREAD_MUTEX_INITIALIZER;
++static _Atomic int64_t g_mem_live[KK_MEM_CAT_COUNT], g_mem_n[KK_MEM_CAT_COUNT];
++static _Atomic int g_oom_dumped;
++
+ static uint64_t
+ now_ns(void)
+ {
+@@ -75,6 +110,278 @@ kk_safe_die(int code, const char *why)
+    _exit(code);
+ }
+ 
++/* ---- waiter release ---- */
++static void
++raise_event(void *ev, uint64_t value)
++{
++   if (mtl_shared_event_get_signaled_value(ev) < value)
++      mtl_shared_event_set_signaled_value(ev, value);
++}
++
++static unsigned
++raise_waiters(void)
++{
++   unsigned n = 0;
++   pthread_mutex_lock(&g_sig_lock);
++   for (unsigned i = 0; i < KK_SAFE_SIGNALS; i++) {
++      if (g_signals.s[i].event) {
++         raise_event(g_signals.s[i].event, g_signals.s[i].value);
++         n++;
++      }
++   }
++   pthread_mutex_unlock(&g_sig_lock);
++   return n;
++}
++
++bool
++kk_safe_note_signal(void *ev, uint64_t value)
++{
++   if (atomic_load_explicit(&g_lost, memory_order_relaxed)) {
++      /* The queue signals nothing any more: raise it here so nobody waits for it. */
++      raise_event(ev, value);
++      return false;
++   }
++   mtl_retain(ev);
++   pthread_mutex_lock(&g_sig_lock);
++   void *old = kk_safe_signals_push(&g_signals, ev, value);
++   pthread_mutex_unlock(&g_sig_lock);
++   if (old)
++      mtl_release(old);
++   /* The access was revoked while this signal was being recorded: the release may have run
++    * before the record existed. */
++   if (atomic_load(&g_lost)) {
++      raise_event(ev, value);
++      return false;
++   }
++   /* KK_TEST_GPU_LOST: a revoked queue runs no signal either. */
++   return !(g_test_lost && atomic_load(&g_seq) >= g_test_lost);
++}
++
++void
++kk_safe_stop_now(void)
++{
++   unsigned n = raise_waiters();
++   fprintf(stderr, "[kk-safe] FATAL: GPU access revoked; %u waiter events raised -> _exit(%d)\n", n, g_stop_code);
++   fflush(stderr);
++   _exit(g_stop_code);
++}
++
++/* ---- first-OOM dump ---- */
++static int
++oom_dump_on(void)
++{
++   static int on = -1;
++   if (on < 0) {
++      const char *e = getenv("KK_OOM_DUMP");
++      on = !(e && e[0] == '0');
++   }
++   return on;
++}
++
++void
++kk_safe_mem_note(uint32_t cat, int64_t bytes)
++{
++   if (cat == KK_MEM_NONE || cat >= KK_MEM_CAT_COUNT || !oom_dump_on())
++      return;
++   atomic_fetch_add_explicit(&g_mem_live[cat], bytes, memory_order_relaxed);
++   atomic_fetch_add_explicit(&g_mem_n[cat], bytes > 0 ? 1 : -1, memory_order_relaxed);
++   if (bytes >= (int64_t)KK_SAFE_MEM_MIN || -bytes >= (int64_t)KK_SAFE_MEM_MIN) {
++      pthread_mutex_lock(&g_mem_lock);
++      kk_safe_memtab_note(&g_memtab, cat, bytes);
++      pthread_mutex_unlock(&g_mem_lock);
++   }
++}
++
++static void
++dump_memory(const char *why)
++{
++   if (!oom_dump_on())
++      return;
++   uint64_t cur = g_dev ? mtl_device_current_allocated_size(g_dev->mtl_handle) : 0;
++   uint64_t rec = g_dev ? mtl_device_recommended_max_working_set_size(g_dev->mtl_handle) : 0;
++   uint64_t rs_bytes = 0, rs_n = 0;
++   if (g_dev) {
++      simple_mtx_lock(&g_dev->residency_set.mutex);
++      rs_bytes = mtl_residency_set_allocated_size(g_dev->residency_set.handle);
++      rs_n = mtl_residency_set_allocation_count(g_dev->residency_set.handle);
++      simple_mtx_unlock(&g_dev->residency_set.mutex);
++   }
++   fprintf(stderr,
++           "[kk-safe] [RED] %s: Metal allocated %llu MiB, recommended working set %llu MiB; residency set %llu allocations, %llu MiB\n",
++           why, (unsigned long long)(cur >> 20), (unsigned long long)(rec >> 20), (unsigned long long)rs_n,
++           (unsigned long long)(rs_bytes >> 20));
++   fprintf(stderr, "[kk-safe]  live by owner (MiB x count; img/buffer rows live inside the app heaps):");
++   for (unsigned c = 1; c < KK_MEM_CAT_COUNT; c++) {
++      long long v = atomic_load(&g_mem_live[c]), n = atomic_load(&g_mem_n[c]);
++      if (v || n)
++         fprintf(stderr, " %s=%.1f x%lld", kk_mem_cat_name(c), v / 1048576.0, n);
++   }
++   fprintf(stderr, "\n");
++   struct kk_safe_memrow top[KK_SAFE_MEM_TOP];
++   pthread_mutex_lock(&g_mem_lock);
++   unsigned n = kk_safe_memtab_top(&g_memtab, top, KK_SAFE_MEM_TOP);
++   uint64_t untracked = g_memtab.untracked;
++   pthread_mutex_unlock(&g_mem_lock);
++   for (unsigned i = 0; i < n; i++)
++      fprintf(stderr, "[kk-safe]  #%u %s %.1f MiB x %u\n", i + 1, kk_mem_cat_name(top[i].cat),
++              top[i].size / 1048576.0, top[i].count);
++   if (untracked)
++      fprintf(stderr, "[kk-safe]  (%llu large allocations not in the table)\n", (unsigned long long)untracked);
++   fflush(stderr);
++}
++
++/* ---- loopcap: state pool ---- */
++static void *
++loop_slot_cpu(uint32_t slot)
++{
++   return (uint8_t *)g_loop_chunk[slot / KK_LOOP_CHUNK_SLOTS]->cpu +
++          (size_t)(slot % KK_LOOP_CHUNK_SLOTS) * KK_LOOP_STATE_BYTES;
++}
++
++static uint64_t
++loop_slot_gpu(uint32_t slot)
++{
++   return g_loop_chunk[slot / KK_LOOP_CHUNK_SLOTS]->gpu +
++          (uint64_t)(slot % KK_LOOP_CHUNK_SLOTS) * KK_LOOP_STATE_BYTES;
++}
++
++static bool
++loop_slot_alloc(struct kk_device *dev, uint32_t *slot)
++{
++   bool ok = false;
++   pthread_mutex_lock(&g_loop_lock);
++   if (!g_loop_nfree && g_loop_chunks < KK_LOOP_MAX_CHUNKS) {
++      if (!g_loop_free)
++         g_loop_free = malloc(sizeof(uint32_t) * KK_LOOP_CHUNK_SLOTS * KK_LOOP_MAX_CHUNKS);
++      struct kk_bo *bo = NULL;
++      if (g_loop_free &&
++          kk_alloc_bo(dev, &dev->vk.base, (uint64_t)KK_LOOP_CHUNK_SLOTS * KK_LOOP_STATE_BYTES, 16, &bo,
++                      KK_MEM_CMD_POOL) == VK_SUCCESS) {
++         uint32_t base = g_loop_chunks * KK_LOOP_CHUNK_SLOTS;
++         g_loop_chunk[g_loop_chunks++] = bo;
++         for (uint32_t i = KK_LOOP_CHUNK_SLOTS; i-- > 0;)
++            g_loop_free[g_loop_nfree++] = base + i;
++      }
++   }
++   if (g_loop_nfree) {
++      *slot = g_loop_free[--g_loop_nfree];
++      ok = true;
++   }
++   pthread_mutex_unlock(&g_loop_lock);
++   return ok;
++}
++
++static void
++loop_slots_free(const struct kk_safe_loop_cmd *lc)
++{
++   if (!lc->count && !lc->has_abort)
++      return;
++   pthread_mutex_lock(&g_loop_lock);
++   for (uint32_t i = 0; i < lc->count; i++)
++      g_loop_free[g_loop_nfree++] = lc->recs[i].slot;
++   if (lc->has_abort)
++      g_loop_free[g_loop_nfree++] = lc->abort_slot;
++   pthread_mutex_unlock(&g_loop_lock);
++}
++
++uint64_t
++kk_safe_loop_state(struct kk_device *dev, struct kk_safe_loop_cmd *lc, uint64_t key, uint32_t sites,
++                   uint32_t barrier_sites, uint32_t msl_len)
++{
++   if (lc->last_gpu && lc->last_key == key)
++      return lc->last_gpu;
++   for (uint32_t i = 0; i < lc->count; i++) {
++      if (lc->recs[i].key == key) {
++         lc->last_key = key;
++         lc->last_gpu = loop_slot_gpu(lc->recs[i].slot);
++         return lc->last_gpu;
++      }
++   }
++   uint32_t slot;
++   if (!lc->has_abort) {
++      if (!loop_slot_alloc(dev, &slot))
++         goto fail;
++      memset(loop_slot_cpu(slot), 0, KK_LOOP_STATE_BYTES); /* abort word = 0 */
++      lc->abort_slot = slot;
++      lc->has_abort = true;
++   }
++   if (lc->count == lc->capacity) {
++      uint32_t cap = lc->capacity ? lc->capacity * 2 : 8;
++      struct kk_safe_loop_rec *r = realloc(lc->recs, cap * sizeof(*r));
++      if (!r)
++         goto fail;
++      lc->recs = r;
++      lc->capacity = cap;
++   }
++   if (!loop_slot_alloc(dev, &slot))
++      goto fail;
++   uint8_t *state = loop_slot_cpu(slot);
++   uint64_t abort_gpu = loop_slot_gpu(lc->abort_slot);
++   uint32_t hit = UINT32_MAX, pad = 0;
++   memcpy(state, &abort_gpu, sizeof(abort_gpu));
++   memcpy(state + KK_LOOP_STATE_HIT, &hit, sizeof(hit));
++   memcpy(state + KK_LOOP_STATE_HIT + 4, &pad, sizeof(pad));
++   lc->recs[lc->count++] = (struct kk_safe_loop_rec){
++      .key = key, .slot = slot, .sites = sites, .msl_len = msl_len, .barrier_sites = barrier_sites};
++   lc->last_key = key;
++   lc->last_gpu = loop_slot_gpu(slot);
++   return lc->last_gpu;
++
++fail:
++   if (!g_loop_nostate_logged) {
++      g_loop_nostate_logged = true;
++      fprintf(stderr, "[kk-safe] [RED] loop cap: no loop state for kernel %016llx; its dispatches are skipped (logged once)\n",
++              (unsigned long long)key);
++   }
++   return 0;
++}
++
++void
++kk_safe_loop_cmd_reset(struct kk_safe_loop_cmd *lc)
++{
++   loop_slots_free(lc);
++   free(lc->recs);
++   memset(lc, 0, sizeof(*lc));
++}
++
++/* Completion: read each kernel's hit word before its state can be reused. A kernel that only
++ * observed another kernel's abort has no hit and is not blamed. The site is the lowest numbered
++ * loop that exhausted the budget, not proof that this loop is the original bug. */
++static void
++loop_report(struct kk_safe_token *tk)
++{
++   struct kk_safe_loop_cmd *lc = &tk->loop;
++   if (!lc->count && !lc->has_abort)
++      return;
++   uint32_t aborted = 0;
++   if (lc->has_abort)
++      memcpy(&aborted, loop_slot_cpu(lc->abort_slot), sizeof(aborted));
++   if (aborted) {
++      atomic_fetch_add(&g_loop_aborts, 1);
++      for (uint32_t i = 0; i < lc->count; i++) {
++         const struct kk_safe_loop_rec *r = &lc->recs[i];
++         uint32_t site;
++         memcpy(&site, (uint8_t *)loop_slot_cpu(r->slot) + KK_LOOP_STATE_HIT, sizeof(site));
++         if (site == UINT32_MAX)
++            continue;
++         atomic_fetch_add(&g_loop_hits, 1);
++         pthread_mutex_lock(&g_loop_lock);
++         bool first = kk_safe_keyset_add(&g_loop_reported, r->key);
++         pthread_mutex_unlock(&g_loop_lock);
++         if (first)
++            fprintf(stderr,
++                    "[kk-safe] [RED] loop cap hit: submission %llu, kernel %016llx, loop site %u of %u (%u with a barrier; "
++                    "MSL %u bytes; budget %llu checks; the kernel's work was cut short, results are wrong; logged once per kernel)\n",
++                    (unsigned long long)tk->seq, (unsigned long long)r->key, site, r->sites, r->barrier_sites,
++                    r->msl_len, (unsigned long long)kk_msl_loop_cap());
++      }
++      fflush(stderr);
++   }
++   loop_slots_free(lc);
++   free(lc->recs);
++   memset(lc, 0, sizeof(*lc));
++}
++
+ static void
+ dump_flight(int overdue)
+ {
+@@ -117,7 +424,10 @@ watchdog_main(void *arg)
+       int o = kk_safe_find_overdue(g_ring, now_ns(), limit);
+       if (o >= 0) {
+          atomic_store(&g_halted, 1); /* no new submissions */
+-         fprintf(stderr, "[kk-safe] GPU WATCHDOG: command buffer incomplete after %.1f s; stopping\n", g_wd_s);
++         fprintf(stderr,
++                 "[kk-safe] GPU WATCHDOG: command buffer incomplete after %.1f s; stopping new work. NOTE: exiting does NOT "
++                 "stop the committed GPU work (it ends by itself: loop cap %llu, %llu submissions aborted so far)\n",
++                 g_wd_s, (unsigned long long)kk_msl_loop_cap(), (unsigned long long)atomic_load(&g_loop_aborts));
+          dump_flight(o);
+          /* Let the host (Kyty) print its own flight ring from a SIGUSR2 handler, then leave. */
+          kill(getpid(), SIGUSR2);
+@@ -139,6 +449,8 @@ init_once(void)
+    g_oom_max = (unsigned)env_d("KK_OOM_MAX", NULL, 32);
+    g_oom_window_ns = (uint64_t)(env_d("KK_OOM_WINDOW_S", NULL, 60) * 1e9);
+    g_wired_on = env_d("KK_WIRED_GUARD", NULL, 1) != 0;
++   g_test_lost = (uint64_t)env_d("KK_TEST_GPU_LOST", NULL, 0);
++   g_test_oom = (uint64_t)env_d("KK_TEST_OOM", NULL, 0);
+    if (g_dev && g_wired_on) {
+       double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0);
+       g_wired_limit = mb > 0 ? (uint64_t)mb << 20
+@@ -150,9 +462,14 @@ init_once(void)
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    pthread_create(&th, &at, watchdog_main, NULL);
+-   fprintf(stderr, "[kk-safe] on: watchdog %.1f s, dispatch clamp %u, queue-error exit %d (oom %u/%.0f s), wired limit %llu MiB\n",
+-           g_wd_s, g_clamp, g_error_exit, g_oom_max, g_oom_window_ns / 1e9,
+-           (unsigned long long)(g_wired_limit >> 20));
++   fprintf(stderr,
++           "[kk-safe] on: watchdog %.1f s, dispatch clamp %u, queue-error exit %d (oom %u/%.0f s), wired limit %llu MiB, "
++           "compute loop cap %llu%s\n",
++           g_wd_s, g_clamp, g_error_exit, g_oom_max, g_oom_window_ns / 1e9, (unsigned long long)(g_wired_limit >> 20),
++           (unsigned long long)kk_msl_loop_cap(), kk_msl_loop_cap() ? "" : " (OFF)");
++   if (g_test_lost || g_test_oom)
++      fprintf(stderr, "[kk-safe] TEST injection: gpu lost from commit %llu, oom from commit %llu (0 = none)\n",
++              (unsigned long long)g_test_lost, (unsigned long long)g_test_oom);
+ }
+ 
+ uint32_t
+@@ -205,6 +522,15 @@ kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd)
+       g_dev = dev;
+    pthread_once(&g_once, init_once);
+ 
++   /* The guards may have been initialized by a dispatch recorded before the first commit, when
++    * no device was known yet: the residency limit is then set here. */
++   static _Atomic int wired_set;
++   if (g_wired_on && !g_wired_limit && !atomic_exchange(&wired_set, 1)) {
++      double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0);
++      g_wired_limit = mb > 0 ? (uint64_t)mb << 20
++                             : kk_safe_default_limit(mtl_device_recommended_max_working_set_size(dev->mtl_handle));
++      fprintf(stderr, "[kk-safe] wired limit %llu MiB\n", (unsigned long long)(g_wired_limit >> 20));
++   }
+    /* residency guard: at most every 50 ms (one ObjC call) */
+    if (g_wired_limit) {
+       uint64_t t = now_ns(), last = atomic_load_explicit(&g_last_wired_check, memory_order_relaxed);
+@@ -219,13 +545,19 @@ kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd)
+          }
+       }
+    }
+-   if (!g_wd_on && !g_error_exit)
+-      return NULL;
+-
+    struct kk_safe_token *tk = malloc(sizeof *tk);
+-   if (!tk)
++   if (!tk) {
++      kk_safe_loop_cmd_reset(&cmd->loop);
+       return NULL;
++   }
++   /* The loop states now belong to this commit: read and released at completion. */
++   tk->loop = cmd->loop;
++   memset(&cmd->loop, 0, sizeof(cmd->loop));
+    uint64_t seq = atomic_fetch_add(&g_seq, 1) + 1;
++   tk->seq = seq;
++   tk->slot = NULL;
++   if (!g_wd_on && !g_error_exit)
++      return tk;
+    struct kk_safe_slot *s = &g_ring[seq % KK_SAFE_RING];
+    struct kk_safe_slot n = {.seq = seq, .start_ns = now_ns(), .pending = 1, .n_disp = cmd->safe_n_disp,
+                             .n_render = cmd->safe_n_render, .cs_len = cmd->safe_cs_len,
+@@ -240,23 +572,54 @@ kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd)
+    s->rt = n.rt;
+    __atomic_store_n(&s->pending, 1, __ATOMIC_RELEASE);
+    tk->slot = s;
+-   tk->seq = seq;
+    return tk;
+ }
+ 
+-void
++bool
+ kk_safe_commit_done(struct kk_safe_token *tk, struct mtl_feedback_data *data)
+ {
+-   if (data->error == MTL_COMMAND_QUEUE_ERROR_ACCESS_REVOKED && g_error_exit)
+-      kk_safe_die(74, "MTL command queue error AccessRevoked (GPU access revoked)");
+-   if (g_error_exit && (data->error == MTL_COMMAND_QUEUE_ERROR_OUT_OF_MEMORY ||
+-                        (data->error_message && strstr(data->error_message, "Insufficient Memory")))) {
+-      pthread_mutex_lock(&g_oom_lock);
+-      bool trip = kk_safe_window_note(&g_oom, now_ns(), g_oom_max, g_oom_window_ns);
+-      pthread_mutex_unlock(&g_oom_lock);
+-      if (trip)
+-         kk_safe_die(72, "repeated 'Insufficient Memory' command-buffer failures");
++   bool stop = false;
++   loop_report(tk);
++
++   /* Tests: imitate the feedback of a revoked access / an out-of-memory failure. */
++   if (g_test_lost && tk->seq >= g_test_lost)
++      mtl_feedback_data_set_synthetic_revoked(data);
++   if (g_test_oom && tk->seq >= g_test_oom) {
++      data->error = MTL_COMMAND_QUEUE_ERROR_OUT_OF_MEMORY;
++      data->error_message = "KK_TEST_OOM: Insufficient Memory";
++      data->out_of_memory = true;
++   }
++
++   /* Only MTL4CommandQueueErrorDomain AccessRevoked, also when it sits under a top-level timeout
++    * (bridge/mtl_error_classify.h). The top-level code alone is not enough: an innocent victim's
++    * IOGPU error has code 5 too, and the GPU recovers from a hang or fault alone. */
++   if (data->access_revoked && !atomic_exchange(&g_lost, 1)) {
++      atomic_store(&g_halted, 1); /* no new submissions: the queue returns DEVICE_LOST */
++      unsigned n = raise_waiters();
++      fprintf(stderr,
++              "[kk-safe] [RED] GPU access revoked (commit %llu: \"%s\"): macOS runs none of this process's GPU work any "
++              "more; submissions stopped, %u waiter events raised%s\n",
++              (unsigned long long)tk->seq, data->error_message ? data->error_message : "", n,
++              g_error_exit ? "" : " (KK_QUEUE_ERROR_EXIT=0: no exit)");
++      fflush(stderr);
++      if (g_error_exit) {
++         g_stop_code = 74;
++         stop = true; /* after the wrapped handler ran (device lost, command buffer released) */
++      }
++   }
++   if (data->out_of_memory || data->error == MTL_COMMAND_QUEUE_ERROR_OUT_OF_MEMORY ||
++       (data->error_message && strstr(data->error_message, "Insufficient Memory"))) {
++      if (!atomic_exchange(&g_oom_dumped, 1))
++         dump_memory("GPU out of memory (first failure)");
++      if (g_error_exit) {
++         pthread_mutex_lock(&g_oom_lock);
++         bool trip = kk_safe_window_note(&g_oom, now_ns(), g_oom_max, g_oom_window_ns);
++         pthread_mutex_unlock(&g_oom_lock);
++         if (trip)
++            kk_safe_die(72, "repeated 'Insufficient Memory' command-buffer failures");
++      }
+    }
+-   if (tk && tk->slot->seq == tk->seq)
++   if (tk->slot && tk->slot->seq == tk->seq)
+       __atomic_store_n(&tk->slot->pending, 0, __ATOMIC_RELEASE);
++   return stop;
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_safety.h b/src/kosmickrisp/vulkan/kk_safety.h
+index a228e24..81fca6e 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.h
++++ b/src/kosmickrisp/vulkan/kk_safety.h
+@@ -21,12 +21,52 @@ uint64_t kk_safe_clamp_counter_addr(struct kk_device *dev);
+ /* True once the watchdog or an error guard stopped the process: no new submissions. */
+ bool kk_safe_halted(void);
+ 
++/* ---- loopcap (compute loop containment, see compiler/msl_loop_cap.h) ----
++ * Per command buffer (= one Metal commit = one submission): one GPU-written abort word and one
++ * 16-byte state per kernel {u64 abort word address, u32 hit = UINT32_MAX, pad}. The states live
++ * in device-wide pool BOs owned by kk_safety (not in the command pool: a pool BO may be reused
++ * before the completion handler reads the hit words). */
++struct kk_safe_loop_rec {
++   uint64_t key;     /* kernel = first 8 bytes of BLAKE3 of its MSL */
++   uint32_t slot;
++   uint32_t sites;   /* guarded loops of the kernel */
++   uint32_t msl_len;
++   uint32_t barrier_sites;
++};
++struct kk_safe_loop_cmd {
++   struct kk_safe_loop_rec *recs;
++   uint32_t count, capacity;
++   uint32_t abort_slot;
++   bool has_abort;
++   uint64_t last_key, last_gpu; /* the state of the kernel used last */
++   uint64_t bound_gpu;          /* address at KK_LOOP_STATE_SLOT of the argument table */
++};
++/* GPU address of the loop state of kernel `key` in this command buffer (created on first use).
++ * 0 = no state could be allocated: the dispatch must be skipped. Recording thread only. */
++uint64_t kk_safe_loop_state(struct kk_device *dev, struct kk_safe_loop_cmd *lc, uint64_t key,
++                            uint32_t sites, uint32_t barrier_sites, uint32_t msl_len);
++/* Command buffer reset / destroy without commit: gives the states back. */
++void kk_safe_loop_cmd_reset(struct kk_safe_loop_cmd *lc);
++
++/* Records an event the queue was asked to signal (retained), for the waiter release before the
++ * process stops after AccessRevoked. Returns false when the signal must not be handed to the GPU
++ * (KK_TEST_GPU_LOST imitating a revoked queue that signals nothing). */
++bool kk_safe_note_signal(void *mtl_shared_event, uint64_t value);
++
++/* Memory accounting for the first-OOM dump (called by kk_mem_account). */
++void kk_safe_mem_note(uint32_t cat, int64_t bytes);
++
+ /* Called by kk_queue_commit just before committing: starts the watchdog thread on first use, runs the
+  * residency guard, and registers the commit in the flight ring. Returns an opaque token for
+- * kk_safe_commit_done (a malloc'd wrapper), or NULL when everything is off. */
++ * kk_safe_commit_done (a malloc'd wrapper), or NULL when everything is off. Takes over the
++ * command buffer's loop states (cmd->loop is empty afterwards). */
+ struct kk_safe_token;
+ struct kk_safe_token *kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd);
+-/* Completion handler: error classification (AccessRevoked / OOM window) and the flight ring. */
+-void kk_safe_commit_done(struct kk_safe_token *token, struct mtl_feedback_data *data);
++/* Completion handler: loop cap attribution, error classification (AccessRevoked / OOM window)
++ * and the flight ring. Returns true when the process must stop after the wrapped handler ran
++ * (the caller then calls kk_safe_stop_now). */
++bool kk_safe_commit_done(struct kk_safe_token *token, struct mtl_feedback_data *data);
++/* Raises the recorded waiter events and exits with the code kk_safe_commit_done decided. */
++void kk_safe_stop_now(void);
+ 
+ #endif
+diff --git a/src/kosmickrisp/vulkan/kk_safety_core.h b/src/kosmickrisp/vulkan/kk_safety_core.h
+index ec7f100..e22b20d 100644
+--- a/src/kosmickrisp/vulkan/kk_safety_core.h
++++ b/src/kosmickrisp/vulkan/kk_safety_core.h
+@@ -67,6 +67,132 @@ kk_safe_find_overdue(const struct kk_safe_slot *ring, uint64_t now_ns, uint64_t
+    return best;
+ }
+ 
++/* ---- loopcap: kernels whose cap hit was already logged (once per kernel). Returns true the
++ * first time a key is seen. A full table reports nothing new (bounded log). */
++#define KK_SAFE_LOOP_KEYS 256
++struct kk_safe_keyset {
++   uint64_t key[KK_SAFE_LOOP_KEYS];
++   unsigned count;
++};
++static inline bool
++kk_safe_keyset_add(struct kk_safe_keyset *ks, uint64_t key)
++{
++   for (unsigned i = 0; i < ks->count; i++)
++      if (ks->key[i] == key)
++         return false;
++   if (ks->count == KK_SAFE_LOOP_KEYS)
++      return false;
++   ks->key[ks->count++] = key;
++   return true;
++}
++
++/* ---- OOM dump: live allocations of at least KK_SAFE_MEM_MIN bytes as (category, size) x count,
++ * so the largest ones can be listed without a per-object registry. */
++#define KK_SAFE_MEM_MIN   (1u << 20)
++#define KK_SAFE_MEM_ROWS  1024
++#define KK_SAFE_MEM_TOP   24
++struct kk_safe_memrow {
++   uint64_t size;
++   uint32_t cat, count;
++};
++struct kk_safe_memtab {
++   struct kk_safe_memrow row[KK_SAFE_MEM_ROWS];
++   unsigned used;       /* rows in use (count may be 0: reusable) */
++   uint64_t untracked;  /* allocations dropped because the table was full */
++};
++/* bytes > 0: allocation, < 0: free. Smaller than KK_SAFE_MEM_MIN: ignored. */
++static inline void
++kk_safe_memtab_note(struct kk_safe_memtab *t, uint32_t cat, int64_t bytes)
++{
++   uint64_t size = bytes < 0 ? (uint64_t)-bytes : (uint64_t)bytes;
++   if (size < KK_SAFE_MEM_MIN)
++      return;
++   int spare = -1;
++   for (unsigned i = 0; i < t->used; i++) {
++      struct kk_safe_memrow *r = &t->row[i];
++      if (r->count && r->size == size && r->cat == cat) {
++         if (bytes > 0)
++            r->count++;
++         else
++            r->count--;
++         return;
++      }
++      if (!r->count && spare < 0)
++         spare = (int)i;
++   }
++   if (bytes < 0)
++      return; /* a free of something allocated while the table was full */
++   if (spare < 0) {
++      if (t->used == KK_SAFE_MEM_ROWS) {
++         t->untracked++;
++         return;
++      }
++      spare = (int)t->used++;
++   }
++   t->row[spare] = (struct kk_safe_memrow){.size = size, .cat = cat, .count = 1};
++}
++/* The n largest live rows by size (ties: more bytes in total first, then lower category), largest
++ * first. Returns how many were written. */
++static inline unsigned
++kk_safe_memtab_top(const struct kk_safe_memtab *t, struct kk_safe_memrow *out, unsigned n)
++{
++   unsigned got = 0;
++   for (unsigned i = 0; i < t->used; i++) {
++      const struct kk_safe_memrow *r = &t->row[i];
++      if (!r->count)
++         continue;
++      unsigned at = got;
++      while (at > 0) {
++         const struct kk_safe_memrow *o = &out[at - 1];
++         bool before = r->size > o->size ||
++                       (r->size == o->size &&
++                        (r->count > o->count || (r->count == o->count && r->cat < o->cat)));
++         if (!before)
++            break;
++         at--;
++      }
++      if (at >= n)
++         continue;
++      unsigned end = got < n ? got : n - 1;
++      for (unsigned k = end; k > at; k--)
++         out[k] = out[k - 1];
++      out[at] = *r;
++      if (got < n)
++         got++;
++   }
++   return got;
++}
++
++/* ---- waiter release: (event, value) pairs the queue was asked to signal. Before the process
++ * stops after AccessRevoked every recorded event is raised from the CPU, so no thread stays
++ * blocked on a fence the GPU will never signal. Pure ring logic; handles are opaque here. */
++#define KK_SAFE_SIGNALS 128
++struct kk_safe_signal {
++   void *event;
++   uint64_t value;
++};
++struct kk_safe_signals {
++   struct kk_safe_signal s[KK_SAFE_SIGNALS];
++   unsigned head;
++};
++/* Records a signal; returns the handle it displaced (to release) or NULL. */
++static inline void *
++kk_safe_signals_push(struct kk_safe_signals *r, void *event, uint64_t value)
++{
++   /* Same event again: keep the highest value in its slot. */
++   for (unsigned i = 0; i < KK_SAFE_SIGNALS; i++) {
++      if (r->s[i].event == event) {
++         if (value > r->s[i].value)
++            r->s[i].value = value;
++         return event; /* the caller's new reference is not needed */
++      }
++   }
++   void *old = r->s[r->head].event;
++   r->s[r->head] = (struct kk_safe_signal){.event = event, .value = value};
++   r->head = (r->head + 1) % KK_SAFE_SIGNALS;
++   return old;
++}
++
+ /* Wired / residency guard: bytes over the limit? limit 0 = off. */
+ static inline bool
+ kk_safe_over_limit(uint64_t allocated, uint64_t limit)
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 45bc973..f5947f3 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1180,7 +1180,8 @@ kk_nir_lower_vertex_id_zero_base(struct nir_shader *nir)
+ static void
+ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+                const struct vk_graphics_pipeline_state *state,
+-               struct msl_compile_data *data, const bool apply_wa19)
++               struct msl_compile_data *data, const bool apply_wa19,
++               struct kk_shader_info *loop_info)
+ {
+    NIR_PASS(_, nir, kk_nir_lower_poly);
+ 
+@@ -1199,6 +1200,12 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+    if (!apply_wa19)
+       translate_options.disabled_workarounds |= BITFIELD64_BIT(19);
+ 
++   /* nps5 loopcap: only an application's compute shader (loop_info != NULL)
++    * gets guarded loops; its dispatch binds the loop state. KK's own compute
++    * passes (VS/TES/GS emulation) stay as they are. */
++   if (loop_info)
++      translate_options.loop_cap = (uint32_t)kk_msl_loop_cap();
++
+    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
+       for (uint32_t i = 0u; i < MAX_DRAW_BUFFERS; ++i) {
+          /* If the attachment is unused, default to 4 to avoid issues with alpha
+@@ -1221,6 +1228,18 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+ 
+    data->code = nir_to_msl(nir, &translate_options);
+    kk_msl_account_raw(data->code, 1);
++   if (loop_info && translate_options.loop_sites) {
++      const size_t len = strlen(data->code);
++      blake3_hash hash;
++      _mesa_blake3_compute(data->code, len, hash);
++      uint64_t key = 0;
++      for (unsigned i = 0; i < 8; i++)
++         key = (key << 8) | hash[i];
++      loop_info->cs.loop_sites = translate_options.loop_sites;
++      loop_info->cs.loop_barrier_sites = translate_options.loop_barrier_sites;
++      loop_info->cs.loop_msl_len = (uint32_t)len;
++      loop_info->cs.loop_key = key;
++   }
+    const char *entrypoint_name = nir_shader_get_entrypoint(nir)->function->name;
+ 
+    /* We need to steal so it doesn't get destroyed with the nir. Needs to happen
+@@ -1352,7 +1371,7 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+       nir->info.stage = MESA_SHADER_COMPUTE;
+       memset(&nir->info.cs, 0, sizeof(nir->info.cs));
+       nir->xfb_info = NULL;
+-      kk_compile_msl(pdev, nir, state, &shader->gs_main, apply_wa19);
++      kk_compile_msl(pdev, nir, state, &shader->gs_main, apply_wa19, NULL);
+ 
+       /* From here on, nir is the rasterization VS of the GS */
+       nir = rast;
+@@ -1371,7 +1390,8 @@ kk_compile_shader(struct kk_device *dev, nir_shader *nir,
+    /* KK_WORKAROUND_19 Only the stage that feeds geometry will be dispatched
+     * through the buggy Metal entry point. */
+    apply_wa19 &= next_stage == MESA_SHADER_GEOMETRY;
+-   kk_compile_msl(pdev, nir, state, &shader->msl_data[stage], apply_wa19);
++   kk_compile_msl(pdev, nir, state, &shader->msl_data[stage], apply_wa19,
++                  stage == MESA_SHADER_COMPUTE ? &shader->info : NULL);
+ 
+    *shader_out = shader;
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 9cf8274..2fdecb2 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -114,6 +114,14 @@ struct kk_shader_info {
+ 
+       struct {
+          struct mtl_size local_size;
++         /* nps5 loopcap: guarded loops of the kernel (0 = its MSL takes no
++          * loop state), how many hold a barrier, the kernel's name in the
++          * cap-hit log (first 8 bytes of the BLAKE3 of its MSL) and the
++          * MSL length. */
++         uint32_t loop_sites;
++         uint32_t loop_barrier_sites;
++         uint32_t loop_msl_len;
++         uint64_t loop_key;
+       } cs;
+    };
+ };

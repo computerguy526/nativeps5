@@ -1,0 +1,672 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 23:02:43 +0000
+Subject: [PATCH] kosmickrisp: segmented persistent Metal 4 pipeline archive,
+ periodic flush, private OS Metal cache id
+
+KK_PIPELINE_ARCHIVE_DIR=<dir>: compiled pipelines (GPU binaries) are kept in
+<dir>/<stamp>/seg-*.mtl4a, <stamp> = hash of KosmicKrisp build + macOS build +
+GPU. Segments are opened at compiler creation and asked directly before the
+compiler runs; only misses are recorded by the serializer. A flush drains the
+serializer, so every flush writes one new segment (tmp + rename) which joins
+the lookup set. A flusher thread writes after N new pipelines or S seconds
+(KK_PIPELINE_ARCHIVE_FLUSH_N=32, _FLUSH_S=10), never on a compiling thread;
+the rest goes out at compiler release, exit and SIGTERM (chained handler,
+KK_PIPELINE_ARCHIVE_SIGTERM=0 disables). Background read-ahead of the segments
+(F_RDADVISE). KK_PIPELINE_ARCHIVE_COMPACT=1 for a prepare run: one segment
+replaces the loaded ones.
+
+KK_METAL_CACHE_ID=<bundle id>: unbundled executables share one OS Metal cache
+with every other unbundled process of the user; a bundle identifier (set only
+when the process has none, in a constructor) gives the process its own
+<DARWIN_USER_CACHE_DIR>/<id>/com.apple.metal, which also persists the
+MSL -> AIR libraries (2-3x the cost of the AIR -> GPU step an archive holds).
+
+KK_COMPILE_STATS=<s>: periodic counters (libraries, archive hits, compiles).
+KK_PIPELINE_ARCHIVE=<file> (single file, AnyPS5) behaves as before.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.m | 565 ++++++++++++++++++++++----
+ 1 file changed, 481 insertions(+), 84 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 95ee80e..ede11d1 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -25,82 +25,501 @@
+ #include <CommonCrypto/CommonDigest.h>
+ #include "git_sha1.h"
+ 
+-/* App-controlled persistent pipeline archive (nativeps5).
++/* Persistent compiled pipelines (nativeps5).
+  *
+- * KK_PIPELINE_ARCHIVE=<file> makes every MTL4Compiler record the pipelines it
+- * builds (descriptors plus GPU binaries) in an MTL4PipelineDataSetSerializer
+- * and look pipelines up in the archive loaded from <file> before compiling.
+- * The archive is rewritten by mtl_compiler_flush_archive() (compiler release
+- * and process exit) only when something new was compiled, so a warm launch
+- * never pays the Metal compile again even if the OS Metal cache was evicted.
+- * Unset: behaviour is unchanged. */
++ * Three independent, opt-in mechanisms; with none of the variables set the
++ * behaviour is stock.
++ *
++ * 1. KK_PIPELINE_ARCHIVE_DIR=<dir>: segmented Metal 4 archive store.
++ *    <dir>/<stamp>/seg-*.mtl4a hold the GPU binaries of the pipelines
++ *    compiled so far; <stamp> hashes the KosmicKrisp build, the macOS build
++ *    (= Metal compiler) and the GPU, Metal itself keys every entry on the full
++ *    pipeline descriptor and the function bitcode. Every segment is opened at
++ *    compiler creation and asked directly (MTL4Archive new*PipelineState) before
++ *    the compiler runs. Only real misses go through the compiler, whose
++ *    MTL4PipelineDataSetSerializer records them; a flush drains the serializer
++ *    (Metal semantics: the next flush holds only later pipelines), so each
++ *    flush writes one NEW segment (tmp + rename) and adds it to the lookup
++ *    set. A flusher thread writes after KK_PIPELINE_ARCHIVE_FLUSH_N (32) new
++ *    pipelines or KK_PIPELINE_ARCHIVE_FLUSH_S (10) seconds, whichever comes
++ *    first, never on a compiling thread; the rest is written at compiler
++ *    release, at exit and on SIGTERM (KK_PIPELINE_ARCHIVE_SIGTERM=0 turns the
++ *    handler off; it chains to the previous disposition). Segments are read
++ *    ahead into the file cache in the background
++ *    (KK_PIPELINE_ARCHIVE_READAHEAD=0 turns that off); they are file-backed
++ *    mappings, not part of the process footprint.
++ *    KK_PIPELINE_ARCHIVE_COMPACT=1 (for a "prepare" run that creates every
++ *    pipeline): lookups go through the compiler so hits are recorded as well,
++ *    nothing is written until the end, then ONE segment replaces the ones
++ *    loaded at start.
++ *
++ * 2. KK_PIPELINE_ARCHIVE=<file> (older single-file mode, kept for AnyPS5):
++ *    one archive, looked up through the compiler, rewritten at compiler
++ *    release / exit when something new was compiled. Ignored when
++ *    KK_PIPELINE_ARCHIVE_DIR is set.
++ *
++ * 3. KK_METAL_CACHE_ID=<bundle id>: an unbundled executable shares ONE OS
++ *    Metal shader cache (<DARWIN_USER_CACHE_DIR>/com.apple.metal) with every
++ *    other unbundled process of the user, so its entries are evicted by
++ *    unrelated programs. Giving the process a bundle identifier (only when it
++ *    has none) moves it to its own <DARWIN_USER_CACHE_DIR>/<id>/com.apple.metal,
++ *    which persists the MSL -> AIR libraries too (archives hold only the
++ *    AIR -> GPU step). Done in a constructor, before any Metal device exists.
++ *
++ * KK_COMPILE_STATS=<seconds>: one "[kk-archive] stats" line per period while
++ * the counters change, and at exit. KK_PIPELINE_ARCHIVE_DEBUG=1: per-call
++ * lines. */
++#include <stdatomic.h>
++#include <signal.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <dirent.h>
++#include <errno.h>
++
++static id<MTLDevice> kk_archive_init_dev;
+ static id<MTL4PipelineDataSetSerializer> kk_serializer;
+-static id<MTL4Archive> kk_archive;
+-static MTL4CompilerTaskOptions *kk_task_options;
+-static NSURL *kk_archive_url;
+-static pthread_mutex_t kk_archive_lock = PTHREAD_MUTEX_INITIALIZER;
+-static uint32_t kk_archive_hits, kk_archive_misses;
+-static bool kk_archive_dirty, kk_archive_atexit;
+-static bool kk_archive_debug;
++static NSArray<id<MTL4Archive>> *kk_archives;      /* lookup set, replaced as a whole */
++static NSMutableArray<NSString *> *kk_loaded_paths; /* segments present at start (compaction) */
++static pthread_mutex_t kk_archives_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_mutex_t kk_flush_lock = PTHREAD_MUTEX_INITIALIZER;
++static MTL4CompilerTaskOptions *kk_task_options;   /* single-file and compact modes */
++static NSURL *kk_archive_url;                      /* single-file mode */
++static char kk_seg_dir[900];
++static bool kk_seg_mode, kk_compact, kk_archive_debug, kk_archive_atexit, kk_legacy_dirty;
++static pthread_once_t kk_archive_once = PTHREAD_ONCE_INIT;
++static pthread_t kk_flusher;
++static int kk_wake_pipe[2] = {-1, -1};
++static struct sigaction kk_old_term;
++static bool kk_term_installed;
++static uint32_t kk_flush_n = 32;
++static double kk_flush_s = 10.0, kk_stats_s;
++static _Atomic uint64_t kk_st_lib, kk_st_lib_slow, kk_st_lib_us, kk_st_hit, kk_st_hit_us,
++   kk_st_miss, kk_st_miss_slow, kk_st_miss_us, kk_st_pending, kk_st_first_pending_ms,
++   kk_st_segments, kk_st_seg_bytes, kk_st_loaded_bytes;
++static uint32_t kk_seg_seq;
++
++static double
++kk_now_ms(void)
++{
++   return (double)clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1e6;
++}
+ 
+ static void
+-kk_archive_log(const char *what, double ms)
++kk_stats_line(const char *why)
+ {
++   fprintf(stderr,
++           "[kk-archive] stats (%s): libraries %llu (%llu slow, %.0f ms), pipelines archive-hit %llu (%.0f ms) "
++           "compiled %llu (%llu slow, %.0f ms), pending %llu, segments written %llu (%.1f MiB), loaded %.1f MiB\n",
++           why, (unsigned long long)kk_st_lib, (unsigned long long)kk_st_lib_slow, kk_st_lib_us / 1e3,
++           (unsigned long long)kk_st_hit, kk_st_hit_us / 1e3, (unsigned long long)kk_st_miss,
++           (unsigned long long)kk_st_miss_slow, kk_st_miss_us / 1e3, (unsigned long long)kk_st_pending,
++           (unsigned long long)kk_st_segments, kk_st_seg_bytes / 1048576.0, kk_st_loaded_bytes / 1048576.0);
++}
++
++static void
++kk_note_library(double ms, size_t bytes)
++{
++   kk_st_lib++;
++   kk_st_lib_us += (uint64_t)(ms * 1e3);
++   if (ms > 5.0)
++      kk_st_lib_slow++;
+    if (kk_archive_debug)
+-      fprintf(stderr, "[kk-archive] %s %.2f ms (hits %u misses %u)\n", what, ms,
+-              kk_archive_hits, kk_archive_misses);
++      fprintf(stderr, "[kk-archive] library %.1f ms (%zu B msl)\n", ms, bytes);
+ }
+ 
+-static double
+-kk_now_ms(void)
++/* A pipeline the archives did not hold was built by the compiler. "slow"
++ * (> 5 ms) separates real Metal compiles from OS-cache hits. */
++static void
++kk_note_pipeline(bool archive_hit, double ms)
+ {
+-   return (double)clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1e6;
++   if (archive_hit) {
++      kk_st_hit++;
++      kk_st_hit_us += (uint64_t)(ms * 1e3);
++   } else {
++      kk_st_miss++;
++      kk_st_miss_us += (uint64_t)(ms * 1e3);
++      if (ms > 5.0)
++         kk_st_miss_slow++;
++      if (kk_serializer) {
++         uint64_t zero = 0;
++         atomic_compare_exchange_strong(&kk_st_first_pending_ms, &zero, (uint64_t)kk_now_ms());
++         kk_st_pending++;
++         /* Single-file mode cannot see hits: a lookup this slow was a compile. */
++         if (!kk_seg_mode && ms > 20.0)
++            kk_legacy_dirty = true;
++      }
++   }
++   if (kk_archive_debug && (ms > 1.0 || archive_hit))
++      fprintf(stderr, "[kk-archive] pipeline %s %.1f ms\n", archive_hit ? "hit" : "compiled", ms);
++}
++
++static NSArray<id<MTL4Archive>> *
++kk_archives_snapshot(void)
++{
++   pthread_mutex_lock(&kk_archives_lock);
++   NSArray<id<MTL4Archive>> *a = [kk_archives retain];
++   pthread_mutex_unlock(&kk_archives_lock);
++   return [a autorelease];
++}
++
++static void
++kk_archives_add(id<MTL4Archive> archive)
++{
++   pthread_mutex_lock(&kk_archives_lock);
++   NSArray<id<MTL4Archive>> *old = kk_archives;
++   kk_archives = [(old ? [old arrayByAddingObject:archive] : @[ archive ]) retain];
++   [old release];
++   pthread_mutex_unlock(&kk_archives_lock);
++}
++
++static void
++kk_readahead(const char *path)
++{
++   int fd = open(path, O_RDONLY);
++   if (fd < 0)
++      return;
++   struct stat st;
++   if (fstat(fd, &st) == 0) {
++      for (off_t off = 0; off < st.st_size; off += (off_t)1 << 30) {
++         off_t left = st.st_size - off;
++         struct radvisory ra = {.ra_offset = off, .ra_count = (int)(left < ((off_t)1 << 30) ? left : ((off_t)1 << 30))};
++         fcntl(fd, F_RDADVISE, &ra);
++      }
++   }
++   close(fd);
++}
++
++/* Segment mode: writes what the serializer holds as one new segment. */
++static void
++kk_flush_segment(const char *why)
++{
++   if (!kk_serializer || !kk_seg_mode)
++      return;
++   @autoreleasepool {
++      pthread_mutex_lock(&kk_flush_lock);
++      uint64_t pending = atomic_exchange(&kk_st_pending, 0);
++      atomic_store(&kk_st_first_pending_ms, 0);
++      if (pending) {
++         char tmp[1024], path[1024];
++         struct timespec ts;
++         clock_gettime(CLOCK_REALTIME, &ts);
++         snprintf(path, sizeof(path), "%s/seg-%lld%03d-%d-%u.mtl4a", kk_seg_dir, (long long)ts.tv_sec,
++                  (int)(ts.tv_nsec / 1000000), getpid(), kk_seg_seq++);
++         snprintf(tmp, sizeof(tmp), "%s.tmp", path);
++         NSError *error = nil;
++         double t0 = kk_now_ms();
++         NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:tmp]];
++         if ([kk_serializer serializeAsArchiveAndFlushToURL:url error:&error] && rename(tmp, path) == 0) {
++            struct stat st;
++            uint64_t size = stat(path, &st) == 0 ? (uint64_t)st.st_size : 0;
++            kk_st_segments++;
++            kk_st_seg_bytes += size;
++            double t1 = kk_now_ms();
++            if (kk_compact && strcmp(why, "sigterm")) {
++               /* The new segment holds every pipeline of this run. */
++               for (NSString *old in kk_loaded_paths)
++                  unlink([old UTF8String]);
++               [kk_loaded_paths removeAllObjects];
++            } else if (!kk_compact) {
++               NSError *aerr = nil;
++               id<MTL4Archive> archive =
++                  [kk_archive_init_dev newArchiveWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:path]]
++                                                      error:&aerr];
++               if (archive) {
++                  kk_archives_add(archive);
++                  [archive release];
++               }
++            }
++            fprintf(stderr, "[kk-archive] segment written (%s): %llu pipelines, %.2f MiB, serialize %.1f ms, reopen %.1f ms: %s\n",
++                    why, (unsigned long long)pending, size / 1048576.0, t1 - t0, kk_now_ms() - t1, path);
++         } else {
++            unlink(tmp);
++            /* "Nothing to serialize": every pending pipeline was an OS-cache
++             * duplicate Metal did not record again. Not an error. */
++            if (kk_archive_debug || ![[error localizedDescription] containsString:@"Nothing to serialize"])
++               fprintf(stderr, "[kk-archive] segment flush (%s, %llu pending) wrote nothing: %s\n", why,
++                       (unsigned long long)pending, [[error localizedDescription] UTF8String]);
++         }
++      }
++      pthread_mutex_unlock(&kk_flush_lock);
++   }
+ }
+ 
+ void
+ mtl_compiler_flush_archive(void)
+ {
++   if (kk_seg_mode) {
++      kk_flush_segment("release");
++      return;
++   }
+    @autoreleasepool {
+-      pthread_mutex_lock(&kk_archive_lock);
+-      if (kk_serializer && kk_archive_dirty) {
++      pthread_mutex_lock(&kk_flush_lock);
++      if (kk_serializer && kk_legacy_dirty) {
+          NSError *error = nil;
+          double t0 = kk_now_ms();
+          if ([kk_serializer serializeAsArchiveAndFlushToURL:kk_archive_url error:&error])
+-            kk_archive_dirty = false;
++            kk_legacy_dirty = false;
+          else
+             fprintf(stderr, "[kk-archive] flush failed: %s\n",
+                     [error.localizedDescription UTF8String]);
+-         kk_archive_log("flushed", kk_now_ms() - t0);
++         if (kk_archive_debug)
++            fprintf(stderr, "[kk-archive] flushed %.2f ms\n", kk_now_ms() - t0);
++      }
++      pthread_mutex_unlock(&kk_flush_lock);
++   }
++}
++
++static void
++kk_archive_exit(void)
++{
++   if (kk_seg_mode)
++      kk_flush_segment("exit");
++   else
++      mtl_compiler_flush_archive();
++   if (kk_stats_s > 0.0)
++      kk_stats_line("exit");
++}
++
++static void
++kk_term_handler(int sig)
++{
++   int e = errno;
++   char c = 'T';
++   if (kk_wake_pipe[1] >= 0)
++      (void)!write(kk_wake_pipe[1], &c, 1);
++   errno = e;
++}
++
++static void *
++kk_flusher_main(void *arg)
++{
++   pthread_setname_np("kk-archive");
++   double last_stats = kk_now_ms();
++   uint64_t last_sum = 0;
++   /* Read-ahead of the segments loaded at start. */
++   if (arg) {
++      @autoreleasepool {
++         for (NSString *path in (NSArray *)arg)
++            kk_readahead([path UTF8String]);
++         [(NSArray *)arg release];
+       }
+-      pthread_mutex_unlock(&kk_archive_lock);
+    }
++   for (;;) {
++      struct pollfd pfd = {.fd = kk_wake_pipe[0], .events = POLLIN};
++      int r = poll(&pfd, 1, 1000);
++      if (r > 0) {
++         char c = 0;
++         (void)!read(kk_wake_pipe[0], &c, 1);
++         if (c == 'T') {
++            kk_flush_segment("sigterm");
++            if (kk_stats_s > 0.0)
++               kk_stats_line("sigterm");
++            /* Hand the signal on to whoever had it before (default: die). */
++            sigaction(SIGTERM, &kk_old_term, NULL);
++            kill(getpid(), SIGTERM);
++            continue;
++         }
++      }
++      double now = kk_now_ms();
++      uint64_t pending = kk_st_pending, first = kk_st_first_pending_ms;
++      if (kk_seg_mode && !kk_compact && pending &&
++          (pending >= kk_flush_n || (first && now - (double)first >= kk_flush_s * 1e3)))
++         kk_flush_segment("periodic");
++      if (kk_stats_s > 0.0 && now - last_stats >= kk_stats_s * 1e3) {
++         uint64_t sum = kk_st_lib + kk_st_hit + kk_st_miss + kk_st_segments;
++         if (sum != last_sum)
++            kk_stats_line("periodic");
++         last_sum = sum;
++         last_stats = now;
++      }
++   }
++   return NULL;
+ }
+ 
+-static MTL4CompilerTaskOptions *
+-kk_lookup_options(void)
++static void
++kk_archive_stamp(id<MTLDevice> dev, char hex[17], char *text, size_t text_size)
+ {
+-   return kk_task_options;
++   char osbuild[64] = "?";
++   size_t len = sizeof(osbuild);
++   sysctlbyname("kern.osversion", osbuild, &len, NULL, 0);
++   snprintf(text, text_size, "fmt=1;kk=%s%s;os=%s;gpu=%s;", PACKAGE_VERSION, MESA_GIT_SHA1, osbuild,
++            [[dev name] UTF8String]);
++   unsigned char d[CC_SHA256_DIGEST_LENGTH];
++   CC_SHA256(text, (CC_LONG)strlen(text), d);
++   for (int i = 0; i < 8; i++)
++      snprintf(hex + i * 2, 3, "%02x", d[i]);
+ }
+ 
+-/* Called after a pipeline was created: a lookup that took this long was a
+- * real compile, so the archive is stale. Archive hits are ~ms. */
+ static void
+-kk_note_pipeline(double ms)
++kk_archive_init(void)
++{
++   @autoreleasepool {
++      id<MTLDevice> dev = kk_archive_init_dev;
++      const char *dir = getenv("KK_PIPELINE_ARCHIVE_DIR");
++      const char *file = getenv("KK_PIPELINE_ARCHIVE");
++      const char *e;
++      kk_archive_debug = getenv("KK_PIPELINE_ARCHIVE_DEBUG") != NULL;
++      if ((e = getenv("KK_COMPILE_STATS")) && atof(e) > 0.0)
++         kk_stats_s = atof(e);
++      NSMutableArray<NSString *> *readahead = nil;
++      MTL4PipelineDataSetSerializerDescriptor *sd = [[MTL4PipelineDataSetSerializerDescriptor new] autorelease];
++      /* CaptureBinaries only: combined with CaptureDescriptors the archive
++       * flush returns NO. */
++      sd.configuration = MTL4PipelineDataSetSerializerConfigurationCaptureBinaries;
++      if (dir && dir[0]) {
++         char hex[17], text[256];
++         kk_archive_stamp(dev, hex, text, sizeof(text));
++         mkdir(dir, 0755);
++         snprintf(kk_seg_dir, sizeof(kk_seg_dir), "%s/%s", dir, hex);
++         mkdir(kk_seg_dir, 0755);
++         char stamp_path[1024];
++         snprintf(stamp_path, sizeof(stamp_path), "%s/STAMP.txt", kk_seg_dir);
++         FILE *f = fopen(stamp_path, "wx");
++         if (f) {
++            fprintf(f, "%s\n", text);
++            fclose(f);
++         }
++         kk_seg_mode = true;
++         kk_compact = (e = getenv("KK_PIPELINE_ARCHIVE_COMPACT")) && atoi(e) != 0;
++         if ((e = getenv("KK_PIPELINE_ARCHIVE_FLUSH_N")) && atoi(e) > 0)
++            kk_flush_n = (uint32_t)atoi(e);
++         if ((e = getenv("KK_PIPELINE_ARCHIVE_FLUSH_S")) && atof(e) > 0.0)
++            kk_flush_s = atof(e);
++         kk_serializer = [dev newPipelineDataSetSerializerWithDescriptor:sd];
++         kk_loaded_paths = [NSMutableArray new];
++         readahead = [NSMutableArray new];
++         double t0 = kk_now_ms();
++         uint32_t loaded = 0, rejected = 0;
++         NSMutableArray<id<MTL4Archive>> *set = [NSMutableArray array];
++         DIR *d = opendir(kk_seg_dir);
++         struct dirent *ent;
++         while (d && (ent = readdir(d))) {
++            size_t n = strlen(ent->d_name);
++            char path[1300];
++            snprintf(path, sizeof(path), "%s/%s", kk_seg_dir, ent->d_name);
++            if (n > 4 && !strcmp(ent->d_name + n - 4, ".tmp")) {
++               /* Left by a process killed during a flush. */
++               struct stat st;
++               if (stat(path, &st) == 0 && time(NULL) - st.st_mtime > 600)
++                  unlink(path);
++               continue;
++            }
++            if (n < 7 || strcmp(ent->d_name + n - 6, ".mtl4a"))
++               continue;
++            NSString *ns_path = [NSString stringWithUTF8String:path];
++            NSError *aerr = nil;
++            id<MTL4Archive> archive = [dev newArchiveWithURL:[NSURL fileURLWithPath:ns_path] error:&aerr];
++            if (!archive) {
++               rejected++;
++               fprintf(stderr, "[kk-archive] ignoring %s: %s\n", path, [aerr.localizedDescription UTF8String]);
++               continue;
++            }
++            struct stat st;
++            if (stat(path, &st) == 0)
++               kk_st_loaded_bytes += (uint64_t)st.st_size;
++            [set addObject:archive];
++            [archive release];
++            [kk_loaded_paths addObject:ns_path];
++            [readahead addObject:ns_path];
++            loaded++;
++         }
++         if (d)
++            closedir(d);
++         kk_archives = [set copy];
++         if (kk_compact && loaded) {
++            kk_task_options = [MTL4CompilerTaskOptions new];
++            kk_task_options.lookupArchives = kk_archives;
++         }
++         if ((e = getenv("KK_PIPELINE_ARCHIVE_READAHEAD")) && atoi(e) == 0) {
++            [readahead release];
++            readahead = nil;
++         }
++         fprintf(stderr, "[kk-archive] store %s (%s): %u segments loaded (%.1f MiB, %.1f ms), %u rejected%s, flush every %u pipelines / %.0f s\n",
++                 kk_seg_dir, text, loaded, kk_st_loaded_bytes / 1048576.0, kk_now_ms() - t0, rejected,
++                 kk_compact ? ", COMPACT" : "", kk_flush_n, kk_flush_s);
++      } else if (file && file[0]) {
++         kk_archive_url = [[NSURL fileURLWithPath:[NSString stringWithUTF8String:file]] retain];
++         NSError *aerr = nil;
++         kk_serializer = [dev newPipelineDataSetSerializerWithDescriptor:sd];
++         if ([[NSFileManager defaultManager] fileExistsAtPath:kk_archive_url.path]) {
++            double t0 = kk_now_ms();
++            id<MTL4Archive> archive = [dev newArchiveWithURL:kk_archive_url error:&aerr];
++            if (archive) {
++               kk_task_options = [MTL4CompilerTaskOptions new];
++               kk_task_options.lookupArchives = @[ archive ];
++            } else {
++               fprintf(stderr, "[kk-archive] ignoring %s: %s\n", file,
++                       [aerr.localizedDescription UTF8String]);
++               kk_legacy_dirty = true;
++            }
++            if (kk_archive_debug)
++               fprintf(stderr, "[kk-archive] %s %.2f ms\n", archive ? "loaded" : "rejected", kk_now_ms() - t0);
++         } else {
++            kk_legacy_dirty = true;
++         }
++      }
++      if (!kk_archive_atexit && (kk_serializer || kk_stats_s > 0.0)) {
++         kk_archive_atexit = true;
++         atexit(kk_archive_exit);
++      }
++      if (kk_seg_mode || kk_stats_s > 0.0) {
++         if (pipe(kk_wake_pipe) == 0) {
++            fcntl(kk_wake_pipe[0], F_SETFD, FD_CLOEXEC);
++            fcntl(kk_wake_pipe[1], F_SETFD, FD_CLOEXEC);
++            fcntl(kk_wake_pipe[1], F_SETFL, O_NONBLOCK);
++         }
++         pthread_attr_t attr;
++         pthread_attr_init(&attr);
++         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
++         pthread_attr_set_qos_class_np(&attr, QOS_CLASS_UTILITY, 0);
++         if (pthread_create(&kk_flusher, &attr, kk_flusher_main, readahead) != 0 && readahead)
++            [readahead release];
++         pthread_attr_destroy(&attr);
++         if (kk_seg_mode && kk_wake_pipe[1] >= 0 && !((e = getenv("KK_PIPELINE_ARCHIVE_SIGTERM")) && atoi(e) == 0)) {
++            struct sigaction sa;
++            memset(&sa, 0, sizeof(sa));
++            sa.sa_handler = kk_term_handler;
++            sigemptyset(&sa.sa_mask);
++            sa.sa_flags = SA_RESTART;
++            kk_term_installed = sigaction(SIGTERM, &sa, &kk_old_term) == 0;
++            if (kk_archive_debug)
++               fprintf(stderr, "[kk-archive] SIGTERM flush handler %s\n", kk_term_installed ? "installed" : "not installed");
++         }
++      }
++   }
++}
++
++/* KK_METAL_CACHE_ID: see the comment above. */
++__attribute__((constructor)) static void
++kk_metal_cache_id_init(void)
+ {
+-   if (kk_archive_debug && ms > 1.0)
+-      fprintf(stderr, "[kk-archive] pipeline %.1f ms\n", ms);
+-   if (!kk_serializer)
++   const char *id = getenv("KK_METAL_CACHE_ID");
++   if (!id || !id[0])
+       return;
+-   pthread_mutex_lock(&kk_archive_lock);
+-   if (ms > 20.0) {
+-      kk_archive_misses++;
+-      kk_archive_dirty = true;
+-   } else {
+-      kk_archive_hits++;
++   @autoreleasepool {
++      NSBundle *bundle = [NSBundle mainBundle];
++      if ([bundle bundleIdentifier] != nil)
++         return;
++      [[bundle infoDictionary] setValue:[NSString stringWithUTF8String:id] forKey:@"CFBundleIdentifier"];
++      fprintf(stderr, "[kk-archive] OS Metal cache id: %s\n",
++              [[bundle bundleIdentifier] UTF8String] ?: "(not applied)");
+    }
+-   pthread_mutex_unlock(&kk_archive_lock);
+ }
+ 
++static id
++kk_archive_lookup(MTL4PipelineDescriptor *render, MTL4ComputePipelineDescriptor *compute)
++{
++   if (!kk_seg_mode || kk_compact)
++      return nil;
++   for (id<MTL4Archive> archive in kk_archives_snapshot()) {
++      NSError *error = nil;
++      id pipeline = render ? (id)[archive newRenderPipelineStateWithDescriptor:render error:&error]
++                           : (id)[archive newComputePipelineStateWithDescriptor:compute error:&error];
++      if (pipeline)
++         return pipeline;
++   }
++   return nil;
++}
+ 
+ /* App-provided prebuilt Metal libraries (nativeps5).
+  *
+@@ -186,40 +605,13 @@ mtl_new_compiler(mtl_device *device)
+ 
+       MTL4CompilerDescriptor *desc = [[MTL4CompilerDescriptor new] autorelease];
+ 
+-      const char *archive_path = getenv("KK_PIPELINE_ARCHIVE");
+-      pthread_mutex_lock(&kk_archive_lock);
+-      if (archive_path && archive_path[0] && !kk_serializer) {
+-         kk_archive_debug = getenv("KK_PIPELINE_ARCHIVE_DEBUG") != NULL;
+-         kk_archive_url = [[NSURL fileURLWithPath:[NSString stringWithUTF8String:archive_path]] retain];
+-         NSError *aerr = nil;
+-         MTL4PipelineDataSetSerializerDescriptor *sd = [[MTL4PipelineDataSetSerializerDescriptor new] autorelease];
+-         /* CaptureBinaries only: combined with CaptureDescriptors the
+-          * archive flush returns NO. */
+-         sd.configuration = MTL4PipelineDataSetSerializerConfigurationCaptureBinaries;
+-         kk_serializer = [dev newPipelineDataSetSerializerWithDescriptor:sd];
+-         if ([[NSFileManager defaultManager] fileExistsAtPath:kk_archive_url.path]) {
+-            double t0 = kk_now_ms();
+-            kk_archive = [dev newArchiveWithURL:kk_archive_url error:&aerr];
+-            if (kk_archive) {
+-               kk_task_options = [MTL4CompilerTaskOptions new];
+-               kk_task_options.lookupArchives = @[ kk_archive ];
+-            } else {
+-               fprintf(stderr, "[kk-archive] ignoring %s: %s\n", archive_path,
+-                       [aerr.localizedDescription UTF8String]);
+-               kk_archive_dirty = true;
+-            }
+-            kk_archive_log(kk_archive ? "loaded" : "rejected", kk_now_ms() - t0);
+-         } else {
+-            kk_archive_dirty = true;
+-         }
+-         if (!kk_archive_atexit) {
+-            kk_archive_atexit = true;
+-            atexit(mtl_compiler_flush_archive);
+-         }
+-      }
++      pthread_mutex_lock(&kk_flush_lock);
++      if (!kk_archive_init_dev)
++         kk_archive_init_dev = [dev retain];
++      pthread_mutex_unlock(&kk_flush_lock);
++      pthread_once(&kk_archive_once, kk_archive_init);
+       if (kk_serializer)
+          desc.pipelineDataSetSerializer = kk_serializer;
+-      pthread_mutex_unlock(&kk_archive_lock);
+ 
+       NSError *error;
+       id<MTL4Compiler> compiler = [dev newCompilerWithDescriptor:desc error:&error];
+@@ -301,8 +693,7 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+ 
+       NSError *error;
+       id<MTLLibrary> lib = [comp newLibraryWithDescriptor:desc error:&error];
+-      if (kk_archive_debug)
+-         fprintf(stderr, "[kk-archive] library %.1f ms (%zu B msl)\n", kk_now_ms() - lib_t0, strlen(src));
++      kk_note_library(kk_now_ms() - lib_t0, strlen(src));
+ 
+       if (lib == nil) {
+          fprintf(stderr, "Failed to create MTLLibrary: %s\n", [error.localizedDescription UTF8String]);
+@@ -341,10 +732,13 @@ mtl_new_compute_pipeline_state(mtl_compiler *compiler,
+ 
+       NSError *error;
+       double t0 = kk_now_ms();
+-      id<MTLComputePipelineState> pipeline = [comp newComputePipelineStateWithDescriptor:desc
+-                                                                     compilerTaskOptions:kk_lookup_options()
+-                                                                                   error:&error];
+-      kk_note_pipeline(kk_now_ms() - t0);
++      id<MTLComputePipelineState> pipeline = kk_archive_lookup(nil, desc);
++      bool hit = pipeline != nil;
++      if (!hit)
++         pipeline = [comp newComputePipelineStateWithDescriptor:desc
++                                            compilerTaskOptions:kk_task_options
++                                                          error:&error];
++      kk_note_pipeline(hit, kk_now_ms() - t0);
+ 
+       if (pipeline == nil) {
+          fprintf(stderr, "Failed to create MTLComputePipelineState: %s\n", [error.localizedDescription UTF8String]);
+@@ -464,10 +858,13 @@ mtl_new_render_pipeline(mtl_compiler *compiler, mtl_render_pass_descriptor *desc
+ 
+       NSError *error = nil;
+       double t0 = kk_now_ms();
+-      id<MTLRenderPipelineState> pipeline = [comp newRenderPipelineStateWithDescriptor:desc
+-                                                                   compilerTaskOptions:kk_lookup_options()
+-                                                                                 error:&error];
+-      kk_note_pipeline(kk_now_ms() - t0);
++      id<MTLRenderPipelineState> pipeline = kk_archive_lookup(desc, nil);
++      bool hit = pipeline != nil;
++      if (!hit)
++         pipeline = [comp newRenderPipelineStateWithDescriptor:desc
++                                           compilerTaskOptions:kk_task_options
++                                                         error:&error];
++      kk_note_pipeline(hit, kk_now_ms() - t0);
+ 
+       if (pipeline == nil) {
+          fprintf(stderr, "Failed to create MTLRenderPipelineState: %s\n", [error.localizedDescription UTF8String]);

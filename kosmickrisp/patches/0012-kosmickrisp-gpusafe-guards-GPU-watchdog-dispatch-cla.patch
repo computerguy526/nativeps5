@@ -1,0 +1,621 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 10:06:10 +0000
+Subject: [PATCH] kosmickrisp: gpusafe guards (GPU watchdog, dispatch clamp,
+ queue-error exits, residency guard)
+
+---
+ src/kosmickrisp/libkk/kk_draws.cl        |  19 ++
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c   |   1 +
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h   |   3 +
+ src/kosmickrisp/vulkan/kk_cmd_dispatch.c |  18 +-
+ src/kosmickrisp/vulkan/kk_queue.c        |  47 +++-
+ src/kosmickrisp/vulkan/kk_safety.c       | 262 +++++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_safety.h       |  32 +++
+ src/kosmickrisp/vulkan/kk_safety_core.h  |  82 +++++++
+ src/kosmickrisp/vulkan/meson.build       |   3 +
+ 9 files changed, 464 insertions(+), 3 deletions(-)
+ create mode 100644 src/kosmickrisp/vulkan/kk_safety.c
+ create mode 100644 src/kosmickrisp/vulkan/kk_safety.h
+ create mode 100644 src/kosmickrisp/vulkan/kk_safety_core.h
+
+diff --git a/src/kosmickrisp/libkk/kk_draws.cl b/src/kosmickrisp/libkk/kk_draws.cl
+index 15ac3a5..0cbf5d2 100644
+--- a/src/kosmickrisp/libkk/kk_draws.cl
++++ b/src/kosmickrisp/libkk/kk_draws.cl
+@@ -71,6 +71,25 @@ libkk_predicate_indirect_neq_zero(global uint32_t *out, constant uint32_t *in,
+    libkk_predicate_draw(out, in, out_stride_el, in_stride_el, draw_id, enabled);
+ }
+ 
++/*
++ * nps5 gpusafe: GPU-written dispatch counts above `limit` threadgroups dispatch nothing (garbage
++ * counts = billions of threadgroups = GPU hang). `counter` counts suppressed dispatches (host logs once).
++ */
++KERNEL(1)
++libkk_clamp_indirect_dispatch(global uint32_t *out, constant uint32_t *in,
++                              global uint32_t *counter, uint32_t limit)
++{
++   uint64_t x = in[0], y = in[1], z = in[2];
++   uint64_t xy = x * y;
++   bool bad = (x != 0 && y != 0 && z != 0) &&
++              (xy > (uint64_t)limit || xy * z > (uint64_t)limit);
++   out[0] = bad ? 0 : in[0];
++   out[1] = bad ? 0 : in[1];
++   out[2] = bad ? 0 : in[2];
++   if (bad)
++      atomic_fetch_add((volatile global atomic_uint *)counter, 1u);
++}
++
+ KERNEL(1024)
+ libkk_unroll_geometry(
+    uint64_t index_buffer, global struct poly_heap *heap,
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 3b46450..8907e53 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -173,6 +173,7 @@ kk_reset_cmd_buffer_internal(struct kk_cmd_buffer *cmd)
+ 
+    memset(&cmd->state, 0, sizeof(cmd->state));
+    cmd->uses_heap = false;
++   cmd->safe_n_disp = cmd->safe_n_render = cmd->safe_cs_len = cmd->safe_cs_local = cmd->safe_rt = 0;
+ }
+ 
+ static void
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 9d72431..c86720f 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -243,6 +243,9 @@ struct kk_ts_stage_entry {
+ struct kk_cmd_buffer {
+    struct vk_command_buffer vk;
+ 
++   /* nps5 gpusafe flight-recorder counters (single-threaded recording) */
++   uint32_t safe_n_disp, safe_n_render, safe_cs_len, safe_cs_local, safe_rt;
++
+    struct {
+       mtl_command_allocator *allocator;
+       mtl_command_buffer *cmd_buf;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+index 734e97f..a685239 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+@@ -12,6 +12,7 @@
+ #include "kk_device.h"
+ #include "kk_entrypoints.h"
+ #include "kk_shader.h"
++#include "kk_safety.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ 
+@@ -70,6 +71,8 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+    /* Metal validation dislikes empty disptaches */
+    if (groupCountX * groupCountY * groupCountZ == 0)
+       return;
++   if (kk_safe_direct_dispatch_blocked(groupCountX, groupCountY, groupCountZ))
++      return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+ 
+@@ -154,8 +157,19 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+       mtl_dispatch_threadgroups_with_indirect_buffer(encoder, patched.gpu,
+                                                      local_size);
+    } else {
++      uint64_t addr = pInfo->addressRange.address;
++      uint32_t limit = kk_safe_dispatch_limit();
++      if (limit) {
++         /* nps5 gpusafe: clamp GPU-written counts (one 1-thread dispatch) */
++         struct kk_ptr clamped = kk_pool_alloc(cmd, sizeof(VkDispatchIndirectCommand), 4u);
++         uint64_t counter = kk_safe_clamp_counter_addr(kk_cmd_buffer_device(cmd));
++         if (likely(clamped.gpu != 0 && counter != 0)) {
++            struct kk_grid grid = kk_grid_1d(1u);
++            libkk_clamp_indirect_dispatch(cmd, grid, false, clamped.gpu, addr, counter, limit);
++            addr = clamped.gpu;
++         }
++      }
+       kk_flush_compute_state(cmd);
+-      mtl_dispatch_threadgroups_with_indirect_buffer(
+-         encoder, pInfo->addressRange.address, local_size);
++      mtl_dispatch_threadgroups_with_indirect_buffer(encoder, addr, local_size);
+    }
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index d8cd4ef..2c66b68 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include "kk_queue.h"
++#include "kk_safety.h"
+ #include "kk_buffer.h"
+ #include "kk_cmd_buffer.h"
+ #include "kk_device.h"
+@@ -151,6 +152,11 @@ kk_prof_token(void *cmd, const char *tok)
+ void
+ kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol, uint32_t dfmt)
+ {
++   {
++      struct kk_cmd_buffer *c = cmd;
++      c->safe_n_render++;
++      c->safe_rt = (w & 0xffff) | ((h & 0xfff) << 16) | ((ncol & 0xf) << 28);
++   }
+    if (!kk_prof_enabled()) return;
+    char tok[48];
+    __atomic_fetch_add(&kk_prof_n_render, 1, __ATOMIC_RELAXED);
+@@ -160,6 +166,12 @@ kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol,
+ void
+ kk_prof_dispatch(void *cmd, uint32_t msl_len, uint32_t lx, uint32_t ly, uint32_t lz)
+ {
++   {
++      struct kk_cmd_buffer *c = cmd;
++      c->safe_n_disp++;
++      c->safe_cs_len = msl_len;
++      c->safe_cs_local = (lx & 0x3ff) | ((ly & 0x3ff) << 10) | ((lz & 0x3ff) << 20);
++   }
+    if (!kk_prof_enabled()) return;
+    char tok[48];
+    __atomic_fetch_add(&kk_prof_n_dispatch, 1, __ATOMIC_RELAXED);
+@@ -206,6 +218,24 @@ kk_prof_dump(void)
+    mtx_unlock(&kk_prof_lock);
+ }
+ 
++/* nps5 gpusafe: outermost commit-callback wrapper (watchdog ring + queue error guards). */
++struct kk_safe_wrap {
++   mtl_feedback_handler_callback cb;
++   void *data;
++   struct kk_safe_token *tk;
++};
++static void
++kk_safe_callback(struct mtl_feedback_data *data)
++{
++   struct kk_safe_wrap *w = data->user_data;
++   kk_safe_commit_done(w->tk, data);
++   data->user_data = w->data;
++   mtl_feedback_handler_callback cb = w->cb;
++   free(w->tk);
++   free(w);
++   cb(data);
++}
++
+ static void
+ commit_callback(struct mtl_feedback_data *data)
+ {
+@@ -271,6 +301,21 @@ kk_queue_commit(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+       callback = kk_prof_callback;
+       user_data = w;
+    }
++   {
++      struct kk_safe_token *tk = kk_safe_commit_begin(queue, cmd);
++      if (tk) {
++         struct kk_safe_wrap *sw = malloc(sizeof(*sw));
++         if (sw) {
++            sw->cb = callback;
++            sw->data = user_data;
++            sw->tk = tk;
++            callback = kk_safe_callback;
++            user_data = sw;
++         } else {
++            free(tk);
++         }
++      }
++   }
+    mtl_commit_options_add_feedback_handler(options, callback, user_data);
+ 
+    mtl_command_queue_commit(queue->mtl_handle, &cmd->metal.cmd_buf, 1u,
+@@ -353,7 +398,7 @@ kk_queue_submit(struct vk_queue *vk_queue, struct vk_queue_submit *submit)
+    struct kk_queue *queue = container_of(vk_queue, struct kk_queue, vk);
+    struct kk_device *dev = kk_queue_device(queue);
+ 
+-   if (vk_queue_is_lost(&queue->vk))
++   if (vk_queue_is_lost(&queue->vk) || kk_safe_halted())
+       return VK_ERROR_DEVICE_LOST;
+ 
+    for (struct vk_sync_wait *wait = submit->waits,
+diff --git a/src/kosmickrisp/vulkan/kk_safety.c b/src/kosmickrisp/vulkan/kk_safety.c
+new file mode 100644
+index 0000000..2dfd0fb
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/kk_safety.c
+@@ -0,0 +1,262 @@
++/* nps5 gpusafe: GPU watchdog, command-queue error guards, residency guard, dispatch clamp counter.
++ * Every guard has an env switch (default ON, cost: one malloc + two atomics per commit).
++ *   KK_GPU_WATCHDOG_S / KYTY_GPU_WATCHDOG_S  seconds a committed command buffer may stay incomplete (4; 0 off) -> _exit(70)
++ *   KK_DISPATCH_CLAMP                         max threadgroups per dispatch (4194304; 0 off)
++ *   KK_QUEUE_ERROR_EXIT                       0 disables the AccessRevoked (_exit 74) and OOM-window (_exit 72) exits
++ *   KK_OOM_MAX / KK_OOM_WINDOW_S              32 / 60
++ *   KK_WIRED_GUARD                            0 off; KK_WIRED_LIMIT_MB overrides recommendedMaxWorkingSetSize*0.9 -> _exit(73)
++ * SPDX-License-Identifier: MIT */
++#include "kk_safety.h"
++
++#include "kk_bo.h"
++#include "kk_cmd_buffer.h"
++#include "kk_device.h"
++#include "kk_queue.h"
++
++#include "kosmickrisp/bridge/mtl_bridge.h"
++
++#include <pthread.h>
++#include <signal.h>
++#include <stdatomic.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++#include <unistd.h>
++
++struct kk_safe_token {
++   struct kk_safe_slot *slot;
++   uint64_t seq;
++   mtl_feedback_handler_callback cb;
++   void *data;
++};
++
++static struct kk_safe_slot g_ring[KK_SAFE_RING];
++static _Atomic uint64_t g_seq;
++static _Atomic int g_halted;
++static struct kk_device *g_dev;
++static pthread_once_t g_once = PTHREAD_ONCE_INIT;
++static double g_wd_s = 4.0;
++static bool g_wd_on = true, g_error_exit = true, g_wired_on = true;
++static uint64_t g_wired_limit;
++static uint32_t g_clamp = 1u << 22;
++static unsigned g_oom_max = 32;
++static uint64_t g_oom_window_ns = 60ull * 1000000000ull;
++static pthread_mutex_t g_oom_lock = PTHREAD_MUTEX_INITIALIZER;
++static struct kk_safe_window g_oom;
++static struct kk_bo *g_counter_bo;
++static pthread_mutex_t g_counter_lock = PTHREAD_MUTEX_INITIALIZER;
++static _Atomic uint64_t g_last_wired_check;
++static bool g_clamp_logged;
++
++static uint64_t
++now_ns(void)
++{
++   struct timespec ts;
++   clock_gettime(CLOCK_MONOTONIC, &ts);
++   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
++}
++
++static double
++env_d(const char *a, const char *b, double def)
++{
++   const char *e = getenv(a);
++   if (!e && b)
++      e = getenv(b);
++   return e && *e ? atof(e) : def;
++}
++
++static void
++kk_safe_die(int code, const char *why)
++{
++   atomic_store(&g_halted, 1);
++   fprintf(stderr, "[kk-safe] FATAL: %s -> _exit(%d)\n", why, code);
++   fflush(stderr);
++   _exit(code);
++}
++
++static void
++dump_flight(int overdue)
++{
++   uint64_t t = now_ns(), top = atomic_load(&g_seq);
++   fprintf(stderr, "[kk-safe] flight summary (newest first), %.2f s limit; commit seq=%llu:\n", g_wd_s,
++           (unsigned long long)top);
++   unsigned shown = 0;
++   for (uint64_t q = top; q > 0 && shown < 16; q--) {
++      struct kk_safe_slot *s = &g_ring[q % KK_SAFE_RING];
++      if (s->seq != q)
++         continue;
++      fprintf(stderr,
++              "[kk-safe]  #%llu age %.0f ms %s disp=%u rp=%u lastCS len=%u local=0x%x lastRT=0x%x note=%llx,%llx\n",
++              (unsigned long long)q, (t - s->start_ns) / 1e6, s->pending ? "PENDING" : "done", s->n_disp,
++              s->n_render, s->cs_len, s->cs_local, s->rt, (unsigned long long)s->note[0],
++              (unsigned long long)s->note[1]);
++      shown++;
++   }
++   if (overdue >= 0)
++      fprintf(stderr, "[kk-safe] overdue commit #%llu\n", (unsigned long long)g_ring[overdue].seq);
++   fflush(stderr);
++}
++
++static void *
++watchdog_main(void *arg)
++{
++   (void)arg;
++   uint64_t limit = (uint64_t)(g_wd_s * 1e9);
++   for (;;) {
++      struct timespec ts = {0, 100 * 1000 * 1000};
++      nanosleep(&ts, NULL);
++      if (g_counter_bo && !g_clamp_logged && *(volatile uint32_t *)g_counter_bo->cpu) {
++         g_clamp_logged = true;
++         fprintf(stderr,
++                 "[kk-safe] dispatch clamp: an indirect dispatch above %u threadgroups was suppressed (logged once; %u so far)\n",
++                 g_clamp, *(volatile uint32_t *)g_counter_bo->cpu);
++      }
++      if (!g_wd_on)
++         continue;
++      int o = kk_safe_find_overdue(g_ring, now_ns(), limit);
++      if (o >= 0) {
++         atomic_store(&g_halted, 1); /* no new submissions */
++         fprintf(stderr, "[kk-safe] GPU WATCHDOG: command buffer incomplete after %.1f s; stopping\n", g_wd_s);
++         dump_flight(o);
++         /* Let the host (Kyty) print its own flight ring from a SIGUSR2 handler, then leave. */
++         kill(getpid(), SIGUSR2);
++         struct timespec w = {0, 300 * 1000 * 1000};
++         nanosleep(&w, NULL);
++         _exit(70);
++      }
++   }
++   return NULL;
++}
++
++static void
++init_once(void)
++{
++   g_wd_s = env_d("KK_GPU_WATCHDOG_S", "KYTY_GPU_WATCHDOG_S", 4.0);
++   g_wd_on = g_wd_s > 0.0;
++   g_clamp = (uint32_t)env_d("KK_DISPATCH_CLAMP", NULL, 4194304.0);
++   g_error_exit = env_d("KK_QUEUE_ERROR_EXIT", NULL, 1) != 0;
++   g_oom_max = (unsigned)env_d("KK_OOM_MAX", NULL, 32);
++   g_oom_window_ns = (uint64_t)(env_d("KK_OOM_WINDOW_S", NULL, 60) * 1e9);
++   g_wired_on = env_d("KK_WIRED_GUARD", NULL, 1) != 0;
++   if (g_dev && g_wired_on) {
++      double mb = env_d("KK_WIRED_LIMIT_MB", NULL, 0);
++      g_wired_limit = mb > 0 ? (uint64_t)mb << 20
++                             : kk_safe_default_limit(mtl_device_recommended_max_working_set_size(g_dev->mtl_handle));
++   }
++   /* keep the thread even with the watchdog off: it also reports the dispatch clamp counter */
++   pthread_t th;
++   pthread_attr_t at;
++   pthread_attr_init(&at);
++   pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
++   pthread_create(&th, &at, watchdog_main, NULL);
++   fprintf(stderr, "[kk-safe] on: watchdog %.1f s, dispatch clamp %u, queue-error exit %d (oom %u/%.0f s), wired limit %llu MiB\n",
++           g_wd_s, g_clamp, g_error_exit, g_oom_max, g_oom_window_ns / 1e9,
++           (unsigned long long)(g_wired_limit >> 20));
++}
++
++uint32_t
++kk_safe_dispatch_limit(void)
++{
++   pthread_once(&g_once, init_once);
++   return g_clamp;
++}
++
++bool
++kk_safe_direct_dispatch_blocked(uint32_t x, uint32_t y, uint32_t z)
++{
++   if (!kk_safe_groups_exceed(x, y, z, kk_safe_dispatch_limit()))
++      return false;
++   if (!g_clamp_logged) {
++      g_clamp_logged = true;
++      fprintf(stderr, "[kk-safe] dispatch clamp: direct dispatch %ux%ux%u above %u threadgroups suppressed (logged once)\n",
++              x, y, z, g_clamp);
++   }
++   return true;
++}
++
++uint64_t
++kk_safe_clamp_counter_addr(struct kk_device *dev)
++{
++   pthread_mutex_lock(&g_counter_lock);
++   if (!g_counter_bo) {
++      struct kk_bo *bo = NULL;
++      if (kk_alloc_bo(dev, &dev->vk.base, 16, 16, &bo, KK_MEM_CMD_POOL) == VK_SUCCESS) {
++         memset(bo->cpu, 0, 16);
++         g_counter_bo = bo;
++      }
++   }
++   uint64_t a = g_counter_bo ? g_counter_bo->gpu : 0;
++   pthread_mutex_unlock(&g_counter_lock);
++   return a;
++}
++
++bool
++kk_safe_halted(void)
++{
++   return atomic_load_explicit(&g_halted, memory_order_relaxed) != 0;
++}
++
++struct kk_safe_token *
++kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd)
++{
++   struct kk_device *dev = kk_queue_device(queue);
++   if (!g_dev)
++      g_dev = dev;
++   pthread_once(&g_once, init_once);
++
++   /* residency guard: at most every 50 ms (one ObjC call) */
++   if (g_wired_limit) {
++      uint64_t t = now_ns(), last = atomic_load_explicit(&g_last_wired_check, memory_order_relaxed);
++      if (t - last > 50ull * 1000000ull &&
++          atomic_compare_exchange_strong(&g_last_wired_check, &last, t)) {
++         uint64_t cur = mtl_device_current_allocated_size(dev->mtl_handle);
++         if (kk_safe_over_limit(cur, g_wired_limit)) {
++            char msg[160];
++            snprintf(msg, sizeof msg, "Metal currentAllocatedSize %llu MiB > limit %llu MiB before commit",
++                     (unsigned long long)(cur >> 20), (unsigned long long)(g_wired_limit >> 20));
++            kk_safe_die(73, msg);
++         }
++      }
++   }
++   if (!g_wd_on && !g_error_exit)
++      return NULL;
++
++   struct kk_safe_token *tk = malloc(sizeof *tk);
++   if (!tk)
++      return NULL;
++   uint64_t seq = atomic_fetch_add(&g_seq, 1) + 1;
++   struct kk_safe_slot *s = &g_ring[seq % KK_SAFE_RING];
++   struct kk_safe_slot n = {.seq = seq, .start_ns = now_ns(), .pending = 1, .n_disp = cmd->safe_n_disp,
++                            .n_render = cmd->safe_n_render, .cs_len = cmd->safe_cs_len,
++                            .cs_local = cmd->safe_cs_local, .rt = cmd->safe_rt};
++   __atomic_store_n(&s->pending, 0, __ATOMIC_RELAXED); /* a torn read only affects a diagnostic */
++   s->seq = n.seq;
++   s->start_ns = n.start_ns;
++   s->n_disp = n.n_disp;
++   s->n_render = n.n_render;
++   s->cs_len = n.cs_len;
++   s->cs_local = n.cs_local;
++   s->rt = n.rt;
++   __atomic_store_n(&s->pending, 1, __ATOMIC_RELEASE);
++   tk->slot = s;
++   tk->seq = seq;
++   return tk;
++}
++
++void
++kk_safe_commit_done(struct kk_safe_token *tk, struct mtl_feedback_data *data)
++{
++   if (data->error == MTL_COMMAND_QUEUE_ERROR_ACCESS_REVOKED && g_error_exit)
++      kk_safe_die(74, "MTL command queue error AccessRevoked (GPU access revoked)");
++   if (g_error_exit && (data->error == MTL_COMMAND_QUEUE_ERROR_OUT_OF_MEMORY ||
++                        (data->error_message && strstr(data->error_message, "Insufficient Memory")))) {
++      pthread_mutex_lock(&g_oom_lock);
++      bool trip = kk_safe_window_note(&g_oom, now_ns(), g_oom_max, g_oom_window_ns);
++      pthread_mutex_unlock(&g_oom_lock);
++      if (trip)
++         kk_safe_die(72, "repeated 'Insufficient Memory' command-buffer failures");
++   }
++   if (tk && tk->slot->seq == tk->seq)
++      __atomic_store_n(&tk->slot->pending, 0, __ATOMIC_RELEASE);
++}
+diff --git a/src/kosmickrisp/vulkan/kk_safety.h b/src/kosmickrisp/vulkan/kk_safety.h
+new file mode 100644
+index 0000000..a228e24
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/kk_safety.h
+@@ -0,0 +1,32 @@
++/* nps5 gpusafe: GPU/machine safety guards (see kk_safety_core.h for the pure logic).
++ * SPDX-License-Identifier: MIT */
++#ifndef KK_SAFETY_H
++#define KK_SAFETY_H 1
++
++#include "kk_safety_core.h"
++#include <stdint.h>
++
++struct kk_device;
++struct kk_queue;
++struct kk_cmd_buffer;
++struct mtl_feedback_data;
++
++/* Dispatch clamp threshold in threadgroups (KK_DISPATCH_CLAMP, default 1<<22, 0 = off). */
++uint32_t kk_safe_dispatch_limit(void);
++/* Direct dispatch over the limit: logs once, true = skip it. */
++bool kk_safe_direct_dispatch_blocked(uint32_t x, uint32_t y, uint32_t z);
++/* GPU address of the device-wide 16-byte clamp counter (created lazily; 0 on failure). */
++uint64_t kk_safe_clamp_counter_addr(struct kk_device *dev);
++
++/* True once the watchdog or an error guard stopped the process: no new submissions. */
++bool kk_safe_halted(void);
++
++/* Called by kk_queue_commit just before committing: starts the watchdog thread on first use, runs the
++ * residency guard, and registers the commit in the flight ring. Returns an opaque token for
++ * kk_safe_commit_done (a malloc'd wrapper), or NULL when everything is off. */
++struct kk_safe_token;
++struct kk_safe_token *kk_safe_commit_begin(struct kk_queue *queue, struct kk_cmd_buffer *cmd);
++/* Completion handler: error classification (AccessRevoked / OOM window) and the flight ring. */
++void kk_safe_commit_done(struct kk_safe_token *token, struct mtl_feedback_data *data);
++
++#endif
+diff --git a/src/kosmickrisp/vulkan/kk_safety_core.h b/src/kosmickrisp/vulkan/kk_safety_core.h
+new file mode 100644
+index 0000000..ec7f100
+--- /dev/null
++++ b/src/kosmickrisp/vulkan/kk_safety_core.h
+@@ -0,0 +1,82 @@
++/*
++ * nps5 gpusafe: pure, dependency-free logic of the KK machine-safety guards, so it can be unit
++ * tested offline (work/s3/kk-safe/test/kk_safety_test.c) without Metal or Mesa headers.
++ * SPDX-License-Identifier: MIT
++ */
++#ifndef KK_SAFETY_CORE_H
++#define KK_SAFETY_CORE_H 1
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++
++/* ---- dispatch clamp: true when x*y*z threadgroups exceed limit (limit 0 = clamp off). No overflow. */
++static inline bool
++kk_safe_groups_exceed(uint32_t x, uint32_t y, uint32_t z, uint32_t limit)
++{
++   if (limit == 0)
++      return false;
++   uint64_t xy = (uint64_t)x * y; /* < 2^64 */
++   if (xy > limit)
++      return z != 0 && x != 0 && y != 0; /* a zero dimension dispatches nothing anyway */
++   return xy * z > limit;                  /* xy <= limit < 2^32: product < 2^64 */
++}
++
++/* ---- failure-window counter: true once `n` events fall inside `window_ns` (sliding). */
++#define KK_SAFE_OOM_MAX 256
++struct kk_safe_window {
++   uint64_t t[KK_SAFE_OOM_MAX];
++   unsigned head, count;
++};
++static inline bool
++kk_safe_window_note(struct kk_safe_window *w, uint64_t now_ns, unsigned n, uint64_t window_ns)
++{
++   if (n == 0 || n > KK_SAFE_OOM_MAX)
++      n = KK_SAFE_OOM_MAX;
++   w->t[w->head] = now_ns;
++   w->head = (w->head + 1) % KK_SAFE_OOM_MAX;
++   if (w->count < KK_SAFE_OOM_MAX)
++      w->count++;
++   if (w->count < n)
++      return false;
++   /* the n-th most recent event */
++   unsigned idx = (w->head + KK_SAFE_OOM_MAX - n) % KK_SAFE_OOM_MAX;
++   return now_ns - w->t[idx] <= window_ns;
++}
++
++/* ---- in-flight commit ring + overdue scan */
++#define KK_SAFE_RING 512
++struct kk_safe_slot {
++   uint64_t seq;       /* 0 = never used */
++   uint64_t start_ns;  /* commit time */
++   uint64_t note[2];   /* host-supplied context (e.g. Kyty tick / submit id) at commit */
++   uint32_t pending;   /* 1 until the completion handler ran */
++   uint32_t n_disp, n_render, cs_len, cs_local, rt;
++};
++/* Index of the oldest slot pending longer than limit_ns, or -1. */
++static inline int
++kk_safe_find_overdue(const struct kk_safe_slot *ring, uint64_t now_ns, uint64_t limit_ns)
++{
++   int best = -1;
++   for (unsigned i = 0; i < KK_SAFE_RING; i++) {
++      const struct kk_safe_slot *s = &ring[i];
++      if (s->seq && s->pending && now_ns - s->start_ns > limit_ns &&
++          (best < 0 || s->seq < ring[best].seq))
++         best = (int)i;
++   }
++   return best;
++}
++
++/* Wired / residency guard: bytes over the limit? limit 0 = off. */
++static inline bool
++kk_safe_over_limit(uint64_t allocated, uint64_t limit)
++{
++   return limit != 0 && allocated > limit;
++}
++static inline uint64_t
++kk_safe_default_limit(uint64_t recommended_max_working_set)
++{
++   return recommended_max_working_set / 10 * 9;
++}
++
++#endif
+diff --git a/src/kosmickrisp/vulkan/meson.build b/src/kosmickrisp/vulkan/meson.build
+index dbbf4a9..c4425cb 100644
+--- a/src/kosmickrisp/vulkan/meson.build
++++ b/src/kosmickrisp/vulkan/meson.build
+@@ -104,6 +104,9 @@ kk_files = files(
+   'kk_query_table.c',
+   'kk_queue.h',
+   'kk_queue.c',
++  'kk_safety.h',
++  'kk_safety_core.h',
++  'kk_safety.c',
+   'kk_sampler.h',
+   'kk_sampler.c',
+   'kk_shader.h',

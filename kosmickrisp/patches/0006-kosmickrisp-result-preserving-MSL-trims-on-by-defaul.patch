@@ -1,0 +1,288 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 22:29:25 +0000
+Subject: [PATCH] kosmickrisp: result-preserving MSL trims on by default; early
+ fragment tests, branch-free guarded loads, math mode switch
+
+KK_MSL_OPT now defaults to 15 (bits 1|2|4|8: workaround 17/14/6 trims that
+keep the shader's results); KK_MSL_OPT=0 restores the old MSL. The value is
+always part of the pipeline cache UUID.
+
+New opt-in bits:
+ 16  [[early_fragment_tests]] for a fragment shader that writes device
+     memory (stores, atomics) and neither writes depth/stencil/sample mask
+     nor can discard. Fragments that fail the depth test no longer run
+     their device writes.
+ 32  the same also for shaders that can discard (not result-preserving:
+     a discarded fragment still writes depth/stencil).
+ 64  msl_nir_select_guarded_loads: 'if (c) x = load(a)' becomes
+     'x = load(c ? a : root); c ? x : k' (no branch; the unselected lane
+     reads the always-bound root table).
+
+KK_MATH_MODE=0|1|2 overrides the library math mode (A/B aid).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.m         |  12 ++
+ .../compiler/msl_nir_lower_common.c           | 127 ++++++++++++++++++
+ src/kosmickrisp/compiler/nir_to_msl.c         |  14 +-
+ src/kosmickrisp/compiler/nir_to_msl.h         |  15 +++
+ src/kosmickrisp/vulkan/kk_physical_device.c   |   7 +-
+ src/kosmickrisp/vulkan/kk_shader.c            |   3 +
+ 6 files changed, 172 insertions(+), 6 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 62e5a28..95ee80e 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -242,6 +242,18 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+    @autoreleasepool {
+       id<MTL4Compiler> comp = (id<MTL4Compiler>)compiler;
+       pthread_once(&kk_metallib_once, kk_metallib_init);
++      /* KK_MATH_MODE=0|1|2 (safe, relaxed, fast): A/B aid, overrides the
++       * library math mode; per-statement math_mode pragmas still apply. Use a
++       * separate pipeline cache when changing it. */
++      {
++         static int kk_math_mode_override = -2;
++         if (kk_math_mode_override == -2) {
++            const char *mm = getenv("KK_MATH_MODE");
++            kk_math_mode_override = (mm && mm[0] >= '0' && mm[0] <= '2') ? mm[0] - '0' : -1;
++         }
++         if (kk_math_mode_override >= 0)
++            math_mode = (enum mtl_math_mode)kk_math_mode_override;
++      }
+       if (kk_metallib_dir || kk_collect_dir) {
+          char key[33];
+          kk_metallib_key(comp, src, (int)msl_version, (int)math_mode, (int)math_fp_fns, key);
+diff --git a/src/kosmickrisp/compiler/msl_nir_lower_common.c b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+index 9844d66..77b1049 100644
+--- a/src/kosmickrisp/compiler/msl_nir_lower_common.c
++++ b/src/kosmickrisp/compiler/msl_nir_lower_common.c
+@@ -1047,3 +1047,130 @@ msl_nir_lower_barycentric_coord(nir_shader *nir)
+    return nir_shader_intrinsics_pass(nir, lower_barycentric_coord,
+                                      nir_metadata_control_flow, NULL);
+ }
++
++/* KK_MSL_OPT_SELECT_LOADS: guarded device loads without a branch.
++ *
++ *    if (c) { x = load_global(a); } phi(x, k)
++ * becomes
++ *    x = load_global(c ? a : root); r = c ? x : k;
++ *
++ * The load of a lane whose guard is false reads the root table (always
++ * bound, always readable) and its value is dropped by the select, so the
++ * shader's results are the same. Only ifs whose two sides hold nothing but
++ * such loads, constants and side-effect-free arithmetic are converted. */
++#define MSL_SELECT_LOADS_MAX_INSTRS 12
++
++static bool
++select_loads_block_ok(nir_block *block, unsigned *count, unsigned *loads)
++{
++   nir_foreach_instr(instr, block) {
++      if (++(*count) > MSL_SELECT_LOADS_MAX_INSTRS)
++         return false;
++      switch (instr->type) {
++      case nir_instr_type_load_const:
++      case nir_instr_type_undef:
++         break;
++      case nir_instr_type_alu:
++         switch (nir_instr_as_alu(instr)->op) {
++         case nir_op_idiv:
++         case nir_op_udiv:
++         case nir_op_irem:
++         case nir_op_imod:
++         case nir_op_umod:
++            return false;
++         default:
++            break;
++         }
++         break;
++      case nir_instr_type_intrinsic: {
++         nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++         if (intr->intrinsic != nir_intrinsic_load_global ||
++             (nir_intrinsic_access(intr) & (ACCESS_ATOMIC | ACCESS_VOLATILE)))
++            return false;
++         (*loads)++;
++         break;
++      }
++      default:
++         return false;
++      }
++   }
++   return true;
++}
++
++static void
++select_loads_hoist(nir_builder *b, nir_if *nif, nir_block *block,
++                   nir_def *cond)
++{
++   nir_foreach_instr_safe(instr, block) {
++      nir_instr_remove(instr);
++      nir_instr_insert(nir_before_cf_node(&nif->cf_node), instr);
++      if (instr->type != nir_instr_type_intrinsic)
++         continue;
++      nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++      b->cursor = nir_before_instr(instr);
++      nir_def *root = nir_load_buffer_ptr_kk(b, 1, 64, .binding = 0);
++      nir_def *addr = nir_bcsel(b, cond, intr->src[0].ssa, root);
++      nir_src_rewrite(&intr->src[0], addr);
++   }
++}
++
++static bool
++select_loads_impl(nir_function_impl *impl)
++{
++   bool progress = false;
++   nir_builder b = nir_builder_create(impl);
++
++   nir_foreach_block_safe(block, impl) {
++      nir_if *nif = nir_block_get_following_if(block);
++      if (!nif)
++         continue;
++      nir_block *then_block = nir_if_first_then_block(nif);
++      nir_block *else_block = nir_if_first_else_block(nif);
++      if (then_block != nir_if_last_then_block(nif) ||
++          else_block != nir_if_last_else_block(nif))
++         continue;
++      unsigned count = 0, loads = 0;
++      if (!select_loads_block_ok(then_block, &count, &loads) ||
++          !select_loads_block_ok(else_block, &count, &loads) || loads == 0)
++         continue;
++      nir_cf_node *next = nir_cf_node_next(&nif->cf_node);
++      if (!next || next->type != nir_cf_node_block)
++         continue;
++      nir_block *merge = nir_cf_node_as_block(next);
++
++      nir_def *cond = nif->condition.ssa;
++      select_loads_hoist(&b, nif, then_block, cond);
++      if (!exec_list_is_empty(&else_block->instr_list)) {
++         b.cursor = nir_before_cf_node(&nif->cf_node);
++         nir_def *not_cond = nir_inot(&b, cond);
++         select_loads_hoist(&b, nif, else_block, not_cond);
++      }
++
++      nir_foreach_phi_safe(phi, merge) {
++         nir_def *then_def = NULL, *else_def = NULL;
++         nir_foreach_phi_src(src, phi) {
++            if (src->pred == then_block)
++               then_def = src->src.ssa;
++            else if (src->pred == else_block)
++               else_def = src->src.ssa;
++         }
++         assert(then_def && else_def);
++         b.cursor = nir_before_cf_node(&nif->cf_node);
++         nir_def *sel = nir_bcsel(&b, cond, then_def, else_def);
++         nir_def_rewrite_uses(&phi->def, sel);
++         nir_instr_remove(&phi->instr);
++      }
++      progress = true;
++   }
++
++   return nir_progress(progress, impl, nir_metadata_none);
++}
++
++bool
++msl_nir_select_guarded_loads(nir_shader *nir)
++{
++   bool progress = false;
++   nir_foreach_function_impl(impl, nir)
++      progress |= select_loads_impl(impl);
++   return progress;
++}
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 8b2e08b..a24d1bd 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -2751,8 +2751,18 @@ nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options)
+    msl_emit_constant_data(&ctx, shader);
+ 
+    msl_emit_io_blocks(&ctx, shader);
+-   if (shader->info.stage == MESA_SHADER_FRAGMENT &&
+-       shader->info.fs.early_fragment_tests)
++   bool early_fragment_tests = shader->info.stage == MESA_SHADER_FRAGMENT &&
++                               shader->info.fs.early_fragment_tests;
++   if (shader->info.stage == MESA_SHADER_FRAGMENT && !early_fragment_tests &&
++       ctx.has_device_writes &&
++       (ctx.msl_opt & (KK_MSL_OPT_EARLY_FRAG | KK_MSL_OPT_EARLY_FRAG_DISCARD)) &&
++       !(shader->info.outputs_written &
++         (BITFIELD64_BIT(FRAG_RESULT_DEPTH) | BITFIELD64_BIT(FRAG_RESULT_STENCIL) |
++          BITFIELD64_BIT(FRAG_RESULT_SAMPLE_MASK))) &&
++       (!shader->info.fs.uses_discard ||
++        (ctx.msl_opt & KK_MSL_OPT_EARLY_FRAG_DISCARD)))
++      early_fragment_tests = true;
++   if (early_fragment_tests)
+       P(&ctx, "[[early_fragment_tests]]\n");
+    P(&ctx, "%s %s %s(\n", get_stage_string(shader->info.stage),
+      output_type(shader), get_entrypoint_name(shader));
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index 034c54d..bb016bc 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -26,6 +26,20 @@ struct vk_color_attachment_location_state;
+ /* KK_WORKAROUND_14 multiply guard (keeps Metal from folding NaN * 0.0 to
+  * 0.0) only when a constant factor has a zero or non-finite component. */
+ #define KK_MSL_OPT_MUL_GUARD_ZERO   (1u << 3)
++/* The bits above keep the shader's results and are the default. */
++#define KK_MSL_OPT_DEFAULT          0xfu
++/* [[early_fragment_tests]] for a fragment shader that writes device memory
++ * (stores, atomics), which Metal otherwise depth-tests after the shader, when
++ * it does not write depth, stencil or the sample mask and cannot discard.
++ * Fragments that fail the depth test then no longer run their device writes
++ * (changes what such statistics/feedback writes count). */
++#define KK_MSL_OPT_EARLY_FRAG       (1u << 4)
++/* The same also for shaders that can discard. NOT result-preserving: a
++ * discarded fragment then still writes depth and stencil. */
++#define KK_MSL_OPT_EARLY_FRAG_DISCARD (1u << 5)
++/* Guarded device loads as select(load(guard ? address : root), default)
++ * instead of a branch (msl_nir_select_guarded_loads). Result-preserving. */
++#define KK_MSL_OPT_SELECT_LOADS     (1u << 6)
+ 
+ struct nir_to_msl_options {
+    void *mem_ctx;
+@@ -101,6 +115,7 @@ bool msl_ensure_vertex_point_size_output(nir_shader *nir);
+ bool msl_nir_fs_io_types(nir_shader *nir);
+ bool msl_nir_vs_io_types(nir_shader *nir);
+ bool msl_nir_fake_guard_for_discards(struct nir_shader *nir);
++bool msl_nir_select_guarded_loads(struct nir_shader *nir);
+ bool msl_nir_lower_sample_shading(nir_shader *nir);
+ bool msl_nir_lower_barycentric_coord(nir_shader *nir);
+ void msl_nir_lower_clip_cull_distance(nir_shader *nir,
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 6a8d9ed..2f7e331 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1031,9 +1031,8 @@ kk_physical_device_init_pipeline_cache(struct kk_physical_device *pdev)
+                        sizeof(instance->driver_build_sha));
+    /* Options that change the generated MSL: a cache written with other
+     * options must not be reused. */
+-   if (pdev->settings.msl_opt)
+-      _mesa_blake3_update(&blake3_ctx, &pdev->settings.msl_opt,
+-                          sizeof(pdev->settings.msl_opt));
++   _mesa_blake3_update(&blake3_ctx, &pdev->settings.msl_opt,
++                       sizeof(pdev->settings.msl_opt));
+ 
+    unsigned char blake3[BLAKE3_KEY_LEN];
+    _mesa_blake3_final(&blake3_ctx, blake3);
+@@ -1163,7 +1162,7 @@ kk_parse_environment_options(struct kk_physical_device *pdev)
+          debug_get_bool_option("MESA_KK_GPU_CAPTURE_IMMEDIATELY", false);
+    }
+ 
+-   settings->msl_opt = (uint32_t)debug_get_num_option("KK_MSL_OPT", 0);
++   settings->msl_opt = (uint32_t)debug_get_num_option("KK_MSL_OPT", KK_MSL_OPT_DEFAULT);
+ 
+    const char *list = debug_get_option("MESA_KK_DISABLE_WORKAROUNDS", "");
+    const char *all_workarounds = "all";
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index a87de7f..5c5028f 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1184,6 +1184,9 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+ {
+    NIR_PASS(_, nir, kk_nir_lower_poly);
+ 
++   if (pdev->settings.msl_opt & KK_MSL_OPT_SELECT_LOADS)
++      NIR_PASS(_, nir, msl_nir_select_guarded_loads);
++
+    msl_optimize_nir(nir);
+    modify_nir_info(nir);
+ 

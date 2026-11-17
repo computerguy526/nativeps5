@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 10:10:16 +0000
+Subject: [PATCH] kosmickrisp: opt-in KK_LOOP_CAP shader loop cap
+
+---
+ src/kosmickrisp/compiler/nir_to_msl.c       | 17 ++++++++++++++++-
+ src/kosmickrisp/compiler/nir_to_msl.h       |  8 ++++++++
+ src/kosmickrisp/vulkan/kk_physical_device.c |  4 ++++
+ 3 files changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 1b9edcd..4144608 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <stdlib.h>
+ #include "nir_to_msl.h"
+ #include "msl_private.h"
+ #include "nir.h"
+@@ -2383,10 +2384,13 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+       if (ctx->disabled_workarounds & BITFIELD64_BIT(2)) {
+          P_IND(ctx, "while (true) {\n");
+       } else {
++         /* nps5 gpusafe: the bound is UINT64_MAX (= unbounded) unless KK_LOOP_CAP=<n> is set (opt-in:
++          * a loop that runs n iterations falls through, so a shader spinning forever ends with wrong
++          * results instead of hanging the GPU). */
+          P_IND(ctx,
+                "for (uint64_t no_crash = 0u; no_crash < %" PRIu64
+                "; ++no_crash) {\n",
+-               UINT64_MAX);
++               kk_msl_loop_cap() ? kk_msl_loop_cap() : UINT64_MAX);
+       }
+       ctx->indentlevel++;
+       foreach_list_typed(nir_cf_node, node, node, &loop->body) {
+@@ -2401,6 +2405,17 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+    }
+ }
+ 
++uint64_t
++kk_msl_loop_cap_value(void)
++{
++   static int64_t cap = -1;
++   if (cap < 0) {
++      const char *e = getenv("KK_LOOP_CAP");
++      cap = e ? (int64_t)strtoull(e, NULL, 10) : 0;
++   }
++   return (uint64_t)cap;
++}
++
+ static void
+ emit_output_return(struct nir_to_msl_ctx *ctx, nir_shader *shader)
+ {
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index 249146c..12e5f42 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -63,6 +63,14 @@ struct vk_color_attachment_location_state;
+  * chain for every active set (tests/simdred_test, 9.9 M checks). */
+ #define KK_MSL_OPT_NATIVE_REDUCE    (1u << 10)
+ /* The bits that keep the shader's results and are the default. */
++/* KK_LOOP_CAP=<n>: per-loop iteration cap in generated MSL (0 / unset = UINT64_MAX = unbounded). */
++#include <stdint.h>
++uint64_t kk_msl_loop_cap_value(void);
++static inline uint64_t
++kk_msl_loop_cap(void)
++{
++   return kk_msl_loop_cap_value();
++}
+ #define KK_MSL_OPT_DEFAULT          (0xfu | KK_MSL_OPT_NATIVE_REDUCE)
+ 
+ struct nir_to_msl_options {
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 6fab06e..2ad4fef 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1033,6 +1033,10 @@ kk_physical_device_init_pipeline_cache(struct kk_physical_device *pdev)
+     * options must not be reused. */
+    _mesa_blake3_update(&blake3_ctx, &pdev->settings.msl_opt,
+                        sizeof(pdev->settings.msl_opt));
++   if (kk_msl_loop_cap()) { /* opt-in loop cap changes the MSL: new cache key (default unchanged) */
++      uint64_t cap = kk_msl_loop_cap();
++      _mesa_blake3_update(&blake3_ctx, &cap, sizeof(cap));
++   }
+ 
+    unsigned char blake3[BLAKE3_KEY_LEN];
+    _mesa_blake3_final(&blake3_ctx, blake3);

@@ -1,0 +1,274 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 21:37:15 +0000
+Subject: [PATCH] kosmickrisp: MSL float compare guard on undefined operands,
+ KK_MSL_OPT code generation options
+
+KK_WORKAROUND_17 printed '!isnan(00)' for an undefined scalar operand,
+which Metal rejects ('call to isnan is ambiguous'); the guard is now
+skipped for undefined operands (any result is valid).
+
+KK_MSL_OPT=<bits>, default 0 (unchanged MSL):
+ 1  KK_WORKAROUND_17 guard only on operands that can be NaN (not on
+    non-NaN constants, int/bool to float conversions, or the same operand
+    twice)
+ 2  KK_WORKAROUND_14 math_mode(safe) block only around float comparisons
+ 4  KK_WORKAROUND_6 coherent device pointers only in shaders that store
+    to or do atomics on device memory
+ 8  KK_WORKAROUND_14 multiply guard only when a constant factor has a
+    zero or non-finite component
+
+A non-zero KK_MSL_OPT is part of the pipeline cache UUID.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/msl_private.h      |   3 +
+ src/kosmickrisp/compiler/nir_to_msl.c       | 102 +++++++++++++++++++-
+ src/kosmickrisp/compiler/nir_to_msl.h       |  14 +++
+ src/kosmickrisp/vulkan/kk_physical_device.c |   7 ++
+ src/kosmickrisp/vulkan/kk_physical_device.h |   2 +
+ src/kosmickrisp/vulkan/kk_shader.c          |   1 +
+ 6 files changed, 126 insertions(+), 3 deletions(-)
+
+diff --git a/src/kosmickrisp/compiler/msl_private.h b/src/kosmickrisp/compiler/msl_private.h
+index e4981ef..39ba386 100644
+--- a/src/kosmickrisp/compiler/msl_private.h
++++ b/src/kosmickrisp/compiler/msl_private.h
+@@ -26,6 +26,9 @@ struct nir_to_msl_ctx {
+    nir_shader *shader;
+    struct _mesa_string_buffer *text;
+    uint64_t disabled_workarounds;
++   uint32_t msl_opt;
++   /* The shader stores to or does atomics on device memory */
++   bool has_device_writes;
+    bool uses_per_draw_data;
+    unsigned short indentlevel;
+    struct io_slot_info inputs_info[NUM_TOTAL_VARYING_SLOTS];
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 43380b0..8b2e08b 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -277,6 +277,66 @@ alu_has_const_src(const nir_alu_instr *instr, unsigned count)
+    return false;
+ }
+ 
++/* True when the operand cannot be NaN: a constant that is not NaN or the
++ * result of an integer or boolean to float conversion. */
++static bool
++alu_src_never_nan(const nir_alu_instr *instr, unsigned srcn)
++{
++   const nir_src *src = &instr->src[srcn].src;
++   if (nir_src_is_const(*src)) {
++      const nir_const_value *value = nir_src_as_const_value(*src);
++      for (unsigned i = 0; i < NIR_MAX_VEC_COMPONENTS; i++) {
++         if (!nir_alu_instr_channel_used(instr, srcn, i))
++            continue;
++         double f = nir_const_value_as_float(value[instr->src[srcn].swizzle[i]],
++                                             src->ssa->bit_size);
++         if (isnan(f))
++            return false;
++      }
++      return true;
++   }
++   const nir_instr *parent = nir_def_instr(src->ssa);
++   if (parent->type != nir_instr_type_alu)
++      return false;
++   switch (nir_instr_as_alu(parent)->op) {
++   case nir_op_i2f16:
++   case nir_op_i2f32:
++   case nir_op_i2f64:
++   case nir_op_u2f16:
++   case nir_op_u2f32:
++   case nir_op_u2f64:
++   case nir_op_b2f16:
++   case nir_op_b2f32:
++   case nir_op_b2f64:
++      return true;
++   default:
++      return false;
++   }
++}
++
++/* True when a constant factor of the multiply could make Metal fold the
++ * product to a constant (x * 0.0) and lose a NaN or infinity of the other
++ * factor. Constants that are neither zero nor non-finite cannot. */
++static bool
++alu_fmul_needs_fold_guard(const nir_alu_instr *instr)
++{
++   for (unsigned s = 0; s < 2; s++) {
++      const nir_src *src = &instr->src[s].src;
++      if (!nir_src_is_const(*src))
++         continue;
++      const nir_const_value *value = nir_src_as_const_value(*src);
++      for (unsigned i = 0; i < NIR_MAX_VEC_COMPONENTS; i++) {
++         if (!nir_alu_instr_channel_used(instr, s, i))
++            continue;
++         double f = nir_const_value_as_float(value[instr->src[s].swizzle[i]],
++                                             src->ssa->bit_size);
++         if (f == 0.0 || !isfinite(f))
++            return true;
++      }
++   }
++   return false;
++}
++
+ static void
+ alu_fcmp_to_msl(struct nir_to_msl_ctx *ctx, nir_alu_instr *instr,
+                 const char *op)
+@@ -286,7 +346,15 @@ alu_fcmp_to_msl(struct nir_to_msl_ctx *ctx, nir_alu_instr *instr,
+    if (!(ctx->disabled_workarounds & BITFIELD64_BIT(17))) {
+       /* fneu is unordered (true on NaN), the others are ordered. */
+       bool ordered = instr->op != nir_op_fneu;
++      const bool trim = ctx->msl_opt & KK_MSL_OPT_FCMP_GUARD;
+       for (unsigned i = 0; i < 2; i++) {
++         /* An undefined operand prints as the untyped literal 00, which
++          * isnan() cannot take; any result is valid for it. */
++         if (nir_src_is_undef(instr->src[i].src))
++            continue;
++         if (trim && (alu_src_never_nan(instr, i) ||
++                      (i == 1 && nir_alu_srcs_equal(instr, instr, 0, 1))))
++            continue;
+          P(ctx, ordered ? "!isnan(" : "isnan(");
+          alu_src_to_msl(ctx, instr, i);
+          P(ctx, ordered ? ") && " : ") || ");
+@@ -322,7 +390,10 @@ alu_to_msl(struct nir_to_msl_ctx *ctx, nir_alu_instr *instr)
+       if (!(ctx->disabled_workarounds & BITFIELD64_BIT(14)) &&
+           (nir_alu_instr_is_inf_preserve(instr) ||
+            nir_alu_instr_is_nan_preserve(instr)) &&
+-          alu_has_const_src(instr, 2))
++          alu_has_const_src(instr, 2) &&
++          (instr->op != nir_op_fmul ||
++           !(ctx->msl_opt & KK_MSL_OPT_MUL_GUARD_ZERO) ||
++           alu_fmul_needs_fold_guard(instr)))
+          P(ctx, "!&buf0.contents[0] ? 1 : ")
+       ALU_BINOP("*");
+       break;
+@@ -1090,7 +1161,9 @@ static const char *
+ global_access_qualifier(struct nir_to_msl_ctx *ctx,
+                         enum gl_access_qualifier access)
+ {
+-   if (!(ctx->disabled_workarounds & BITFIELD64_BIT(6)))
++   if (!(ctx->disabled_workarounds & BITFIELD64_BIT(6)) &&
++       (ctx->has_device_writes ||
++        !(ctx->msl_opt & KK_MSL_OPT_COHERENT_WRITERS)))
+       return "coherent device";
+    if (access & ACCESS_VOLATILE) {
+       /* KK_WORKAROUND_15 */
+@@ -2156,7 +2229,12 @@ alu_fp_math_mode_pragma(struct nir_to_msl_ctx *ctx, const nir_alu_instr *alu)
+    if (!(ctx->disabled_workarounds & BITFIELD64_BIT(14))) {
+       bool is_min_max_sz = (alu->op == nir_op_fmin || alu->op == nir_op_fmax) &&
+                            (fp_math_ctrl & nir_fp_preserve_signed_zero);
+-      if (is_min_max_sz || nir_alu_instr_is_comparison(alu))
++      bool is_comparison = nir_alu_instr_is_comparison(alu);
++      if (is_comparison && (ctx->msl_opt & KK_MSL_OPT_SAFE_FLOAT_ONLY))
++         is_comparison =
++            nir_alu_type_get_base_type(nir_op_infos[alu->op].input_types[0]) ==
++            nir_type_float;
++      if (is_min_max_sz || is_comparison)
+          return "safe";
+    }
+ 
+@@ -2637,7 +2715,25 @@ nir_to_msl(nir_shader *shader, struct nir_to_msl_options *options)
+       .shader = shader,
+       .text = _mesa_string_buffer_create(options->mem_ctx, 1024),
+       .disabled_workarounds = options->disabled_workarounds,
++      .msl_opt = options->msl_opt,
+    };
++   nir_foreach_function_impl(scan_impl, shader) {
++      nir_foreach_block(block, scan_impl) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_intrinsic)
++               continue;
++            switch (nir_instr_as_intrinsic(instr)->intrinsic) {
++            case nir_intrinsic_store_global:
++            case nir_intrinsic_global_atomic:
++            case nir_intrinsic_global_atomic_swap:
++               ctx.has_device_writes = true;
++               break;
++            default:
++               break;
++            }
++         }
++      }
++   }
+    /* KK_WORKAROUND_19 needs a threadgroup buffer argument, which a mesh
+     * function cannot declare (and its dispatch path is not affected). */
+    if (shader->info.stage == MESA_SHADER_MESH)
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index d5a5388..034c54d 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -14,9 +14,23 @@ enum pipe_format;
+ struct vk_input_attachment_location_state;
+ struct vk_color_attachment_location_state;
+ 
++/* KK_MSL_OPT bits: code generation changes that keep the shader's results. */
++/* KK_WORKAROUND_17 guard only on operands that can be NaN (not on constants,
++ * integer conversions, or twice on the same operand). */
++#define KK_MSL_OPT_FCMP_GUARD       (1u << 0)
++/* KK_WORKAROUND_14 math_mode(safe) block only around float comparisons. */
++#define KK_MSL_OPT_SAFE_FLOAT_ONLY  (1u << 1)
++/* KK_WORKAROUND_6 coherent device pointers only in shaders that write device
++ * memory (the miscompile needs a store and a later load in one shader). */
++#define KK_MSL_OPT_COHERENT_WRITERS (1u << 2)
++/* KK_WORKAROUND_14 multiply guard (keeps Metal from folding NaN * 0.0 to
++ * 0.0) only when a constant factor has a zero or non-finite component. */
++#define KK_MSL_OPT_MUL_GUARD_ZERO   (1u << 3)
++
+ struct nir_to_msl_options {
+    void *mem_ctx;
+    uint64_t disabled_workarounds;
++   uint32_t msl_opt;
+ 
+    /* Required to correctly declare fragment outputs. Shader may contain
+     * shrinked writes which can lead to writting less components than the ones
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index e4e9cd6..6a8d9ed 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1029,6 +1029,11 @@ kk_physical_device_init_pipeline_cache(struct kk_physical_device *pdev)
+ 
+    _mesa_blake3_update(&blake3_ctx, instance->driver_build_sha,
+                        sizeof(instance->driver_build_sha));
++   /* Options that change the generated MSL: a cache written with other
++    * options must not be reused. */
++   if (pdev->settings.msl_opt)
++      _mesa_blake3_update(&blake3_ctx, &pdev->settings.msl_opt,
++                          sizeof(pdev->settings.msl_opt));
+ 
+    unsigned char blake3[BLAKE3_KEY_LEN];
+    _mesa_blake3_final(&blake3_ctx, blake3);
+@@ -1158,6 +1163,8 @@ kk_parse_environment_options(struct kk_physical_device *pdev)
+          debug_get_bool_option("MESA_KK_GPU_CAPTURE_IMMEDIATELY", false);
+    }
+ 
++   settings->msl_opt = (uint32_t)debug_get_num_option("KK_MSL_OPT", 0);
++
+    const char *list = debug_get_option("MESA_KK_DISABLE_WORKAROUNDS", "");
+    const char *all_workarounds = "all";
+    const size_t all_len = strlen(all_workarounds);
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.h b/src/kosmickrisp/vulkan/kk_physical_device.h
+index 1c05ffc..d9ecb5d 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.h
++++ b/src/kosmickrisp/vulkan/kk_physical_device.h
+@@ -56,6 +56,8 @@ struct kk_env_settings {
+    bool gpu_capture_immediately;
+    const char *gpu_capture_dir;
+    uint64_t disabled_workarounds;
++   /* KK_MSL_OPT, see nir_to_msl.h */
++   uint32_t msl_opt;
+ };
+ 
+ struct kk_physical_device {
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 6e1b736..a87de7f 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1190,6 +1190,7 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+    struct nir_to_msl_options translate_options = {
+       .mem_ctx = NULL,
+       .disabled_workarounds = pdev->settings.disabled_workarounds,
++      .msl_opt = pdev->settings.msl_opt,
+    };
+ 
+    if (!apply_wa19)

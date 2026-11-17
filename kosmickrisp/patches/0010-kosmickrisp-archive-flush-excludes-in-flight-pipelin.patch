@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 00:01:11 +0000
+Subject: [PATCH] kosmickrisp: archive flush excludes in-flight pipeline
+ compiles
+
+Flushing the MTL4PipelineDataSetSerializer while a compile that records into
+it is running crashes inside Metal (-[_MTLBinaryArchive
+newArchiverIdWithBinaryKey:entry:srcArchiverId:functionType:], NULL dispatch
+data; Astro world map 2/2 runs, standalone probe 3/3). Compiles take a rwlock
+shared, flushes exclusive; the periodic flush only tries the lock and retries
+every 50 ms so a waiting writer never stalls compiles behind a long one.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.m | 59 +++++++++++++++++++++------
+ 1 file changed, 46 insertions(+), 13 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index ede11d1..8c8cb69 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -42,7 +42,8 @@
+  *    flush writes one NEW segment (tmp + rename) and adds it to the lookup
+  *    set. A flusher thread writes after KK_PIPELINE_ARCHIVE_FLUSH_N (32) new
+  *    pipelines or KK_PIPELINE_ARCHIVE_FLUSH_S (10) seconds, whichever comes
+- *    first, never on a compiling thread; the rest is written at compiler
++ *    first, never on a compiling thread and never while a compile is in
++ *    flight (see kk_compile_lock); the rest is written at compiler
+  *    release, at exit and on SIGTERM (KK_PIPELINE_ARCHIVE_SIGTERM=0 turns the
+  *    handler off; it chains to the previous disposition). Segments are read
+  *    ahead into the file cache in the background
+@@ -82,6 +83,14 @@ static NSArray<id<MTL4Archive>> *kk_archives;      /* lookup set, replaced as a
+ static NSMutableArray<NSString *> *kk_loaded_paths; /* segments present at start (compaction) */
+ static pthread_mutex_t kk_archives_lock = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_mutex_t kk_flush_lock = PTHREAD_MUTEX_INITIALIZER;
++/* Metal crashes (-[_MTLBinaryArchive newArchiverIdWithBinaryKey:...], NULL
++ * dispatch data) when the serializer is flushed while a pipeline compile that
++ * records into it is in flight. Compiles hold this lock shared, a flush holds
++ * it exclusive. The periodic flush only TRIES to take it, so a waiting writer
++ * never stalls new compiles behind a long one; it retries every 50 ms and
++ * runs in the first gap. Release / exit / SIGTERM flushes wait. */
++static pthread_rwlock_t kk_compile_lock = PTHREAD_RWLOCK_INITIALIZER;
++static _Atomic uint64_t kk_st_flush_deferred;
+ static MTL4CompilerTaskOptions *kk_task_options;   /* single-file and compact modes */
+ static NSURL *kk_archive_url;                      /* single-file mode */
+ static char kk_seg_dir[900];
+@@ -109,11 +118,12 @@ kk_stats_line(const char *why)
+ {
+    fprintf(stderr,
+            "[kk-archive] stats (%s): libraries %llu (%llu slow, %.0f ms), pipelines archive-hit %llu (%.0f ms) "
+-           "compiled %llu (%llu slow, %.0f ms), pending %llu, segments written %llu (%.1f MiB), loaded %.1f MiB\n",
++           "compiled %llu (%llu slow, %.0f ms), pending %llu, segments written %llu (%.1f MiB), loaded %.1f MiB, flush retries %llu\n",
+            why, (unsigned long long)kk_st_lib, (unsigned long long)kk_st_lib_slow, kk_st_lib_us / 1e3,
+            (unsigned long long)kk_st_hit, kk_st_hit_us / 1e3, (unsigned long long)kk_st_miss,
+            (unsigned long long)kk_st_miss_slow, kk_st_miss_us / 1e3, (unsigned long long)kk_st_pending,
+-           (unsigned long long)kk_st_segments, kk_st_seg_bytes / 1048576.0, kk_st_loaded_bytes / 1048576.0);
++           (unsigned long long)kk_st_segments, kk_st_seg_bytes / 1048576.0, kk_st_loaded_bytes / 1048576.0,
++           (unsigned long long)kk_st_flush_deferred);
+ }
+ 
+ static void
+@@ -190,11 +200,17 @@ kk_readahead(const char *path)
+ }
+ 
+ /* Segment mode: writes what the serializer holds as one new segment. */
+-static void
+-kk_flush_segment(const char *why)
++static bool
++kk_flush_segment(const char *why, bool wait)
+ {
+    if (!kk_serializer || !kk_seg_mode)
+-      return;
++      return true;
++   if (wait)
++      pthread_rwlock_wrlock(&kk_compile_lock);
++   else if (pthread_rwlock_trywrlock(&kk_compile_lock) != 0) {
++      kk_st_flush_deferred++;
++      return false;
++   }
+    @autoreleasepool {
+       pthread_mutex_lock(&kk_flush_lock);
+       uint64_t pending = atomic_exchange(&kk_st_pending, 0);
+@@ -243,15 +259,18 @@ kk_flush_segment(const char *why)
+       }
+       pthread_mutex_unlock(&kk_flush_lock);
+    }
++   pthread_rwlock_unlock(&kk_compile_lock);
++   return true;
+ }
+ 
+ void
+ mtl_compiler_flush_archive(void)
+ {
+    if (kk_seg_mode) {
+-      kk_flush_segment("release");
++      kk_flush_segment("release", true);
+       return;
+    }
++   pthread_rwlock_wrlock(&kk_compile_lock);
+    @autoreleasepool {
+       pthread_mutex_lock(&kk_flush_lock);
+       if (kk_serializer && kk_legacy_dirty) {
+@@ -267,13 +286,14 @@ mtl_compiler_flush_archive(void)
+       }
+       pthread_mutex_unlock(&kk_flush_lock);
+    }
++   pthread_rwlock_unlock(&kk_compile_lock);
+ }
+ 
+ static void
+ kk_archive_exit(void)
+ {
+    if (kk_seg_mode)
+-      kk_flush_segment("exit");
++      kk_flush_segment("exit", true);
+    else
+       mtl_compiler_flush_archive();
+    if (kk_stats_s > 0.0)
+@@ -304,14 +324,15 @@ kk_flusher_main(void *arg)
+          [(NSArray *)arg release];
+       }
+    }
++   bool retry = false;
+    for (;;) {
+       struct pollfd pfd = {.fd = kk_wake_pipe[0], .events = POLLIN};
+-      int r = poll(&pfd, 1, 1000);
++      int r = poll(&pfd, 1, retry ? 50 : 1000);
+       if (r > 0) {
+          char c = 0;
+          (void)!read(kk_wake_pipe[0], &c, 1);
+          if (c == 'T') {
+-            kk_flush_segment("sigterm");
++            kk_flush_segment("sigterm", true);
+             if (kk_stats_s > 0.0)
+                kk_stats_line("sigterm");
+             /* Hand the signal on to whoever had it before (default: die). */
+@@ -324,7 +345,9 @@ kk_flusher_main(void *arg)
+       uint64_t pending = kk_st_pending, first = kk_st_first_pending_ms;
+       if (kk_seg_mode && !kk_compact && pending &&
+           (pending >= kk_flush_n || (first && now - (double)first >= kk_flush_s * 1e3)))
+-         kk_flush_segment("periodic");
++         retry = !kk_flush_segment("periodic", false);
++      else
++         retry = false;
+       if (kk_stats_s > 0.0 && now - last_stats >= kk_stats_s * 1e3) {
+          uint64_t sum = kk_st_lib + kk_st_hit + kk_st_miss + kk_st_segments;
+          if (sum != last_sum)
+@@ -734,10 +757,15 @@ mtl_new_compute_pipeline_state(mtl_compiler *compiler,
+       double t0 = kk_now_ms();
+       id<MTLComputePipelineState> pipeline = kk_archive_lookup(nil, desc);
+       bool hit = pipeline != nil;
+-      if (!hit)
++      if (!hit) {
++         if (kk_serializer)
++            pthread_rwlock_rdlock(&kk_compile_lock);
+          pipeline = [comp newComputePipelineStateWithDescriptor:desc
+                                             compilerTaskOptions:kk_task_options
+                                                           error:&error];
++         if (kk_serializer)
++            pthread_rwlock_unlock(&kk_compile_lock);
++      }
+       kk_note_pipeline(hit, kk_now_ms() - t0);
+ 
+       if (pipeline == nil) {
+@@ -860,10 +888,15 @@ mtl_new_render_pipeline(mtl_compiler *compiler, mtl_render_pass_descriptor *desc
+       double t0 = kk_now_ms();
+       id<MTLRenderPipelineState> pipeline = kk_archive_lookup(desc, nil);
+       bool hit = pipeline != nil;
+-      if (!hit)
++      if (!hit) {
++         if (kk_serializer)
++            pthread_rwlock_rdlock(&kk_compile_lock);
+          pipeline = [comp newRenderPipelineStateWithDescriptor:desc
+                                            compilerTaskOptions:kk_task_options
+                                                          error:&error];
++         if (kk_serializer)
++            pthread_rwlock_unlock(&kk_compile_lock);
++      }
+       kk_note_pipeline(hit, kk_now_ms() - t0);
+ 
+       if (pipeline == nil) {

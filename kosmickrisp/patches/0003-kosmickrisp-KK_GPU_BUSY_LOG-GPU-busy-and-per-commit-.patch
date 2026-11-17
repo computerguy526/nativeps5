@@ -1,0 +1,277 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 21:12:29 +0000
+Subject: [PATCH] kosmickrisp: KK_GPU_BUSY_LOG GPU busy and per-commit GPU time
+ from commit feedback (kprof)
+
+Measurement aid, off by default. No counter heaps.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_dispatch.c |  10 ++
+ src/kosmickrisp/vulkan/kk_cmd_draw.c     |   6 +
+ src/kosmickrisp/vulkan/kk_queue.c        | 175 +++++++++++++++++++++++
+ 3 files changed, 191 insertions(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+index 4df22e7..734e97f 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+@@ -17,6 +17,10 @@
+ 
+ #include "vk_common_entrypoints.h"
+ 
++void kk_prof_dispatch(void *cmd, uint32_t msl_len, uint32_t lx, uint32_t ly, uint32_t lz);
++void kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol, uint32_t dfmt);
++
++
+ static void
+ kk_flush_compute_state(struct kk_cmd_buffer *cmd)
+ {
+@@ -79,6 +83,9 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+ 
+    struct kk_shader *cs = cmd->state.shaders[MESA_SHADER_COMPUTE];
+    struct mtl_size local_size = cs->info.cs.local_size;
++   kk_prof_dispatch(cmd, cs->msl_z[MESA_SHADER_COMPUTE].raw_len ? cs->msl_z[MESA_SHADER_COMPUTE].raw_len
++                         : (cs->msl_data[MESA_SHADER_COMPUTE].code ? (uint32_t)strlen(cs->msl_data[MESA_SHADER_COMPUTE].code) + 1 : 0),
++                    (uint32_t)local_size.x, (uint32_t)local_size.y, (uint32_t)local_size.z);
+ 
+    mtl_compute_encoder *encoder = cs_get_compute(cmd);
+    if (cmd->state.cond_render.enabled) {
+@@ -128,6 +135,9 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+ 
+    struct kk_shader *cs = cmd->state.shaders[MESA_SHADER_COMPUTE];
+    struct mtl_size local_size = cs->info.cs.local_size;
++   kk_prof_dispatch(cmd, cs->msl_z[MESA_SHADER_COMPUTE].raw_len ? cs->msl_z[MESA_SHADER_COMPUTE].raw_len
++                         : (cs->msl_data[MESA_SHADER_COMPUTE].code ? (uint32_t)strlen(cs->msl_data[MESA_SHADER_COMPUTE].code) + 1 : 0),
++                    (uint32_t)local_size.x, (uint32_t)local_size.y, (uint32_t)local_size.z);
+ 
+    mtl_compute_encoder *encoder = cs_get_compute(cmd);
+    if (cmd->state.cond_render.enabled) {
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index eb52cd2..e1ccfb1 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -9,6 +9,9 @@
+ 
+ #include "kk_entrypoints.h"
+ 
++void kk_prof_dispatch(void *cmd, uint32_t msl_len, uint32_t lx, uint32_t ly, uint32_t lz);
++void kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol, uint32_t dfmt);
++
+ #include "kk_buffer.h"
+ #include "kk_cmd_buffer.h"
+ #include "kk_format.h"
+@@ -293,6 +296,9 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+    kk_attachment_init(&render->stencil_att, pRenderingInfo->pStencilAttachment);
+    kk_merge_render_iview(&framebuffer_extent,
+                          render->depth_att.iview ?: render->stencil_att.iview);
++   kk_prof_render(cmd, framebuffer_extent.width, framebuffer_extent.height,
++                  render->color_att_count ? render->color_att[0].vk_format : 0,
++                  render->color_att_count, render->depth_att.vk_format);
+ 
+    const VkRenderingFragmentShadingRateAttachmentInfoKHR *fsr_att_info =
+       vk_find_struct_const(pRenderingInfo->pNext,
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index 5509318..d8cd4ef 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -50,9 +50,166 @@ check_device_lost(struct kk_device *dev, struct mtl_feedback_data *data)
+    }
+ }
+ 
++/* kprof: KK_GPU_BUSY_LOG=<seconds>: GPU busy time from the commit feedback's GPUStartTime/GPUEndTime
++ * (no counter heaps). One stderr line per period: commits, union of the GPU intervals, their sum. */
++#include <stdio.h>
++#include <stdlib.h>
++static unsigned kk_prof_periods;
++static unsigned kk_prof_n_render, kk_prof_n_dispatch;
++static void kk_prof_dump(void);
++static void
++kk_gpu_busy_note(double start, double end)
++{
++   static int period = -1;
++   static mtx_t lock;
++   static double win_start, last_end, busy, sum, max_span;
++   static unsigned commits;
++   bool dump = false;
++   if (period == 0)
++      return;
++   if (period < 0) {
++      const char *e = getenv("KK_GPU_BUSY_LOG");
++      int p = e ? atoi(e) : 0;
++      if (p > 0)
++         mtx_init(&lock, mtx_plain);
++      period = p > 0 ? p : 0;
++      if (period == 0)
++         return;
++   }
++   if (!(end > start) || start <= 0.0)
++      return;
++   mtx_lock(&lock);
++   if (win_start == 0.0) {
++      win_start = start;
++      last_end = start;
++   }
++   double from = start > last_end ? start : last_end;
++   if (end > from)
++      busy += end - from;
++   if (end > last_end)
++      last_end = end;
++   sum += end - start;
++   if (end - start > max_span)
++      max_span = end - start;
++   commits++;
++   if (last_end - win_start >= (double)period) {
++      double wall = last_end - win_start;
++      fprintf(stderr, "[kk-gpu] %.1f s: commits %u, busy %.1f ms/s (%.1f%%), sum %.1f ms/s, max span %.2f ms, render passes %u, dispatches %u\n",
++              wall, commits, busy * 1000.0 / wall, busy * 100.0 / wall, sum * 1000.0 / wall, max_span * 1000.0,
++              __atomic_exchange_n(&kk_prof_n_render, 0, __ATOMIC_RELAXED), __atomic_exchange_n(&kk_prof_n_dispatch, 0, __ATOMIC_RELAXED));
++      win_start = last_end;
++      busy = sum = max_span = 0.0;
++      commits = 0;
++      dump = (++kk_prof_periods % 3u) == 0u;
++   }
++   mtx_unlock(&lock);
++   if (dump)
++      kk_prof_dump();
++}
++
++/* kprof: per-commit content signature (render target sizes/formats, compute shaders by MSL length and
++ * local size) -> GPU time by signature. Only with KK_GPU_BUSY_LOG. */
++#include <string.h>
++#define KK_PROF_SIG 160
++void kk_prof_dispatch(void *cmd, uint32_t msl_len, uint32_t lx, uint32_t ly, uint32_t lz);
++void kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol, uint32_t dfmt);
++struct kk_prof_slot { void *cmd; char sig[KK_PROF_SIG]; };
++struct kk_prof_agg { char sig[KK_PROF_SIG]; double gpu; unsigned commits; };
++static struct kk_prof_slot kk_prof_slots[64];
++static struct kk_prof_agg kk_prof_aggs[512];
++static unsigned kk_prof_nagg;
++static mtx_t kk_prof_lock;
++static int kk_prof_on = -1;
++static bool
++kk_prof_enabled(void)
++{
++   if (kk_prof_on < 0) {
++      static mtx_t init;
++      const char *e = getenv("KK_GPU_BUSY_LOG");
++      (void)init;
++      mtx_init(&kk_prof_lock, mtx_plain);
++      kk_prof_on = e && atoi(e) > 0;
++   }
++   return kk_prof_on;
++}
++static void
++kk_prof_token(void *cmd, const char *tok)
++{
++   mtx_lock(&kk_prof_lock);
++   struct kk_prof_slot *slot = NULL, *free_slot = NULL;
++   for (unsigned i = 0; i < 64; i++) {
++      if (kk_prof_slots[i].cmd == cmd) { slot = &kk_prof_slots[i]; break; }
++      if (!kk_prof_slots[i].cmd && !free_slot) free_slot = &kk_prof_slots[i];
++   }
++   if (!slot && free_slot) { slot = free_slot; slot->cmd = cmd; slot->sig[0] = 0; }
++   if (slot && !strstr(slot->sig, tok) && strlen(slot->sig) + strlen(tok) + 2 < KK_PROF_SIG) {
++      strcat(slot->sig, tok);
++      strcat(slot->sig, " ");
++   }
++   mtx_unlock(&kk_prof_lock);
++}
++void
++kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t ncol, uint32_t dfmt)
++{
++   if (!kk_prof_enabled()) return;
++   char tok[48];
++   __atomic_fetch_add(&kk_prof_n_render, 1, __ATOMIC_RELAXED);
++   snprintf(tok, sizeof(tok), "R%ux%u/c%u*%u/d%u", w, h, cfmt, ncol, dfmt);
++   kk_prof_token(cmd, tok);
++}
++void
++kk_prof_dispatch(void *cmd, uint32_t msl_len, uint32_t lx, uint32_t ly, uint32_t lz)
++{
++   if (!kk_prof_enabled()) return;
++   char tok[48];
++   __atomic_fetch_add(&kk_prof_n_dispatch, 1, __ATOMIC_RELAXED);
++   snprintf(tok, sizeof(tok), "C%u/%ux%ux%u", msl_len, lx, ly, lz);
++   kk_prof_token(cmd, tok);
++}
++struct kk_prof_wrap { mtl_feedback_handler_callback cb; void *data; char sig[KK_PROF_SIG]; };
++static int
++kk_prof_cmp(const void *a, const void *b)
++{
++   double d = ((const struct kk_prof_agg *)b)->gpu - ((const struct kk_prof_agg *)a)->gpu;
++   return d > 0 ? 1 : d < 0 ? -1 : 0;
++}
++static void
++kk_prof_callback(struct mtl_feedback_data *data)
++{
++   struct kk_prof_wrap *w = data->user_data;
++   double span = data->gpu_end > data->gpu_start ? data->gpu_end - data->gpu_start : 0.0;
++   mtx_lock(&kk_prof_lock);
++   struct kk_prof_agg *agg = NULL;
++   for (unsigned i = 0; i < kk_prof_nagg; i++)
++      if (!strcmp(kk_prof_aggs[i].sig, w->sig)) { agg = &kk_prof_aggs[i]; break; }
++   if (!agg && kk_prof_nagg < 512) { agg = &kk_prof_aggs[kk_prof_nagg++]; strcpy(agg->sig, w->sig); agg->gpu = 0; agg->commits = 0; }
++   if (agg) { agg->gpu += span; agg->commits++; }
++   mtx_unlock(&kk_prof_lock);
++   data->user_data = w->data;
++   w->cb(data);
++   free(w);
++}
++static void
++kk_prof_dump(void)
++{
++   mtx_lock(&kk_prof_lock);
++   double total = 0;
++   for (unsigned i = 0; i < kk_prof_nagg; i++) total += kk_prof_aggs[i].gpu;
++   qsort(kk_prof_aggs, kk_prof_nagg, sizeof(kk_prof_aggs[0]), kk_prof_cmp);
++   fprintf(stderr, "[kk-prof] %u signatures, %.1f ms GPU in the window\n", kk_prof_nagg, total * 1000.0);
++   for (unsigned i = 0; i < kk_prof_nagg && i < 28; i++)
++      fprintf(stderr, "[kk-prof] %5.1f%% %8.1f ms %6u commits %.3f ms/commit | %s\n",
++              total > 0 ? kk_prof_aggs[i].gpu * 100.0 / total : 0.0, kk_prof_aggs[i].gpu * 1000.0,
++              kk_prof_aggs[i].commits, kk_prof_aggs[i].commits ? kk_prof_aggs[i].gpu * 1000.0 / kk_prof_aggs[i].commits : 0.0,
++              kk_prof_aggs[i].sig[0] ? kk_prof_aggs[i].sig : "(other: copies/blits/clears)");
++   kk_prof_nagg = 0;
++   mtx_unlock(&kk_prof_lock);
++}
++
+ static void
+ commit_callback(struct mtl_feedback_data *data)
+ {
++   kk_gpu_busy_note(data->gpu_start, data->gpu_end);
+    check_device_lost((struct kk_device *)data->user_data, data);
+ }
+ 
+@@ -64,6 +221,7 @@ rerecord_commit_callback(struct mtl_feedback_data *data)
+    struct kk_device *dev = kk_queue_device(queue);
+ 
+    check_device_lost(dev, data);
++   kk_gpu_busy_note(data->gpu_start, data->gpu_end);
+ 
+    /* Completion callbacks are called from multiple threads, so we need to
+     * ensure the access to queue resources is safe. */
+@@ -96,6 +254,23 @@ kk_queue_commit(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+    assert(kk_cmd_buffer_has_work(cmd));
+ 
+    mtl_commit_options *options = mtl_new_commit_options();
++   if (kk_prof_enabled()) {
++      struct kk_prof_wrap *w = malloc(sizeof(*w));
++      w->cb = callback;
++      w->data = user_data;
++      w->sig[0] = 0;
++      mtx_lock(&kk_prof_lock);
++      for (unsigned i = 0; i < 64; i++) {
++         if (kk_prof_slots[i].cmd == (void *)cmd) {
++            strcpy(w->sig, kk_prof_slots[i].sig);
++            kk_prof_slots[i].cmd = NULL;
++            break;
++         }
++      }
++      mtx_unlock(&kk_prof_lock);
++      callback = kk_prof_callback;
++      user_data = w;
++   }
+    mtl_commit_options_add_feedback_handler(options, callback, user_data);
+ 
+    mtl_command_queue_commit(queue->mtl_handle, &cmd->metal.cmd_buf, 1u,
