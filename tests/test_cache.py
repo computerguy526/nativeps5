@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for scripts/nps5lib/cache.py: stack key / Metal id derivation, status on fresh / partial / prepared / stale dirs,
 list merge and verify-list through a fake pipeline-list tool, prepare / record / check as dry runs and with a fake runner. No title is run."""
-import io, os, shutil, sys, tempfile, unittest, warnings
+import time, io, os, shutil, sys, tempfile, unittest, warnings
 warnings.simplefilter("ignore", ResourceWarning)
 from contextlib import redirect_stdout, redirect_stderr
 sys.dont_write_bytecode = True
@@ -185,10 +185,57 @@ class T(unittest.TestCase):
         def runner(cmd, env=None, capture=False):
             d = next(x.split("=", 1)[1] for x in cmd if x.startswith("KK_LIBCACHE_DIR=")); d = os.path.dirname(d)
             self.assertTrue(os.path.isfile(d + "/marker"))                      # the run sees a clone of the prepared cache
-            open(runs + "/run.err", "w").write("[kk-archive] stats libraries 0 (0 slow, 0 ms), pipelines archive-hit 9 (1 ms) compiled 0 (0 slow, 0 ms)\n"); return 0
+            open(runs + "/run.err", "w").write("[kk-archive] stats libraries 0 (0 slow, 0 ms), pipelines archive-hit 9 (1 ms) compiled 0 (0 slow, 0 ms)\n")
+            open(runs + "/run.json", "w").write("{}"); return 0
         rc, out, _ = self.run_main(["check", "PPSA00001", "--scene", "boot"], runner)
         self.assertEqual(rc, 0); self.assertIn("boot\t0\t0", out)
         self.assertTrue(os.path.isfile(os.path.join(c.dir, "marker")))          # the prepared cache itself is untouched
+        # a run that is refused (busy, rule) leaves the folder of the PREVIOUS check: its log must not be reported as this check
+        old = time.time() - 600; os.utime(runs + "/run.json", (old, old))
+        rc, out, _ = self.run_main(["check", "PPSA00001", "--scene", "boot"], lambda cmd, env=None, capture=False: 75)
+        self.assertEqual(rc, 1); self.assertIn("boot\t75\t-\t-", out); self.assertIn("not a measurement", out)
+        rc, out, _ = self.run_main(["check", "PPSA00001", "--scene", "boot"], lambda cmd, env=None, capture=False: 0)   # "ok" but no new run.json
+        self.assertEqual(rc, 1); self.assertIn("boot\tnorun", out)
+
+    def test_torn_prepared_record_is_not_prepared(self):
+        c = self.ctx(); os.makedirs(c.dir)
+        open(os.path.join(c.dir, "prepared.tsv"), "w").write("key=%s\n" % c.key)          # the writer died before the rc line
+        self.assertEqual(cache.status(c)[0], "partial")
+        calls = []
+        rc, _, _ = self.run_main(["prepare", "PPSA00001"], lambda cmd, env=None, capture=False: (calls.append(cmd), (0, "pipelines 5") if capture else 0)[1])
+        self.assertEqual(rc, 0); self.assertEqual(cache.status(self.ctx())[0], "prepared")
+        self.assertEqual([n for n in os.listdir(c.dir) if n.endswith(".tmp")], [])
+
+    def test_merge_with_a_failed_export_adopts_nothing(self):
+        for n in ("boot", "map"):
+            rec = os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "rec", n); os.makedirs(rec)
+            for j in ("pipelines", "shaders"): open(os.path.join(rec, "PPSA00001.%s.journal" % j), "w").write("j")
+        def runner(cmd, env=None, capture=False):
+            if "export" in cmd and any(x.endswith("map.kyplst") for x in cmd): return (1, "boom")
+            return cache.default_runner(cmd, env, capture)
+        rc, out, _ = self.run_main(["merge", "PPSA00001", "--rebuild", "--write"], runner)
+        self.assertEqual(rc, 1); self.assertIn("NOT adopted", out)
+        self.assertEqual(open(self.ctx().list_path, "rb").read(), b"1 2 3\n")
+
+    def test_public_layout_finds_the_kosmickrisp_identity(self):
+        import subprocess
+        work = os.path.join(self.tmp, "build", "kosmickrisp"); mesa = os.path.join(work, "mesa"); os.makedirs(mesa)
+        def g(*a, data=None): return subprocess.run(("git", "-C", mesa) + a, input=data, capture_output=True, check=True).stdout.decode().strip()
+        g("init", "-q")
+        g("fast-import", "--quiet", data=b"commit refs/heads/main\ncommitter T <t@example.invalid> 1 +0000\ndata 1\nc\nM 100644 inline f.c\ndata 6\nint a;\n\n")
+        g("symbolic-ref", "HEAD", "refs/heads/main"); g("reset", "-q", "--hard")
+        self.env.update(NPS5_STACK_KK="", NPS5_KK_WORK=work, NPS5_KK_DIR="")
+        pin = cache.stack_commits(self.env)["kk"]
+        self.assertEqual(pin, g("rev-parse", "--short=10", "HEAD"))
+        k0 = self.ctx().key
+        open(os.path.join(mesa, "f.c"), "w").write("int patched;\n")                 # the series applied, not committed
+        self.assertRegex(cache.stack_commits(self.env)["kk"], r"^%s\+[0-9a-f]{8}$" % pin)
+        self.assertNotEqual(self.ctx().key, k0)                                        # a changed driver source is a new cache key
+        _, out, _ = self.run_main(["status", "PPSA00001"]); self.assertNotIn("no commit known", out)
+
+    def test_gpu_from_the_titles_file_is_checked(self):
+        open(os.path.join(self.tmp, "titles", "PPSA00001.env"), "a").write("GPU=../../x\n")
+        rc, _, err = self.run_main(["status", "PPSA00001"]); self.assertEqual(rc, 2); self.assertIn("kyty or anyps5", err)
 
     # ---- merge / verify-list
     def test_merge_unions_with_the_committed_list_and_reports_counts(self):

@@ -10,7 +10,9 @@
   nps5 cache status  <id>                                              fresh | partial | prepared | stale (exit 0 only when prepared)
 
 Identity is derived, never typed. stack key = 8 hex of sha256(list sha256, Kyty commit, KosmicKrisp commit, ps5recomp commit,
-NPS5_HW_CACHE_KEY of hwpresets); cache dir = <scratch>/cache/<id>/<gpu>-<stack key>/; Metal cache id =
+NPS5_HW_CACHE_KEY of hwpresets). A commit is the checkout's HEAD, with +<hash of the uncommitted changes> when its tracked files
+differ (run.py commit_of); KosmicKrisp is read from $NPS5_KK_DIR, else $NPS5_KK_WORK or its mesa/ (the public layout, where the patch
+series is applied on the pinned commit without committing). cache dir = <scratch>/cache/<id>/<gpu>-<stack key>/; Metal cache id =
 com.nativeps5.<gpu>.<id>.<stack key>. A new list, a new KK / Kyty / ps5recomp commit or another GPU family / OS build gives a new
 key, so a stale cache is never reused silently. Compiled caches are never committed; only games/<id>/pipelines.kyplst and
 its .verified are. The runs go through `nps5 run` (title queue, memory limit, one GPU process); nothing here starts a game itself.
@@ -78,15 +80,16 @@ def hw_key(environ):
 
 def stack_commits(environ):
     e = environ
-    def pick(var, *dirs):
+    def pick(var, *dirs, of=runmod.commit_of):
         if e.get(var):
             return e[var]
         for d in dirs:
-            c = runmod.commit_of(d) if d else None
+            c = of(d) if d else None
             if c:
                 return c
         return "unknown"
-    return dict(kyty=pick("NPS5_STACK_KYTY", e.get("NPS5_KYTY_DIR")), kk=pick("NPS5_STACK_KK", e.get("NPS5_KK_DIR"), e.get("NPS5_KK_WORK")),
+    return dict(kyty=pick("NPS5_STACK_KYTY", e.get("NPS5_KYTY_DIR")),
+                kk=pick("NPS5_STACK_KK", e.get("NPS5_KK_DIR"), e.get("NPS5_KK_WORK"), of=runmod.kk_commit),
                 ps5recomp=pick("NPS5_STACK_RECOMP", e.get("NPS5_RECOMP_DIR")))
 
 
@@ -103,6 +106,8 @@ def context(tid, environ, commits=None, hw=None):
     tpath = os.path.join(environ.get("NPS5_PUBLIC_DIR", REPO), "titles", tid + ".env")
     titles = runmod.parse_titles_env(tpath, environ)
     gpu = titles.get("GPU") or p.one("gpu", "kyty")
+    if gpu not in ("kyty", "anyps5"):                 # it becomes part of folder names that are deleted and recreated
+        raise CacheError("GPU must be kyty or anyps5 (titles/%s.env)" % tid, 2)
     return Ctx(tid, environ, p, gpu, os.path.join(p.dir, "pipelines.kyplst"), commits or stack_commits(environ),
                hw or hw_key(environ), environ["NPS5_SCRATCH"], titles)
 
@@ -207,11 +212,13 @@ def status(ctx):
              "  list %s kyty %s kk %s ps5recomp %s hw %s" % (ctx.list_sha[:12], ctx.commits["kyty"], ctx.commits["kk"], ctx.commits["ps5recomp"], ctx.hw)]
     unk = [k for k in ("kyty", "kk", "ps5recomp") if ctx.commits[k] == "unknown"]
     if unk:
-        lines.append("  warning: no commit known for %s (set NPS5_KYTY_DIR / NPS5_KK_DIR / NPS5_RECOMP_DIR to git checkouts): the key does not track them" % ", ".join(unk))
+        lines.append("  warning: no commit known for %s (set NPS5_KYTY_DIR / NPS5_KK_DIR / NPS5_RECOMP_DIR to git checkouts, or NPS5_STACK_KYTY / "
+                     "NPS5_STACK_KK / NPS5_STACK_RECOMP to an identity): the key does not track them, so a cache built by another build of them "
+                     "would be reused" % ", ".join(unk))
     if ctx.list_sha == "none":
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
-    if prep is not None and prep.get("key") == ctx.key and prep.get("rc") in (None, "0"):
+    if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0":      # no rc line = a torn or foreign file, not a pass
         return "prepared", lines + ["  prepared %s (%s pipelines): %s" % (prep.get("date", "?"), prep.get("pipelines", "?"), ctx.dir)]
     if os.path.isdir(ctx.dir):
         return "partial", lines + ["  %s exists without a good prepared.tsv: run nps5 cache prepare %s" % (ctx.dir, ctx.tid)]
@@ -304,13 +311,14 @@ def cmd_merge(ctx, o, runner):
         raise CacheError("no recordings (run `nps5 cache record %s`, or give --from DIR holding %s.{shaders,pipelines}.journal)" % (ctx.tid, ctx.tid))
     out_dir = os.path.join(ctx.root, "lists"); os.makedirs(out_dir, exist_ok=True)
     lists = [] if (o["rebuild"] or not os.path.isfile(ctx.list_path)) else [ctx.list_path]
+    failed = []
     for d in recs:
         n = os.path.basename(d.rstrip("/"))
         out = os.path.join(out_dir, n + ".kyplst")
         r = runner([tool, "export", "--out", out, "--game", app0, "--shaders", os.path.join(d, ctx.tid + ".shaders.journal"),
                     "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", "nps5-cache-" + n], env=ctx.environ, capture=True)
         if r[0] != 0:
-            print("export %s FAILED:\n%s" % (n, r[1])); continue
+            print("export %s FAILED:\n%s" % (n, r[1])); failed.append(n); continue
         lists.append(out); print("export %s: ok" % n)
     cand = os.path.join(ctx.root, "merged.kyplst")
     r = runner([tool, "merge", "--out", cand] + lists, env=ctx.environ, capture=True)
@@ -319,8 +327,12 @@ def cmd_merge(ctx, o, runner):
     new = parse_info(runner([tool, "info", cand], env=ctx.environ, capture=True)[1])
     old = parse_info(runner([tool, "info", ctx.list_path], env=ctx.environ, capture=True)[1]) if os.path.isfile(ctx.list_path) else {}
     print("merged %d list(s)%s -> %s\n  %s" % (len(lists), " (rebuild: committed list not included)" if o["rebuild"] else "", cand, count_diff(old, new)))
+    if failed:
+        # a list merged from fewer recordings than were given is smaller than intended, silently so with --rebuild
+        print("merge: %d recording(s) could not be exported (%s): the candidate is incomplete and was NOT adopted" % (len(failed), ", ".join(failed)))
+        return 1
     if o["write"]:
-        shutil.copyfile(cand, ctx.list_path)
+        shutil.copyfile(cand, ctx.list_path + ".tmp"); os.replace(ctx.list_path + ".tmp", ctx.list_path)
         try: os.remove(ctx.list_path + ".verified")
         except OSError: pass
         print("wrote %s; its .verified is removed: run `nps5 cache verify-list %s` before committing" % (ctx.list_path, ctx.tid))
@@ -367,17 +379,20 @@ def cmd_prepare(ctx, o, runner):
     rc = _call(cmd, ctx, runner)
     lc = ctx.environ.get("NPS5_KK_LIBCACHE_BUILD")
     if rc == 0 and lc and os.path.isfile(lc) and os.path.isdir(os.path.join(ctx.dir, "kk-libcache", "msl")):
-        runner(["bash", lc, os.path.join(ctx.dir, "kk-libcache"), str(ctx.environ.get("NPS5_BUILD_JOBS", "4"))], env=ctx.environ)
+        if runner(["bash", lc, os.path.join(ctx.dir, "kk-libcache"), str(ctx.environ.get("NPS5_BUILD_JOBS", "4"))], env=ctx.environ) != 0:
+            print("prepare: warning: %s failed; the library cache is not built (pipelines are still prepared)" % lc)
     info = {}
     try:
         info = parse_info(runner([tool_path(ctx), "info", ctx.list_path], env=ctx.environ, capture=True)[1])
     except CacheError:
         pass
-    with open(os.path.join(ctx.dir, "prepared.tsv"), "w") as f:
+    pt = os.path.join(ctx.dir, "prepared.tsv")
+    with open(pt + ".tmp", "w") as f:
         f.write("# written by nps5 cache prepare; read by nps5 cache status (a key mismatch means stale)\n")
         for k, v in [("key", ctx.key), ("gpu", ctx.gpu), ("metal_id", ctx.metal), ("date", time.strftime("%Y-%m-%d", time.gmtime())),
                      ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?"))] + list(ctx.identity().items()):
             f.write("%s=%s\n" % (k, v))
+    os.replace(pt + ".tmp", pt)            # whole or absent: status never reads a half-written record
     print("prepare: rc=%s, %s" % (rc, ctx.dir))
     return 0 if rc == 0 else 1
 
@@ -397,6 +412,7 @@ def cmd_check(ctx, o, runner):
         raise CacheError("\n".join(lines) + "\ncache check needs a prepared cache for this stack: nps5 cache prepare %s" % ctx.tid)
     rows = ["scene\trc\tcompiled\tlibraries\tstalls>%dms\tstall_s\tworst_ms\tred" % STALL_MS]
     out_dir = os.path.join(ctx.root, "check-%s" % ctx.key); os.makedirs(out_dir, exist_ok=True) if not o["dry"] else None
+    bad = 0
     for s in scene_names(ctx, o["scene"]):
         d = os.path.join(ctx.root, "verify", ctx.key, s); mid = ctx.metal + ".v." + s
         words = cache_env(ctx.tid, d, mid) + [("KYTY_PROGRESS_TITLE_LOG", "1"), ("KYTY_PIPELINE_STATS", "1")]
@@ -408,25 +424,33 @@ def cmd_check(ctx, o, runner):
         om = os_metal_dir(ctx.metal)
         if om and os.path.isdir(om):
             clone_dir(om, os_metal_dir(mid))
-        rc = _call(cmd, ctx, runner)
         rd = os.path.join(ctx.scratch, "runs", ctx.tid, tag)
-        try:
-            import frames as fr
-            ms = fr.load_run_frames(rd).ms
-        except Exception:
-            ms = []
-        try:
-            err = open(os.path.join(rd, "run.err"), errors="replace").read()
-        except OSError:
-            err = ""
-        rows.append(check_row(s, rc, parse_check(err, ms)))
+        t_start = time.time()
+        rc = _call(cmd, ctx, runner)
+        ms, err = [], ""
+        # only this run's files: when the run was refused or never started, the folder still holds the previous check
+        fresh = os.path.isfile(os.path.join(rd, "run.json")) and os.stat(os.path.join(rd, "run.json")).st_mtime >= t_start - 2
+        if fresh:
+            try:
+                import frames as fr
+                ms = fr.load_run_frames(rd).ms
+            except Exception:
+                ms = []
+            try:
+                with open(os.path.join(rd, "run.err"), errors="replace") as f: err = f.read()
+            except OSError:
+                err = ""
+        bad += 1 if (rc != 0 or not fresh) else 0
+        rows.append(check_row(s, rc if fresh or rc != 0 else "norun", parse_check(err, ms)))
         rmtree_inside(d, ctx.root)
         if om: shutil.rmtree(os_metal_dir(mid), ignore_errors=True)
     if not o["dry"]:
         with open(os.path.join(out_dir, "check.tsv"), "w") as f:
             f.write("\n".join(rows) + "\n")
         print("\n".join(rows))
-    return 0
+        if bad:
+            print("cache check: %d scene run(s) failed or did not start; their rows are not a measurement" % bad)
+    return 1 if bad else 0
 
 
 def cmd_status(ctx, o, runner):
@@ -485,6 +509,8 @@ def main(argv, environ=None, runner=default_runner, ctx=None):
         print("nps5 cache: %s" % e, file=sys.stderr); return e.code
     except runmod.Refuse as e:
         print("nps5 cache: %s" % e, file=sys.stderr); return e.code
+    except OSError as e:
+        print("nps5 cache: %s" % e, file=sys.stderr); return 1
 
 
 if __name__ == "__main__":
