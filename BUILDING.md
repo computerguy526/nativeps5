@@ -174,7 +174,7 @@ reference until it is adapted to this layout.
 
 From fresh clones of the four repositories in an empty directory, with a scrubbed environment (`env -i`, PATH =
 Homebrew + system, an empty HOME, so cold Go and pip caches), at nice 10 with 4 jobs, while other work ran on the
-machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components at `components.lock` (recomp f1a5d35, Kyty d9cadb65,
+machine (2026-11-17, M4 Pro 24 GB, macOS 26). Components at `components.lock` (recomp f1a5d35, Kyty 3e0eab0,
 AnyPS5 bff91d13); the repositories were cloned from local copies because the GitHub URLs did not exist yet.
 
 | Step | Result | Time |
