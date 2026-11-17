@@ -165,7 +165,18 @@ class T(unittest.TestCase):
             joined = [" ".join(c) for c in self.calls]
             self.assertEqual(any("push" in j for j in joined), pushed, joined)
             self.assertEqual(any("pr create" in j for j in joined), pushed)
+            if pushed:      # the commit holds the two list files and nothing else that happens to be staged in the user's clone
+                commit = [c for c in self.calls if "commit" in c][0]
+                self.assertEqual([x for x in commit[commit.index("--") + 1:]], [c for c in self.calls if "add" in c][0][-2:])
+                self.assertTrue(all(x.startswith("games/PPSA00001/contrib/") for x in commit[commit.index("--") + 1:]))
             for f in self.contribs(): os.remove(os.path.join(self.gd, "contrib", f))
+        # no terminal to ask (end of input): nothing is pushed
+        self.calls.clear()
+        def eof(_p): raise EOFError
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = cache.cmd_share(cache.context("PPSA00001", dict(env), commits=tc.COMMITS), dict(cache.parse(["share", "PPSA00001", "--pr"])[2], confirm=eof), self.runner)
+        self.assertEqual(rc, 0); self.assertFalse(any("push" in " ".join(c) or "pr create" in " ".join(c) for c in self.calls))
+        for f in self.contribs(): os.remove(os.path.join(self.gd, "contrib", f))
 
     # ---- maintainer merge
     def share_one(self, text, name="a"):

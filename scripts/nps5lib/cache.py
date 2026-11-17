@@ -487,7 +487,10 @@ def cmd_share(ctx, o, runner):
         side = b""
     bad = kyplst_rules(rel, data, side)
     if bad:
-        print("share: the repository's list rules reject it:\n  " + "\n  ".join(bad)); return 1
+        for f in (dest, dest + ".verified"):
+            try: os.remove(f)
+            except OSError: pass
+        print("share: the repository's list rules reject it; it was deleted:\n  " + "\n  ".join(bad)); return 1
     print("share: passed the no-game-code proof and the list rules (one zstd frame, size cap, no payload).")
     ver = mi.get("version")
     title, body = pr_texts(ctx.tid, name, ver, new, cls, commit)
@@ -508,13 +511,17 @@ def open_pr(ctx, o, rel, h, title, body, runner):
              "git add %s %s.verified; git commit" % (rel, rel), "git push -u fork share-%s-%s   <- publishes to YOUR fork on GitHub" % (ctx.tid, h),
              "gh pr create   <- opens a public pull request"]
     print("\n--pr will run, in %s:\n  %s" % (REPO, "\n  ".join(steps)))
-    ans = (o.get("confirm") or input)("Push and open the pull request? [y/N] ")
+    try:
+        ans = (o.get("confirm") or input)("Push and open the pull request? [y/N] ")
+    except EOFError:                                       # no terminal to ask: the answer is no
+        ans = ""
     if ans.strip().lower() not in ("y", "yes"):
         print("Nothing was pushed or created."); return 0
     git = lambda *a: runner(["git", "-C", REPO] + list(a), env=ctx.environ, capture=True)
     runner(["gh", "repo", "fork", "--remote", "--remote-name", "fork"], env=ctx.environ, capture=True)
     br = "share-%s-%s" % (ctx.tid, h)
-    for cmd in (["switch", "-c", br], ["add", rel, rel + ".verified"], ["commit", "-m", title], ["push", "-u", "fork", br]):
+    # the commit names its two files: whatever else is staged in the user's clone is not committed and not published
+    for cmd in (["switch", "-c", br], ["add", rel, rel + ".verified"], ["commit", "-m", title, "--", rel, rel + ".verified"], ["push", "-u", "fork", br]):
         rc, text = git(*cmd)
         if rc != 0:
             print("share --pr: git %s failed: %s" % (cmd[0], scrub(text.strip()[-300:], ctx.environ))); return 1
