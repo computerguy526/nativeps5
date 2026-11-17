@@ -1,0 +1,112 @@
+# ASTRO BOT 01.007 (PS5, Team Asobi's own engine, AGC graphics). Schema: games/schema.tsv. See README.md for status and evidence.
+# key<TAB>value, comments on their own lines. No game data: identifiers, addresses, counts and switches only.
+# `game.py PPSA21564 --env [--gpu G] [--scene S]` turns this file (plus titles/kyty-preset.env for the kyty back end) into the env words.
+
+# ---- Identity ----
+title_id	PPSA21564
+name	ASTRO BOT
+engine	Team Asobi in-house (not Unreal); video through libSceAvPlayer; tbb worker pool
+graphics	AGC; compute-heavy (tiled lighting megakernels), mesh shaders, own temporal upscaler
+build	01.007	eboot=70d673f7c43edb18	size=251850759
+package	01.007
+stage	S7
+
+# ---- Translated binary lineages (one row per relink that was run; patches.py keeps the shift per lineage) ----
+lineage	base	recomp=ea42026	shift=0x0	first boot build of 01.007 (astro-boot2; the exact first commit was not recorded)
+lineage	ab2	recomp=ea42026	shift=0xcc0	lazy dispatch
+lineage	kyty3	recomp=1f34467	shift=0x7760	Kyty seam (kyty-seam-kb4)
+lineage	kyty5	recomp=9bc830c	shift=0x7d50	seam ABI 1.7, alias trim, self limit
+lineage	kyty6	recomp=ce4c7dd	shift=0x82f0	fault fix (eager readback); the canonical lineage
+lineage	kyty6_pb	recomp=f56778a	shift=0x86d8	kyty6 + video pitch fix (guest code moved by 0x3e8)
+lineage	int4	recomp=a2a0d0f	adaptive yield back-off; the AnyPS5 canonical binary (no patch shift recorded)
+canonical_lineage	kyty6
+patches_default	dr nt
+
+# ---- Back end ----
+gpu	kyty
+preset	titles/kyty-preset.env
+window	1920x1080
+direct_mem_mib	13824
+host_import_mib	16384
+guest_bias	0x10000000000
+gpu_profile_ban	on
+
+# ---- Run-time switches read by ps5recomp ----
+# real-time game speed: the game advances a fixed 1/60 s per frame from one global block {f64 60.0, f32 1/60, pad, u64 16666};
+# ps5recomp rewrites it from the measured frame time (verified layout, else off). Replaces the deprecated NPS5_ASTRO_REALTIME=1
+# (kept as an alias for one release; it meant exactly this address).
+framerate_block	0x93d4040 build=01.007
+# folder whose children are scenes: logs "[scene-open] <name> t=<s>" (and the legacy "[level-open]" alias) on first open
+scene_open_key	levels/
+marker	worldmap	open:levels/worldmap/
+run_secs	default=90	max=180
+blank_fail_s	90
+cache	kind=kyplst	limit_mb=448	app_ver=01.007.000
+
+# ---- Environment words (deltas over the preset; the reason for each is in README.md, "Canonical configuration and why") ----
+# Order matters: a later row for the same KEY wins. `when` is - or gpu=kyty|anyps5, build=, scene=, class=, and the hardware
+# conditions hw= hw!= gpufam= ram<= cores<= os>= (docs/reference/hardware.md). Rows for hardware nobody has run say `untested`.
+# never: KYTY_EOP_TIMESTAMPS=gpu (the preset's value; Metal counter heaps kernel-panicked the Mac on 2026-11-16)
+env	NPS5_WINDOW_TITLE_NAME=AstroBot	-	window title label
+env	kk_fake_depth_bounds=true	-	KosmicKrisp: Metal has depth bounds only on the newest GPU family
+env	APS5_TEX_MIP_SKIP=1	-	memory
+env	APS5_TEX_MIP_SKIP_LEVELS=2	gpu=anyps5,ram<=16	untested: 16 GB Mac, skip two levels
+env	NPS5_LAZY_DISPATCH=1	-	lazy dispatch lineage (ab2)
+env	KK_MSL_COMPRESS=1	-	smaller Metal source
+env	APS5_VK_PIPELINE_CACHE_MAX_MIB=2048	-	pipeline cache ceiling
+env	APS5_GS_GROUP_MAX_PRIMITIVES=64	-	geometry-shader emulation group size
+env	APS5_GDS_IMPORT=1	-	GDS import
+env	APS5_NO_VOLUME_DRAW_OWN_BATCH=1	-	volume draws share a batch (kk-poison fix)
+env	APS5_NO_MAP_IMPORT=1	-	Map imports as on-demand 64 MiB windows, about -1.5-2 GB
+env	NPS5_GPU=kyty	gpu=kyty	back end selector word
+env	NPS5_TS_POOL_MAX=48	gpu=kyty	timestamp pool size
+env	NPS5_KYTY_ALIAS_TRIM_MS=1000	gpu=kyty	alias views no longer count twice in the footprint
+env	KYTY_TEXTURE_RESIDENT_TRIM=1	gpu=kyty	memory
+env	KYTY_VRAM_BUDGET_MB=6144	gpu=kyty	24 GB Mac (measured; 7168 reaches the memory limit)
+env	KYTY_VRAM_BUDGET_MB=4096	gpu=kyty,ram<=16	untested: 16 GB Mac, a quarter of RAM
+env	KYTY_TEX_MIP_SKIP=2	gpu=kyty,ram<=16	untested: 16 GB Mac, large sampled textures start two levels down (needs the resident trim above)
+env	NPS5_KYTY_TRACE=0	gpu=kyty	no trace
+env	NPS5_KYTY_STATS=10	gpu=kyty	stats line every 10 s
+env	KYTY_PS_PER_VERTEX=unpack	gpu=kyty	per-vertex unpack
+env	KYTY_READBACK_EAGER_PAGES=256	gpu=kyty	hot set larger than the GPU-written pages the fluid workers sample
+env	KYTY_READ_FAULT_PUBLISHED_BURST=0	gpu=kyty	fault fix
+env	ASTROHYBRID_CACHE_TITLE_ID=PPSA21564	gpu=kyty	cache id inherited name
+env	KYTY_BUFFER_RANGE_FIXES=1	gpu=kyty	
+env	KYTY_GPU_WIDTH=1920	gpu=kyty	render size
+env	KYTY_GPU_HEIGHT=1080	gpu=kyty	render size
+env	KYTY_READ_FAULT_PUBLISHED=1	gpu=kyty	fault fix
+env	KYTY_HANG_WATCHDOG=0	gpu=kyty	off
+env	KYTY_CP_PASS_STATS=1	gpu=kyty	diagnostics
+env	KYTY_CP_GAP_STATS=1	gpu=kyty	diagnostics
+env	KYTY_DRAW_PREP_SPIN_US=10	gpu=kyty	release settings
+env	KYTY_DRAW_PREP_COLD_SPIN_US=5	gpu=kyty	release settings
+env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	honest GPU clock for the game's DRS (record-time clocks)
+env	KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S=20	gpu=kyty	pipeline cache saves
+env	KYTY_PIPELINE_CACHE_SAVE_QUIET_S=5	gpu=kyty	pipeline cache saves
+env	KYTY_PIPELINE_CACHE_SAVE_MIN_NEW=8	gpu=kyty	pipeline cache saves
+env	KK_METAL_CACHE_ID=com.nativeps5.kyty.PPSA21564	gpu=kyty	Metal cache id (the reference machine keeps its warm cache under this name)
+env	KK_METAL_CACHE_ID=com.nativeps5.kyty.PPSA21564.{gpufam}.{osbuild}	gpu=kyty,hw!=m4pro-24g	every other machine: GPU family and OS build in the id
+env	KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1	gpu=kyty	save on terminate
+env	KK_COMPILE_STATS=10	gpu=kyty	diagnostics
+env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
+env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
+env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
+
+# ---- Facts (for people and the README; no tool reads them) ----
+fact.display_buffer	3840x2160
+fact.pipeline_list_counts	shaders 741, permutations 765, pipelines 1260
+fact.pipeline_list_scenes	title, world map and 12 levels, first visits
+fact.prepare	scripts/prepare-pipelines.sh PPSA21564
+fact.level_peak_gib	16.3-17.8
+fact.guest_fixed_direct_memory	0x10_0000_0000 3.2 GB, 0x3_0000_0000 2 GiB
+fact.drs_controller	0x7818870
+fact.drs_level_site	0x7818971
+fact.drs_budget_ms	16.67
+fact.drs_upgrade_after_updates	31
+fact.drs_levels	1920x1080 2432x1368 3328x1872 3840x2160
+fact.drs_timer_source	end-of-pipe clock writes, about 880 per frame, read 3 frames back
+fact.upscale_target	2432x1368
+fact.scene_mode_site	0x77bcecc
+fact.level0_size_sites	0x77be670 0x74cef60
+fact.level_open_s	24-30
+fact.picture_after_first_frame_s	40-66

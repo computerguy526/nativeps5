@@ -1,0 +1,5 @@
+# The component commits this game was last green on (boots, picture checked, every route measured). One row per mode, the latest of each.
+# mode <TAB> kyty=<commit> kk=<commit> ps5recomp=<commit> lineage=<name>+<patches> date=<UTC day> class=<machine class> machine=<model> macos=<version>. No game data.
+# One row per mode AND machine class (docs/reference/hardware.md, "Adding a machine"); `scripts/nps5lib/hw.py class` prints yours.
+# Written by hand until a harness records it. A red result leaves the rows as they were.
+full	kyty=329f43a6 kk=8110779 ps5recomp=ce4c7dd lineage=kyty6+dr date=2026-11-17 class=m4pro-24g machine=Mac16,8 macos=26.6.2

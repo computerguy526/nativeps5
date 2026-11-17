@@ -1,0 +1,3 @@
+# The component commits this game was last green on. One row per mode, the latest of each.
+# mode <TAB> anyps5=<commit> kk=<series> ps5recomp=<commit> date=<UTC day> machine=<model> macos=<version>. No game data.
+# No row yet: the last integration was not recorded in this format.

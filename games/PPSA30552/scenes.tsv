@@ -1,0 +1,5 @@
+# name, args, pad, until, secs, save, description. See games/README.md. Pad: `-`, a file in pad/, or an inline `ms:action;...` / `f<frame>:action` script.
+menu	-	f40:tap=cross	first-present	40	new	Main menu (the press lands in the logos, so the run stays in the menu); static, so in-run A/B is valid here
+cutscene	-	20000:tap=cross	first-present	60	new	Intro cutscene after NEW GAME; about 25-70 s long
+gameplay	-	pad/gameplay_short.vpad	first-present	66	keep	Gameplay from a save: Continue at 11 s, then a 38 s recorded route (your own save, copied per run)
+gameplay_static	-	pad/static_short.vpad	first-present	66	keep	Continue, one nudge, no input: near-static garden for GPU-only A/Bs

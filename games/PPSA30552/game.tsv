@@ -1,0 +1,47 @@
+# A Game About Digging A Hole (PS5, Unreal Engine 5, AGC graphics). Schema: games/schema.tsv. See README.md; full history in docs/playbook.md.
+# key<TAB>value, comments on their own lines. No game data.
+
+# ---- Identity ----
+title_id	PPSA30552
+name	A Game About Digging A Hole
+engine	Unreal Engine 5 (Lumen, virtual shadow maps and Nanite available; turned down by the settings overlay)
+graphics	AGC; Slate UI composited at 3840x2160
+build	01.100	eboot=ec58cf9dd64cbde6	size=141554780
+package	01.100
+stage	S4
+
+# ---- Translated binary lineage ----
+# native_sf = savefix + introcrash; the commit of the first row is the ps5recomp merge that carries both (2500278)
+lineage	sf	recomp=2500278	savefix + introcrash (the canonical binary; native_int4 dies in the intro)
+canonical_lineage	sf
+
+# ---- Back end ----
+gpu	anyps5
+title_resolution	1280x720
+window	1920x1080
+gpu_profile_ban	on
+
+# ---- Environment words ----
+# engine console variables are applied at start (NPS5_UECVAR_SET_FOR in ms); the settings overlay mounted over /app0 selects the
+# lighter rendering path (see fact.overlay): the overlay directory itself is a machine path (titles/PPSA30552.env, NPS5_OVERLAY_DIR)
+env	kk_fake_depth_bounds=true	-	KosmicKrisp: Metal has depth bounds only on the newest GPU family, needed to replay pipelines
+env	APS5_WATCH_RUNS=1	-	run watcher on
+env	NPS5_UECVAR_SET_FOR=100000	-	console variables applied for the first 100 s (fast iteration runs)
+env	APS5_DUMP_FRAMES=3	-	three frame dumps per run
+env	APS5_DUMP_FRAMES_EVERY=500	-	one every 500 presents
+env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
+env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
+
+# ---- Timing / run limits ----
+run_secs	default=66	max=180
+cache	kind=none
+
+# ---- Facts ----
+fact.uecvar	Slate.ForceBackgroundBlurLowQualityOverride=1	menu blur override: changes the look, approved by the user
+fact.overlay	required: without the settings overlay the scene is dark and not comparable
+fact.display_buffer	3840x2160
+fact.footprint_gb	8.6-8.8
+fact.site_intro_crash	0x331c760+0x4a68	intro crash before the translator fix (vector lane liveness)
+fact.menu_press_ms	15000	a press before 15 s lands in the logos
+fact.gameplay_hud_s	75
+fact.content_version	01.100.000 (sce_sys/param.json contentVersion)

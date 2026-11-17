@@ -1,0 +1,5 @@
+# Benchmark routes: name, scene (scenes.tsv), window, class, description. Window <a>s..<b>s = seconds of run time (since the first presented frame).
+# Say the route with every number: the three differ by a factor of two. Class perf = quiet machine, AC power, no other GPU client.
+menu	menu	10s..40s	perf	Main menu; static, so in-run A/B is valid here
+cutscene	cutscene	25s..45s	perf	Intro cutscene after NEW GAME; about 25-70 s long
+gameplay_short	gameplay	34s..66s	perf	Gameplay from a save; a moving scene: whole runs per arm, medians of three, no in-run A/B

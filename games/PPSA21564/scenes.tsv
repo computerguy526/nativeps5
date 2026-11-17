@@ -1,0 +1,7 @@
+# name, args, pad, until, secs, save, description. See games/README.md. Pad: `-`, a file in pad/, or an inline `ms:action;...` script.
+title	-	-	marker:worldmap	90	new	Title screen (its backdrop is the world map scene); steady state after the logo video
+worldmap	-skipIntro	-	marker:worldmap	90	new	World map, no input
+hoover_beach	-skipIntro -lvl hoover_beach	pad/levels.vpad	scene:hoover_beach	180	new	First level: stick forward and Cross every 4 s from 40 s
+underwater_aerial_garden	-skipIntro -lvl underwater_aerial_garden	70000:ly=-1;72000:tap=cross;76000:tap=cross;80000:rx=0.6;82000:rx=0;84000:tap=cross;90000:tap=cross	scene:underwater_aerial_garden	180	new	Sky Garden: about 5,000 draws per frame, CPU-bound
+shuriken_ninja_castle	-skipIntro -lvl shuriken_ninja_castle	pad/levels.vpad	scene:shuriken_ninja_castle	180	new	Glider level: about 5,600 draws per frame, CPU-bound
+level:*	-skipIntro -lvl {name}	pad/levels.vpad	scene:{name}	180	new	Any level by its folder name (levels.md: 150-180 s cap, picture 40-66 s after the first frame)

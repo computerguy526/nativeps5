@@ -1,0 +1,9 @@
+# Benchmark routes: name, scene (scenes.tsv), window, class, description. Launch arguments and pad live in the scene.
+# Window: marker:<m>+<s> = from that many seconds after the marker (game.tsv) to 1 s before the end; present:<scene>+<n> = from the
+# n-th present after the scene opened; <a>s..<b>s = run seconds. Frame times before the window include loading and are not quoted.
+# Class perf = quiet machine, AC power, no other GPU client (docs/reference/profiling.md). Runs over 90 s need NPS5_RUN_REASON.
+title	title	marker:worldmap+15	perf	Title screen (its backdrop is the world map scene); steady state after the logo video
+worldmap	worldmap	marker:worldmap+15	perf	World map, no input
+hoover	hoover_beach	present:hoover_beach+1700	perf	First level: stick forward and Cross every 4 s from 40 s
+sky	underwater_aerial_garden	present:underwater_aerial_garden+1700	perf	Sky Garden: about 5,000 draws per frame, CPU-bound
+shuriken	shuriken_ninja_castle	present:shuriken_ninja_castle+1700	perf	Glider level: about 5,600 draws per frame, CPU-bound

@@ -1,0 +1,13 @@
+# games/hw-defaults.tsv: environment rows that depend on the machine and apply to EVERY title. Read by games/game.py --env after the
+# preset and before the profile's own rows (a profile row for the same KEY wins). Same columns as a profile env row:
+#   env<TAB>KEY=VALUE<TAB>when<TAB>why      when must hold a hardware condition (games/schema.tsv); a later row for the same KEY wins.
+# The reference machine (m4pro-24g: 10 performance cores, 24 GB) must match NO row here: its values are the code defaults and the
+# preset (tests/test_hw.py checks that, and that the rows equal the formulas in scripts/nps5lib/hw.py). Every row below is derived,
+# not measured: when you measure one on your machine, say so in the reason and add a validated.tsv row (docs/reference/hardware.md).
+
+# Kyty back end, pipeline compile workers while a game runs. Code defaults: journal 4, skip 3 (fit 10 performance cores).
+# journal = clamp(2/5 of the performance cores, 2, 4); skip = clamp(3/10, 1, 3). The same values also bound a pipeline prepare run.
+env	KYTY_PIPELINE_JOURNAL_THREADS=3	gpu=kyty,cores<=9	untested: 8-9 performance cores
+env	KYTY_PIPELINE_JOURNAL_THREADS=2	gpu=kyty,cores<=7	untested: 4-7 performance cores
+env	KYTY_PIPELINE_SKIP_THREADS=2	gpu=kyty,cores<=9	untested: 7-9 performance cores
+env	KYTY_PIPELINE_SKIP_THREADS=1	gpu=kyty,cores<=6	untested: 4-6 performance cores

@@ -1,0 +1,5 @@
+# Continue at 11.0 s then one 0.2 s forward nudge at 26.2 s then no input: near-static garden for GPU-only A/Bs. Without any input the scene stayed DARK (srw) so the nudge is a guess to leave the dark state, check luma
+11000:+cross
+11100:-cross
+26200:ly=-0.3
+26400:ly=0

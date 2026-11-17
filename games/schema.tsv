@@ -1,0 +1,70 @@
+# games/schema.tsv: every key a tool reads from games/<id>/game.tsv. Read by games/game.py (check, query, --env).
+# Columns (TAB separated): key, type, required, multi, allowed, default, readers, meaning
+#   required: yes / no.   multi: one (a second row is an error) / many (a key may repeat).
+#   allowed:  for enum the alternatives joined by |; for stage/other types a note; - = anything the type accepts.
+# Types (the value columns after the key; "text" joins all columns):
+#   text      free text, one or more columns
+#   id        title id (PPSA12345, CUSA12345, ...), must equal the folder name
+#   int       decimal integer >= 0
+#   hex       0x-prefixed hex number
+#   wxh       <width>x<height>
+#   wxh_opt   wxh or empty
+#   enum      one of `allowed`
+#   version   content version such as 01.007
+#   words     one or more space separated names, one column
+#   relpath   path relative to the repository (no leading / or ~, no ..)
+#   build     <version> eboot=<16 hex> [size=<n>] [sdk=<hex>] [free note]
+#   lineage   <name> recomp=<commit> [shift=<hex>] [free note]
+#   kvwords   key=value words (translate flags)
+#   envrow    KEY=VALUE [when] [why]; when = - or conditions joined by , : gpu=kyty|anyps5  build=<version or eboot prefix>  scene=<name>  class=func|perf
+#             and the hardware conditions hw=<machine class or chip> hw!=  gpufam=<g13..g17> gpufam!=  ram<=N ram>=N (GB)
+#             cores<=N cores>=N (performance cores)  os<=N os>=N (macOS major version)
+#   forbidrow KEY[=VALUE] [why]; refused from any source (profile, preset, --env), exit 78
+#   marker    <name> <spec>; spec = log:<regex> | open:<regex> | present:<n>
+#   runsecs   default=<s> max=<s>
+#   cache     kind=kyplst|none [limit_mb=<n>] [app_ver=<x.y.z>]
+#   addrbuild guest address (hex) [build=<version or eboot prefix>]
+#   stage     S0..S8 (evidence per stage is checked: see game.py STAGE_EVIDENCE)
+# Free keys: fact.<anything> is never read by a tool (people and the README only). Any other unknown key is an error.
+# Conditional env rows: `env<TAB>KYTY_X=1<TAB>gpu=kyty,class=perf<TAB>why`. All conditions must hold (AND). Only conditions whose
+#   input was given to `game.py --env` can hold: `scene=` needs --scene, `class=` needs --class; `gpu=` defaults to the profile gpu,
+#   `build=` to the package build. Later rows override earlier rows for the same KEY.
+# Hardware conditions (docs/reference/hardware.md): the machine comes from `--hw` (default auto = scripts/nps5lib/hw.py on this Mac, or
+#   NPS5_HW); with `--hw none` or an unknown machine no hardware condition holds. `hw=m4pro-24g` is one machine class, `hw=m4pro` every
+#   memory size of that chip. A VALUE may hold {gpufam}, {osbuild} and {hw}, filled from the machine (compiled-cache identities).
+#   A row for hardware nobody has run says `untested` in its reason. games/hw-defaults.tsv holds the hardware rows that apply to
+#   every title (after the preset, before the profile's rows).
+# Never raised by any key: NPS5_SELF_MEM_LIMIT_MB above 18944 in a profile row, and above 37/48 of this Mac's RAM in a composed
+#   environment (18944 on 24 GB; refused wherever it comes from).
+key	type	required	multi	allowed	default	readers	meaning
+title_id	id	yes	one	-	-	all	folder name must equal it
+name	text	yes	one	-	-	list, window title	label
+engine	text	no	one	-	-	list	label
+graphics	text	no	one	-	-	list	label
+build	build	yes	many	-	-	translate, patch, cache, regress	one row per build brought up; Build ID = first 16 hex of the eboot SHA-256
+package	version	yes	one	-	-	all	the build the tables, list and note were made on (must be a build row)
+modules	words	no	one	-	-	translate	modules translated beside eboot.bin, in load order
+translate	kvwords	no	one	-	-	translate	gpu=anyps5|kyty x87= call_model= addr_mode= hle_malloc= allow_unsupported=1 args=...
+translate_exclude	words	no	one	-	-	translate	-exclude-module names
+lineage	lineage	no	many	-	-	patch, validated	one row per relink that was run
+canonical_lineage	words	no	one	-	-	run	lineage `nps5 run` takes when titles/<id>.env names no binary
+patches_default	words	no	one	-	-	run	patches the canonical binary carries
+gpu	enum	yes	one	kyty|anyps5	-	run	default back end
+preset	relpath	no	one	-	-	run	env preset file for the default back end (titles/kyty-preset.env)
+env	envrow	no	many	-	-	run	env delta over the preset, optionally conditional
+env_forbidden	forbidrow	no	many	-	-	run	refused wherever it comes from
+gpu_profile_ban	enum	no	one	on|off	on	run	GPU counter profiling refused (a profile can only keep it on)
+window	wxh	no	one	-	-	run	window size
+title_resolution	wxh_opt	no	one	-	-	run	NPS5_TITLE_RESOLUTION
+direct_mem_mib	int	no	one	-	-	run	PS4_DIRECT_MEM_SIZE (MiB)
+host_import_mib	int	no	one	-	-	run	APS5_HOST_IMPORT_MIB (anyps5 only)
+guest_bias	hex	no	one	-	-	run, kyty	host = guest + bias
+framerate_block	addrbuild	no	many	-	-	run	NPS5_FRAMERATE_BLOCK
+marker	marker	no	many	-	-	run, bench, regress	a named point of a run
+scene_open_key	text	no	one	-	-	runtime	folder whose children are scenes (NPS5_SCENE_OPEN_KEY); empty = off
+run_secs	runsecs	no	one	-	-	run	soft cap and ceiling when the scene gives none
+blank_fail_s	int	no	one	-	-	run	early-stop black threshold, seconds
+stall_fail_s	int	no	one	-	-	run	early-stop stall threshold, seconds
+cache	cache	no	one	-	-	cache	which prepare step the title has
+uecvars	relpath	no	one	-	-	run	Unreal console-variable table
+stage	stage	no	one	S0|S1|S2|S3|S4|S5|S6|S7|S8	-	game.py check, README	bring-up stage reached
