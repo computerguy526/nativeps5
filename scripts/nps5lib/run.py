@@ -454,19 +454,13 @@ def gpu_others(sample_s=1.0):
     return sum((b[k] - a.get(k, 0)) / 1e6 / dt for k in b if not k[1].startswith("native_"))
 
 
-def gpu_processes():
-    try:
-        out = subprocess.run(["pgrep", "-fl", "agc_frame_replay|kk_spv|spvpipe|harness|/native_"], capture_output=True, text=True).stdout
-    except Exception:
-        return []
-    return other_gpu_lines(out.splitlines(), _ancestors())
-
-
-RUNNER_NAMES = ("nps5", "run-title.sh", "prepare-pipelines.sh")
+GPU_EXE = re.compile(r"^(native(_.*)?|agc_frame_replay.*|kk_spv.*|spvpipe.*|.*harness.*)$")      # executables that use the GPU
+GPU_SCRIPT = re.compile(r"(harness|spvpipe|kk_spv)[^/]*\.(py|sh)$")                                 # the same, started through an interpreter
+INTERPRETERS = re.compile(r"^(python[\d.]*|Python|bash|sh|zsh)$")
 
 
 def _ancestors(pid=None, limit=12):
-    """This process and its parents (a bench or regress that started this run names a native_ binary on its own command line)."""
+    """This process and its parents."""
     out, pid = set(), pid or os.getpid()
     while pid > 1 and len(out) < limit:
         out.add(pid)
@@ -475,18 +469,37 @@ def _ancestors(pid=None, limit=12):
     return out
 
 
-def other_gpu_lines(lines, mine):
-    """`pgrep -fl` lines that are another GPU-using process: not this process or a parent, and not an nps5 runner command
-    (whose arguments name the binary). The decision is by pid and by the command's own words, never by a substring of a path."""
+def gpu_users(comm_lines, args_lines, mine=()):
+    """-> ["<pid> <name>"] of the processes that use the GPU now, from `ps -axo pid=,comm=` and `ps -axo pid=,args=` lines.
+    Decided by the EXECUTABLE: a title binary (native, native_<lineage>) or a known GPU tool; for an interpreter, by the
+    script it runs. A command line that merely names a title binary is not a GPU user: a runner or wrapper script waiting
+    in the title queue (run_sandboxed.sh ... /path/native_x), a gtimeout in front of a title, an editor, a grep."""
+    args = {}
+    for l in args_lines:
+        pid, _, rest = l.strip().partition(" ")
+        if pid.isdigit(): args[int(pid)] = rest.strip()
     res = []
-    for l in lines:
-        pid, _, cmd = l.strip().partition(" ")
+    for l in comm_lines:
+        pid, _, comm = l.strip().partition(" ")
         if not pid.isdigit() or int(pid) in mine:
             continue
-        if any(os.path.basename(t) in RUNNER_NAMES for t in cmd.split()[:4]):
-            continue
-        res.append(l)
+        name = os.path.basename(comm.strip())
+        if GPU_EXE.match(name):
+            res.append("%s %s" % (pid, name))
+        elif INTERPRETERS.match(name):
+            script = next((t for t in args.get(int(pid), "").split()[1:] if not t.startswith("-")), "")
+            if GPU_SCRIPT.search(script):
+                res.append("%s %s" % (pid, os.path.basename(script)))
     return res
+
+
+def gpu_processes():
+    def ps(col):
+        return subprocess.run(["ps", "-axo", "pid=,%s=" % col], capture_output=True, text=True, errors="replace").stdout.splitlines()
+    try:
+        return gpu_users(ps("comm"), ps("args"), _ancestors())
+    except Exception:
+        return []
 
 
 def preflight(plan, power=power_source, others=gpu_others, procs=gpu_processes):
@@ -502,7 +515,7 @@ def preflight(plan, power=power_source, others=gpu_others, procs=gpu_processes):
         warn.append("other processes use the GPU: %.0f ms/s (WindowServer and other apps); perf numbers will be noisy" % o)
     pr = procs()
     if pr:
-        busy.append("another GPU-using process is running: " + pr[0].strip()[:80])
+        busy.append("another GPU-using process is running (pid name): " + ", ".join(x.strip()[:60] for x in pr[:8]) + (" and %d more" % (len(pr) - 8) if len(pr) > 8 else ""))
     if plan.cls == "perf" and (ps != "AC" or (o or 0) > 30):
         warn.append("this run is class perf: results should be marked NOISY")
     return warn, busy

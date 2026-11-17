@@ -125,15 +125,27 @@ class T(unittest.TestCase):
             run.REPO = repo
         self.assertEqual(c.exception.code, 2)
 
-    def test_other_gpu_process_is_judged_by_pid_and_command_not_path_text(self):
-        mine = {100, 50}
-        lines = ["100 python3 scripts/nps5 run PPSA00001 --bin /s/native_x", "50 python3 /r/scripts/nps5 bench PPSA00001 --arm A:bin=/s/native_a",
-                 "200 gtimeout 90 /ws/nps5-scratch/build/PPSA00001/native_kyty6", "201 /ws/nps5-scratch/build/PPSA00001/native_kyty6 -guest",
-                 "300 python3 -I /r/scripts/nps5 run PPSA00002 --bin /s/native_y", "301 /bin/bash /r/scripts/run-title.sh PPSA00002 60",
-                 "400 /t/agc_frame_replay cap4"]
-        got = [l.split()[0] for l in run.other_gpu_lines(lines, mine)]
-        self.assertEqual(got, ["200", "201", "400"])        # a title under a folder named nps5-* is still another title
+    def test_gpu_user_is_decided_by_the_executable_not_by_a_command_line(self):
+        comm = ["100 /usr/bin/python3", "50 /bin/bash",
+                "201 /ws/nps5-scratch/build/PPSA00001/native_kyty6", "202 /ws/b/native", "200 /opt/homebrew/bin/gtimeout",
+                "300 /bin/bash", "301 /bin/bash", "302 /bin/sh", "303 /usr/bin/python3", "304 /usr/bin/grep", "305 /usr/bin/vim",
+                "400 /t/agc_frame_replay", "401 /usr/bin/python3", "402 /t/kk_spv_gfx", "403 /Applications/My App.app/Contents/MacOS/My App"]
+        args = ["100 python3 scripts/nps5 run PPSA00001 --bin /s/native_x", "50 /bin/bash bench.sh /s/native_a",
+                "201 /ws/nps5-scratch/build/PPSA00001/native_kyty6 -guest", "202 /ws/b/native", "200 gtimeout 90 /ws/nps5-scratch/build/PPSA00001/native_kyty6",
+                "300 /bin/bash /w/run_sandboxed.sh /s/native_kyty6 90", "301 bash /w/run_astro.sh --bin /s/native_kyty6", "302 sh -c sleep 5; /s/native_x",
+                "303 python3 -I /r/scripts/nps5 run PPSA00002 --bin /s/native_y", "304 grep -r native_ /s/native_dir", "305 vim /s/native_notes.txt",
+                "400 /t/agc_frame_replay cap4", "401 python3 -u /t/shaderlab/harness.py --gpu", "402 /t/kk_spv_gfx a.spv", "403 /Applications/My App.app/Contents/MacOS/My App /s/native_x"]
+        # waiting wrappers, runners, a timeout wrapper, tools that only NAME a title binary: none of them holds the GPU
+        self.assertEqual(run.gpu_users(comm, args, mine={100, 50}), ["201 native_kyty6", "202 native", "400 agc_frame_replay", "401 harness.py", "402 kk_spv_gfx"])
+        waiting = (["%d /bin/bash" % p for p in range(500, 520)], ["%d /bin/bash /w/run_sandboxed.sh /s/native_kyty6 90" % p for p in range(500, 520)])
+        self.assertEqual(run.gpu_users(*waiting), [])                                   # 20 queued wrappers: the run may start
+        class P: cls = "func"
+        warn, busy = run.preflight(P, power=lambda: "AC", others=lambda: 0, procs=lambda: run.gpu_users(*waiting))
+        self.assertEqual(busy, [])
+        warn, busy = run.preflight(P, power=lambda: "AC", others=lambda: 0, procs=lambda: run.gpu_users(comm, args, {100, 50}))
+        self.assertIn("201 native_kyty6", busy[0]); self.assertIn("402 kk_spv_gfx", busy[0])      # the refusal names every pid
         self.assertIn(os.getpid(), run._ancestors())
+        self.assertIsInstance(run.gpu_processes(), list)                                # the real ps call parses
 
     def test_component_identity_names_changed_sources(self):
         import subprocess
@@ -236,6 +248,26 @@ class T(unittest.TestCase):
         p = self.plan(["--scene", "scn", "--until", "marker:m+5,stall:20"])
         j = run._watch().judge_for(p)
         self.assertEqual((j.blank_fail, j.stall_fail, j.until["kind"], j.until["arg"], j.until["n"]), (33.0, 20.0, "log", "READY", 5.0))
+
+
+class EnvScript(unittest.TestCase):
+    """scripts/nps5-env.sh reading nps5.conf (sourced by every script and by machine_env)."""
+    def env_of(self, conf):
+        import subprocess
+        d = tempfile.mkdtemp(); c = os.path.join(d, "nps5.conf"); open(c, "w").write(conf)
+        sh = os.path.join(HERE, "..", "scripts", "nps5-env.sh")
+        r = subprocess.run(["bash", "-c", '. "$1" && env', "_", sh], capture_output=True, text=True, env=dict(PATH=os.environ["PATH"], NPS5_CONF=c, NPS5_HW="m4pro-24g"))
+        return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l), r.stderr, d
+
+    def test_values_may_use_the_root_whatever_the_line_order(self):
+        e, _, _ = self.env_of("NPS5_SCRATCH=$NPS5_ROOT/scratch\nNPS5_KK_WORK=$NPS5_ROOT/build/kk        # Mesa checkout\nNPS5_ROOT=/ws root\n")
+        self.assertEqual(e["NPS5_ROOT"], "/ws root"); self.assertEqual(e["NPS5_SCRATCH"], "/ws root/scratch")     # was /scratch: expanded before the root was known
+        self.assertEqual(e["NPS5_KK_WORK"], "/ws root/build/kk")                                                   # no trailing blanks from the comment
+        self.assertEqual(e["NPS5_RECOMP_DIR"], "/ws root/ps5recomp")
+
+    def test_a_name_is_never_code(self):
+        e, err, d = self.env_of("NPS5_X;touch %s/pwned=1\nFOO=1\n" % tempfile.gettempdir())
+        self.assertFalse(os.path.exists(os.path.join(tempfile.gettempdir(), "pwned"))); self.assertIn("ignoring", err); self.assertNotIn("FOO", e)
 
 
 class FakeProc:
