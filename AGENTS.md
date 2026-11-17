@@ -39,7 +39,9 @@ each safety rule has its incident in [docs/reference/machine-safety.md](docs/ref
   found on), a row in [docs/agents/symptoms.md](docs/agents/symptoms.md) for the text someone will search for, and a
   link under the game note's "Found on this game".
 - A measured idea, win or loss: one dated row in [docs/learnings.md](docs/learnings.md).
-- A new environment switch: `scripts/gen_env_switches.py`, then its meaning in `docs/env_switches.tsv`.
+- A new environment switch: `scripts/gen_env_switches.py ps5recomp=<dir> anyps5=<dir> kyty=<dir>
+  kosmickrisp=<mesa>/src/kosmickrisp` (without the component folders only this repository's rows are refreshed),
+  then its meaning in `docs/env_switches.tsv`.
 - Link to a finding instead of repeating it. This file changes only when a rule does.
 
 ## Game data: never
@@ -61,7 +63,8 @@ each safety rule has its incident in [docs/reference/machine-safety.md](docs/ref
   hard-code a game.
 - A patch to a translated binary is described (guest address, instruction before and after, game build); the
   patched binary and the original bytes are never shared.
-- Run `scripts/check.sh` before every commit and `scripts/check.sh --range <base>..HEAD --tests` before a PR. Do not
+- Run `scripts/check.sh` before every commit and `scripts/check.sh --range <base>..HEAD --tests` before a PR (it
+  checks every commit of the range, so a file added and removed again is still found; `--history` checks all). Do not
   work around a finding by renaming a file or adding it to `.nps5-check-allow`; the allow list is only for fixtures
   built from source in the same folder, with a comment that says so.
 - No secrets, no personal data: no home-folder paths (use `$NPS5_ROOT`), no user or machine names, no e-mail

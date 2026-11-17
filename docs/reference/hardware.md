@@ -103,7 +103,7 @@ Compiled GPU code is valid for one GPU generation and one OS build. `hw.py cache
 | OS Metal cache (functions, libraries) | the bundle id `KK_METAL_CACHE_ID`; below it the OS keeps one folder per GPU architecture and discards entries of another OS build | the profile's `env KK_METAL_CACHE_ID=...` row. Use `com.nativeps5.<back end>.<title id>.{gpufam}.{osbuild}`: `game.py` fills the braces. ASTRO BOT keeps the unkeyed name on `m4pro-24g` only (its warm cache) and the keyed one everywhere else |
 | KosmicKrisp pipeline archive (`KK_PIPELINE_ARCHIVE_DIR`, `KK_PIPELINE_ARCHIVE`) | stamp = hash of format, KosmicKrisp version and commit, OS build (`kern.osversion`), Metal device name; a segment with another stamp is not opened | `kk_archive_stamp` in `bridge/mtl_compiler.m` (patch 0009). The device name is finer than the GPU family, so nothing was added |
 | Vulkan pipeline cache, program cache, journals under the work dir | the work dir's `cache/.hwkey` stamp | `nps5 run` (`keep_cache_per_hardware` in `scripts/nps5lib/run.py`): caches stamped with another key are set aside as `cache.<old key>` (never deleted, restored when that key returns) |
-| Prepared-cache directory and Metal cache id of `nps5 cache` (planned) | the stack key must hash `NPS5_HW_CACHE_KEY` together with the list and component commits | not built yet; this is the requirement |
+| Prepared-cache directory and Metal cache id of `nps5 cache` | the stack key: 8 hex of the hash of the list's SHA-256, the Kyty, KosmicKrisp and ps5recomp identities (commit, with `+<hash>` for uncommitted changes) and `NPS5_HW_CACHE_KEY` | `stack_key` in `scripts/nps5lib/cache.py`; `nps5 cache status <id>` prints the key and names what changed when a cache is stale |
 
 A committed pipeline list (`pipelines.kyplst`) holds keys and state only and is the same for every machine; the
 compiled result is not.
@@ -117,9 +117,10 @@ compiled result is not.
    class and cache key). Exit code 86 is the memory limit: report the
    footprint timeline, do not raise the limit. If a derived row is wrong for your machine, change the row (or add
    one for your class, `hw=<class>`, after the general rows) and say what you measured in its reason.
-4. On AC power and a quiet machine, record the benchmark routes: `nps5 bench <id> --record` appends a row with your
-   machine class to `games/<id>/validated.tsv` (until that command is in this tree, write the row by hand in the
-   format the file's header gives: `class=<machine class> machine=<model> macos=<version>`).
+4. On AC power and a quiet machine, run the regression routes: `nps5 regress check --games <id> --record` writes a
+   row with your machine class to `games/<id>/validated.tsv` when every route is green, every rule could be
+   checked and the components are committed sources. `nps5 bench <id> --route <name>` measures the benchmark
+   routes for the frame times you quote.
 5. In the pull request: the doctor output, the validated row, the rows you changed with `untested` removed only
    where you measured, and a line for the table at the top of this page. Frame times from a fanless machine or from
    battery power are not accepted as benchmarks; "boots, picture checked" still is worth a row.

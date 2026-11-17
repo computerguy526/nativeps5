@@ -1,3 +1,4 @@
 # The component commits this game was last green on. One row per mode, the latest of each.
-# mode <TAB> anyps5=<commit> kk=<series> ps5recomp=<commit> date=<UTC day> machine=<model> macos=<version>. No game data.
+# mode <TAB> anyps5=<commit> kk=<commit> ps5recomp=<commit> lineage=<name>+<patches> date=<UTC day> class=<machine class> machine=<model> macos=<version>. No game data.
+# Written by `nps5 regress check --record` (it needs a smoke.tsv, which this profile does not have yet).
 # No row yet: the last integration was not recorded in this format.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""nps5 cache: the pipeline list and the compiled caches of one title (bringup-design.md, section 5). Standard library only.
+"""nps5 cache: the pipeline list and the compiled caches of one title (games/README.md). Standard library only.
 
   nps5 cache record  <id> [--scene NAME ...] [--secs N] [--dry-run]   one first visit per scene into an EMPTY cache arm
   nps5 cache merge   <id> [--from DIR ...] [--rebuild] [--write]      export one list per recording, merge with the committed list

@@ -28,13 +28,25 @@ The folder holds:
   (`--list`, `--check`, apply to a copy, `--docs`) checks the embedded build ID, refuses on any mismatch, re-signs
   the copy and writes a `.patches.json` sidecar. The asserted words are the only bytes of a translated program in
   this repository; nothing else of a binary is ever added.
-- **`bench.tsv`** (optional): benchmark routes, one per line: name, launch arguments, pad script, measured window,
-  run seconds, run class, description. A frame time is quoted with the name of its route.
+- **`scenes.tsv`** (optional): the scenes a run can name (`nps5 run <id> --scene <name>`), one per line: name,
+  launch arguments, pad script (a file in `pad/` or an inline script), until (the target that ends the run, see
+  `scripts/nps5lib/watch.py`), seconds (`<s>` or `<s>/<max>`), save name, description. `level:*` is a template row;
+  `{name}` in it is filled from `level:<name>`.
+- **`pad/<name>.vpad`** (optional): pad scripts, input timings only.
+- **`bench.tsv`** (optional): benchmark routes for `nps5 bench`, one per line: name, scene (a `scenes.tsv` name),
+  measured window (`marker:<m>+<s>`, `present:<scene>+<n>` or `<a>s..<b>s`), run class (`perf` or `func`),
+  description. A frame time is quoted with the name of its route.
+- **`smoke.tsv`** (optional): regression routes for `nps5 regress`, one per line: name, scene, mode (`quick`, `full`
+  or `quick,full`), reach (`<until spec>@<seconds>`), `mem_max_mib` (peak footprint), `stall_ms_max` (largest frame
+  once steady), description.
 - **`validated.tsv`** (optional): the component commits this game was last green on, one row per mode and machine
   class, the latest of each: `mode<TAB>kyty=<commit> kk=<commit> ps5recomp=<commit> lineage=<name>+<patches>
-  date=<UTC day> class=<machine class> machine=<model> macos=<version>`
-  ([hardware.md](../docs/reference/hardware.md), "Adding a machine"). A red result leaves the rows as they were. It holds no game data; commit it
-  with the pull request that changes it.
+  date=<UTC day> class=<machine class> machine=<model> macos=<version>`; a title on the AnyPS5 back end has
+  `anyps5=<commit>` in place of `kyty=`. `kk=` reads `<Mesa pin>+<hash of the applied series>` when KosmicKrisp was
+  built from `kosmickrisp/` here ([hardware.md](../docs/reference/hardware.md), "Adding a machine"). Written by
+  `nps5 regress check --record`, only for a run in which every route was green and every rule could be checked,
+  from committed component sources; a red result leaves the rows as they were. `game.py check` reads the rows. It
+  holds no game data; commit it with the pull request that changes it.
 - **`pipelines.kyplst`** (optional) and **`pipelines.kyplst.verified`**: the pipeline list and the record of its
   no-game-code proof. See below.
 
@@ -60,12 +72,14 @@ binary. The back end reads a shader's code from your copy of the game and uses i
 2. `scripts/check.sh` accepts a `.kyplst` only as `games/<title id>/pipelines.kyplst`, only if it parses (known
    sections, sizes in bounds, nothing after the last section, the title ID of its folder), only if no decompressed
    section contains a shader binary or shader text (SPIR-V, Metal library, LLVM bitcode, ELF/SELF, MSL or AIR
-   text), and only with a `.verified` record whose hash matches these exact bytes. A changed list without a new
-   proof fails.
+   text) or nested compressed data, only if every section's stored bytes are exactly one zstd frame (a second or
+   skippable frame could carry a payload the decoder never shows), and only with a `.verified` record whose hash
+   matches these exact bytes. A changed list without a new proof fails.
 3. The record is an attestation by whoever ran the proof; the check cannot rerun it without the game. A maintainer
    reruns step 1 before a list is taken.
 
-**How to use a list.** `scripts/prepare-pipelines.sh <title id>` starts the title once in prepare mode: every
+**How to use a list.** `scripts/nps5 cache prepare <title id>` (`scripts/prepare-pipelines.sh <title id>` is the
+same call) starts the title once in prepare mode: every
 permutation and pipeline is built through KosmicKrisp from your own dump, and the process exits before the game
 runs (ASTRO BOT: 1,259 of 1,260 built in 85 s on an M4 Pro). It fills the Vulkan driver cache, the program cache,
 the KosmicKrisp pipeline archive and a private OS Metal cache.

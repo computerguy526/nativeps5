@@ -3,7 +3,7 @@
 (build, list, play, launcher, doctor, ...) passes through to the Go nps5 of ps5recomp.
   nps5 run <id> [--scene X] [--until SPEC] [--arm LABEL:K=V,...] [--class func|perf] [--secs N] [--dry-run] ...
   nps5 analyze|ab|pics|report ...   frame stats, noise-aware A/B, picture sheets, PR evidence (docs/agents/evidence.md)
-  nps5 cache record|merge|verify-list|prepare|check|status <id>   pipeline list and compiled caches (bringup-design.md, section 5)
+  nps5 cache record|merge|verify-list|prepare|check|status <id>   pipeline list and compiled caches (games/README.md, Pipeline lists)
   nps5 bench <id> --route NAME [--arm A:... --arm B:...]          benchmark routes of bench.tsv, ABBA, quiet-machine gate
   nps5 regress check|baseline|list [--quick] [--record]            smoke routes, green/red rule, validated.tsv
   nps5 patch <id> --list | --check <native> | <native> <names> [-o COPY]
