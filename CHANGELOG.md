@@ -51,11 +51,11 @@ fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1
 - **Fewer periodic stalls from the pipeline-cache saver.** The saver skips a rewrite when nothing changed, backs off,
   defers while frames are slow and runs at background I/O priority (`KYTY_PIPELINE_CACHE_SAVE_LEGACY=1` restores the old
   behaviour). `KYTY_MEMLOG=1` prints a 1 Hz `[mem]` line (footprint, resident, swap) and `[slowframe]` lines.
-- **Flight recorder, always on.** A light, bounded recorder (about 13 MB of rings, nothing on the hot path but a ring
-  write) keeps the last seconds of submissions, compile and file events and counters, and writes a dump when something goes
-  wrong (GPU watchdog, a frame or present stall over 2 s, the memory limit, a crash, SIGTERM). A dump holds ids, sizes,
-  hashes and timings only, no game bytes. `nps5 run` writes it to `<run dir>/flightrec`; `KYTY_FLIGHTREC=0` turns it off,
-  `=2` records every draw. Attach one to a bug report.
+- **Flight recorder (opt-in).** `KYTY_FLIGHTREC=1` turns on a light, bounded recorder (about 13 MB of rings, nothing on the hot
+  path but a ring write) that keeps the last seconds of submissions, compile and file events and counters and writes a dump
+  when something goes wrong (GPU watchdog, a frame or present stall over 2 s, the memory limit, a crash, SIGTERM). A dump
+  holds ids, sizes, hashes and timings only, no game bytes. `nps5 run` puts it in `<run dir>/flightrec`; `=2` records every
+  draw. Off by default; attach a dump (`<run dir>/flightrec`) and the `nps5 bug-report` zip to an issue, we decode them locally (README, Flight recorder).
 - **Symlinked dump folders.** `getdents`/`getdirentries` report a symlink's target type (file or folder) and hide dangling
   links, so a dump folder that is a tree of symlinks lists correctly (nps5's own translation does not build one; it
   matters for hand-assembled dumps).

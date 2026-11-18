@@ -1165,7 +1165,7 @@ KYTY_FAULT_COST_LOG	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP_SECONDS	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
-KYTY_FLIGHTREC	kyty	always-on flight recorder (v1.1): unset or 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
+KYTY_FLIGHTREC	kyty	flight recorder (v1.1; compiled in, OFF unless set): 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); unset or 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
 KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
 KYTY_FLIGHTREC_DIR	kyty	folder of flight-recorder dumps; nps5 run sets <run dir>/flightrec; default ./flightrec	src/common/flightRec.cpp
 KYTY_FLIGHTREC_EXIT	kyty	0 = no dump at process exit; default 1	src/common/flightRec.cpp

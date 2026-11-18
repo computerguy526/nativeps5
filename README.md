@@ -106,7 +106,16 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
 
 If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an issue with the command and its output.
 
-**Troubleshooting.** `nps5 doctor` checks the machine. After a run that stopped, crashed or looks wrong, `nps5 log --last` shows the log without the noise and ends with a SUMMARY block (verdict, fps, compiles, stalls, crashes, settings), and `nps5 bug-report` writes one zip of redacted text (log, versions, commits, settings, crash report) to attach to an issue; `--dry-run` lists what would go in. It never includes game files. See [docs/reference/logging.md](docs/reference/logging.md).
+**Troubleshooting.** `nps5 doctor` checks the machine. After a run that stopped, crashed or looks wrong, `nps5 log --last` shows the log without the noise and ends with a SUMMARY block (verdict, fps, compiles, stalls, crashes, settings), and `nps5 bug-report` writes one zip of redacted text (log, versions, commits, settings, crash report) to attach to an issue; `--dry-run` lists what would go in. It never includes game files. See [docs/reference/logging.md](docs/reference/logging.md). For a stall, a slow run or a run ended by a guard, also turn on the flight recorder (below).
+
+### Flight recorder (off by default)
+
+`KYTY_FLIGHTREC=1` turns on a small recorder in the Kyty back end (about 13 MB of memory, a ring write per event) that keeps the
+last seconds of submissions, compile and file events (files as hashes), memory samples and counters. It writes a dump when
+something goes wrong (GPU watchdog, a frame or present stall over 2 s, the memory limit, a crash, SIGTERM) and at exit. A dump holds
+ids, sizes, hashes and timings, no game bytes and no paths. `nps5 run` puts it in `<run dir>/flightrec` as `<tag>.<n>.<why>.flightrec`
+(otherwise `./flightrec`); the run logs are in the same run folder (`run.err`, `run.summary.txt`). Attach the `.flightrec` file and
+the `nps5 bug-report` zip to your issue, or send them to us; we decode them ourselves. `KYTY_MEMLOG=1` adds a once-a-second memory line.
 
 ## For developers
 
