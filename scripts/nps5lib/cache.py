@@ -12,6 +12,8 @@
                                                                       every listed pipeline in a start that exits before the game runs;
                                                                       two starts with KK's library cache (see below), --single-pass = one;
                                                                       then two short warm starts (window helper pipelines), --no-warm = none
+  nps5 cache metal   <id> [--dry-run]                                (re)generate our Metal kernels for the listed verified keys from this
+                                                                      cache's programs.bin (prepare does it between its passes; metal.py)
   nps5 cache check   <id> [--scene NAME ...] [--secs N] [--dry-run]   first-visit runs on a clone of the prepared cache: live compiles, stalls
   nps5 cache status  <id>                                              fresh | partial | prepared | stale (exit 0 only when prepared)
 
@@ -33,6 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import run as runmod  # noqa: E402
+import metal as metalmod  # noqa: E402
 
 STALL_MS = 250.0
 PREPARE_SECS = 1800
@@ -165,7 +168,8 @@ def launch_words(ctx, app0):
     compiles there, not at its first draw."""
     o = cache_opts(ctx.p)
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")),
-            ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")), ("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1")]
+            ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")), ("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1")] + \
+        metalmod.launch_words(ctx.dir, os.path.join(ctx.p.dir, metalmod.LIST_NAME), ctx.environ)[0]
 
 
 def run_cmd(tid, tag, scene, secs, words, cls="func"):
@@ -248,7 +252,9 @@ def status(ctx):
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
     if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0":      # no rc line = a torn or foreign file, not a pass
-        return "prepared", lines + ["  prepared %s (%s pipelines): %s" % (prep.get("date", "?"), prep.get("pipelines", "?"), ctx.dir)]
+        ms = metalmod.index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
+        mline = ["  Metal shaders: %d generated kernels%s" % (ms, "" if metalmod.enabled(ctx.environ) else " (off: NPS5_METAL_SHADERS=0)")] if ms or prep.get("metal_shaders") else []
+        return "prepared", lines + ["  prepared %s (%s pipelines): %s" % (prep.get("date", "?"), prep.get("pipelines", "?"), ctx.dir)] + mline
     if os.path.isdir(ctx.dir):
         return "partial", lines + ["  %s exists without a good prepared.tsv: run nps5 cache prepare %s" % (ctx.dir, ctx.tid)]
     others = []
@@ -692,6 +698,9 @@ def cmd_prepare(ctx, o, runner):
     if not os.path.isfile(ctx.list_path):
         raise CacheError("no %s" % ctx.list_path, 2)
     words = cache_env(ctx.tid, ctx.dir, ctx.metal) + prepare_words(ctx, app0)
+    mlist = metal_list(ctx)
+    if mlist:
+        words.append(("KK_MSL_OVERRIDE_LOG", "1"))     # pass 1: KK names every compute kernel it builds (how many listed keys it sees)
     # A prepare exits by itself when the list is built; --secs is only its ceiling. 180 s (the old default) cut a first prepare of
     # ~1,600 pipelines on a busy Mac (no until target: the watcher ends a run at its secs), so the default is 30 min.
     cmd = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words)
@@ -704,11 +713,16 @@ def cmd_prepare(ctx, o, runner):
 
     def fresh_dir(keep_libcache=False):
         keep = ctx.dir + ".libkeep"
+        mdir, mkeep = os.path.join(ctx.dir, metalmod.OUT_NAME), ctx.dir + ".metalkeep"
         if keep_libcache and os.path.isdir(lcdir):
             shutil.rmtree(keep, ignore_errors=True); os.replace(lcdir, keep)
+        if keep_libcache and os.path.isdir(mdir):
+            shutil.rmtree(mkeep, ignore_errors=True); os.replace(mdir, mkeep)
         rmtree_inside(ctx.dir, ctx.root); os.makedirs(ctx.dir)
         if os.path.isdir(keep):
             os.replace(keep, lcdir)
+        if os.path.isdir(mkeep):
+            os.replace(mkeep, mdir)
         if om and os.path.isdir(om):
             shutil.rmtree(om, ignore_errors=True)
 
@@ -730,7 +744,7 @@ def cmd_prepare(ctx, o, runner):
     # is the one later runs hit. Only pass 2's archive is kept. No builder, or nothing collected = a single pass, as before.
     rd = os.path.join(ctx.scratch, "runs", ctx.tid, "cache-prepare")
 
-    def one_pass(label):
+    def one_pass(label, cmd=cmd):
         # The window shows the loading card ("PREPARING SHADERS X / T") for the whole pass; the terminal gets the same count.
         print("prepare: %s: building the shader list; a window with the progress card is open, the game does not start" % label, flush=True)
         tail = ProgressTail(rd, label); tail.start()
@@ -744,13 +758,23 @@ def cmd_prepare(ctx, o, runner):
     if rc == 0:
         print("prepare: building Metal libraries from the collected shaders (no window; this takes a few minutes on a first prepare)", flush=True)
     nlib = build_libs() if rc == 0 else 0
+    mst = metal_step(ctx, runner, rd) if rc == 0 and mlist else None
     passes = 1
     if rc == 0 and nlib > 0 and not o.get("single"):
         print("prepare: pass 1 done (%d metallibs); pass 2 re-prepares with them" % nlib)
         fresh_dir(keep_libcache=True)
-        rc = one_pass("pass 2 of 2"); passes = 2
+        cmd2 = cmd
+        if mst and mst.get("written"):
+            # pass 2 compiles every generated kernel once, synchronously, under the progress card; KK collects its MSL, so the
+            # library build below makes its metallib and normal starts only load it (asynchronously)
+            mw = [("KK_MSL_OVERRIDE_DIR", os.path.join(ctx.dir, metalmod.OUT_NAME)), ("KK_MSL_OVERRIDE_ASYNC", "0")]
+            cmd2 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + mw)
+        rc = one_pass("pass 2 of 2", cmd2); passes = 2
         if rc == 0:
             nlib = build_libs()
+            if mst and mst.get("written"):
+                mst["active"], mst["failed"] = metalmod.override_counts(run_logs(rd))
+                print("prepare: Metal shaders: %d compiled, %d failed to compile (KosmicKrisp's own kernel is kept for those)" % (mst["active"], mst["failed"]))
     warm = 0
     if rc == 0 and passes == 2 and not o.get("nowarm"):
         warm = warm_starts(ctx, app0, o, runner, build_libs)
@@ -763,11 +787,65 @@ def cmd_prepare(ctx, o, runner):
     with open(pt + ".tmp", "w") as f:
         f.write("# written by nps5 cache prepare; read by nps5 cache status (a key mismatch means stale)\n")
         for k, v in [("key", ctx.key), ("gpu", ctx.gpu), ("metal_id", ctx.metal), ("date", time.strftime("%Y-%m-%d", time.gmtime())),
-                     ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?")), ("passes", passes), ("metallibs", nlib), ("warm", warm)] + list(ctx.identity().items()):
+                     ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?")), ("passes", passes), ("metallibs", nlib), ("warm", warm)] + metal_fields(mst) + list(ctx.identity().items()):
             f.write("%s=%s\n" % (k, v))
     os.replace(pt + ".tmp", pt)            # whole or absent: status never reads a half-written record
     print("prepare: rc=%s, %s" % (rc, ctx.dir))
     return 0 if rc == 0 else 1
+
+
+def metal_list(ctx):
+    """games/<id>/metal-shaders.tsv when this title has one and NPS5_METAL_SHADERS is not 0, else None."""
+    p = os.path.join(ctx.p.dir, metalmod.LIST_NAME)
+    return p if os.path.isfile(p) and metalmod.enabled(ctx.environ) else None
+
+
+def run_logs(rd):
+    t = ""
+    for n in ("run.err", "run.out"):
+        try:
+            with open(os.path.join(rd, n), "rb") as f:
+                t += f.read().decode(errors="replace")
+        except OSError:
+            pass
+    return t
+
+
+def metal_step(ctx, runner, rd=None, label="prepare: "):
+    """Generate <cache dir>/metal-shaders from the keys list and this cache's programs.bin (metal.py). Never fails a prepare:
+    any problem means KosmicKrisp's own kernels, as in v1.0. -> stats dict or None."""
+    mlist = metal_list(ctx)
+    if not mlist:
+        return None
+    print("%sgenerating our Metal kernels from your dump (CPU only, no window)" % label, flush=True)
+    seen = metalmod.seen_keys(run_logs(rd)) if rd else None
+    try:
+        st = metalmod.generate(mlist, os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid), os.path.join(ctx.dir, metalmod.OUT_NAME),
+                               ctx.environ, jobs=compile_jobs(ctx.environ), seen=seen or None, label=label)
+    except (metalmod.MetalError, OSError) as e:
+        print("%sMetal shaders: skipped (%s); KosmicKrisp's own kernels are used" % (label, e), flush=True)
+        return dict(listed=0, written=0, skipped=0, seen=None, reasons={}, error=str(e))
+    print(label + metalmod.summary(st), flush=True)
+    if st.get("seen") == 0 and st["written"]:
+        print("%swarning: KosmicKrisp built none of the listed kernels here (another KosmicKrisp / macOS MSL): nothing will be swapped" % label)
+    return st
+
+
+def metal_fields(st):
+    if not st:
+        return []
+    return [("metal_shaders", "%d/%d" % (st["written"], st["listed"])), ("metal_seen", "" if st.get("seen") is None else st["seen"]),
+            ("metal_active", st.get("active", "")), ("metal_failed", st.get("failed", ""))]
+
+
+def cmd_metal(ctx, o, runner):
+    if not metal_list(ctx):
+        print("no games/%s/%s, or NPS5_METAL_SHADERS=0: nothing to generate" % (ctx.tid, metalmod.LIST_NAME)); return 0
+    if o["dry"]:
+        print("[dry-run] would generate %s from %s and %s/%s.programs.bin" % (os.path.join(ctx.dir, metalmod.OUT_NAME), metal_list(ctx), ctx.dir, ctx.tid))
+        return 0
+    st = metal_step(ctx, runner, None, label="")
+    return 0 if st and not st.get("error") else 1
 
 
 def warm_starts(ctx, app0, o, runner, build_libs):
@@ -893,13 +971,13 @@ def parse(argv):
             pos.append(a)
         i += 1
     if len(pos) != 2:
-        raise CacheError("usage: nps5 cache record|merge|share|verify-list|prepare|check|status <id> [options]; see --help", 2)
+        raise CacheError("usage: nps5 cache record|merge|share|verify-list|prepare|metal|check|status <id> [options]; see --help", 2)
     if o["secs"] is not None and not re.fullmatch(r"\d+", o["secs"]):
         raise CacheError("--secs must be a number", 2)
     return pos[0], pos[1], o
 
 
-CMDS = {"record": cmd_record, "merge": cmd_merge, "share": cmd_share, "verify-list": cmd_verify_list, "prepare": cmd_prepare, "check": cmd_check, "status": cmd_status}
+CMDS = {"metal": cmd_metal, "record": cmd_record, "merge": cmd_merge, "share": cmd_share, "verify-list": cmd_verify_list, "prepare": cmd_prepare, "check": cmd_check, "status": cmd_status}
 
 
 def main(argv, environ=None, runner=default_runner, ctx=None):

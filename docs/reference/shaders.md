@@ -127,6 +127,24 @@ cannot simply be dropped: the game reads them ([rendering.md](rendering.md)).
   reboot. Cause not isolated. Check a new codegen bit with an offline GPU timing run before a title run.
 - Mesh shaders and stream-out vertex shaders cannot be decoded by `agxdis` yet; the hottest world-map shader is one.
 
+## Our Metal kernels (v1.1)
+
+Kyty has a second shader back end, `recompiler/backend/msl/`, that emits MSL directly from Kyty's IR (the same
+front end as the SPIR-V path), in KosmicKrisp's binding convention ("kk-bda": root table at `buffer(0)`, sampler
+table at `buffer(1)`, Kyty's descriptor set 0 in KosmicKrisp's layout). KosmicKrisp patch 0023 lets a run replace an
+application compute kernel: `KK_MSL_OVERRIDE_DIR=<dir>` holds `<b3>.metal`, where `<b3>` is the first 16 hex digits
+of the BLAKE3 of KosmicKrisp's own MSL for that kernel; the file starts with
+`// kk-mslinject v1 local_size X Y Z entry NAME math safe|relaxed|fast`. KosmicKrisp still builds its own pipeline,
+so a replacement that fails to compile changes nothing; `KK_MSL_OVERRIDE_ASYNC` (patch 0024, default 1) compiles
+replacements on a background queue and keeps KosmicKrisp's kernel until the replacement is published;
+`KK_MSL_OVERRIDE_PERIOD=<s>` alternates replacement and original inside one run (A/B); `KK_MSL_OVERRIDE_LOG=1`
+logs the key of every compute kernel. Which kernels are replaced is decided per title by the keys list
+`games/<id>/metal-shaders.tsv` and generated locally by `nps5 cache prepare` (scripts/nps5lib/metal.py; games/README.md).
+Rules for a row: bit-identical (or within 4 ulp for the documented relaxed-contraction class) to KosmicKrisp's kernel on
+seeded inputs in the differential harness, not slower, and part of a set that passed an in-game smoke and a play test.
+Ballots and votes use `simd_or` of lane bits (an `if`-converted `simd_ballot` sees all lanes on macOS 26), and LDS reads
+after LDS writes without a barrier get a simdgroup fence (Apple GPUs do not run 32 lanes in lockstep).
+
 ## `KK_MSL_OPT` bits
 
 A bit mask; the value is part of the pipeline cache key, so changing it means a cold cache. The default is 1039.

@@ -25,6 +25,7 @@ __pycache__/
 !/games/*/validated.tsv
 !/games/*/pipelines.kyplst
 !/games/*/pipelines.kyplst.verified
+!/games/*/metal-shaders.tsv
 !titles/README.md
 # local data of the offline shader tools (tools/xray, tools/agxdis): dumps and outputs, never committed
 /work/

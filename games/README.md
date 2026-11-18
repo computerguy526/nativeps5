@@ -52,6 +52,11 @@ The folder holds:
 - **`contrib/<date>-<hash>.kyplst`** and its **`.verified`** (optional, short-lived): lists shared by players with
   `nps5 cache share`, waiting to be folded into `pipelines.kyplst`; **`pipelines.contrib.tsv`**: one provenance row
   per folded contribution. See "Share your list".
+- **`metal-shaders.tsv`** (optional, v1.1): KEYS ONLY of the compute kernels verified with our own Metal translation
+  (Kyty's MSL back end) instead of KosmicKrisp's. Each row: program digest, specialization key, KosmicKrisp MSL key, sha256
+  of our MSL, local size, evidence tag. No shader code: `nps5 cache prepare` generates the kernels on the player's Mac from
+  the player's dump and keeps one only when it hashes to the listed sha256 (scripts/nps5lib/metal.py; `NPS5_METAL_SHADERS=0`
+  turns it off). `scripts/check.sh` accepts the file only as hashes, header lines and prose comments.
 
 ## Pipeline lists
 

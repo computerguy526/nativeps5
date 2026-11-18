@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 13:32:55 +0000
+Subject: [PATCH 25/25] kosmickrisp: nps5_kk_compile_stats (progcard):
+ in-flight/started/finished Metal compiles for the host's compile card
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.m | 34 +++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index 46d899d..e90969a 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -109,6 +109,34 @@ static _Atomic uint64_t kk_st_lib, kk_st_lib_slow, kk_st_lib_us, kk_st_hit, kk_s
+ static uint32_t kk_seg_seq;
+ static _Atomic uint64_t kk_st_dedupe, kk_st_mlhit;
+ 
++/* nps5 progcard: compile begin/end signal for the host's progress card. Every real Metal compile (MSL library,
++ * compute and render pipeline that the archives did not hold) is counted in flight; the host (Kyty) reads the three
++ * numbers through nps5_kk_compile_stats (dlsym on this image) and shows its compile card/badge while inflight > 0. */
++static _Atomic int32_t kk_cp_inflight;
++static _Atomic uint64_t kk_cp_started, kk_cp_finished;
++
++__attribute__((visibility("default"))) void
++nps5_kk_compile_stats(int32_t *inflight, uint64_t *started, uint64_t *finished)
++{
++   *inflight = atomic_load_explicit(&kk_cp_inflight, memory_order_relaxed);
++   *started = atomic_load_explicit(&kk_cp_started, memory_order_relaxed);
++   *finished = atomic_load_explicit(&kk_cp_finished, memory_order_relaxed);
++}
++
++static inline void
++kk_compile_begin(void)
++{
++   atomic_fetch_add_explicit(&kk_cp_started, 1, memory_order_relaxed);
++   atomic_fetch_add_explicit(&kk_cp_inflight, 1, memory_order_relaxed);
++}
++
++static inline void
++kk_compile_end(void)
++{
++   atomic_fetch_sub_explicit(&kk_cp_inflight, 1, memory_order_relaxed);
++   atomic_fetch_add_explicit(&kk_cp_finished, 1, memory_order_relaxed);
++}
++
+ static double
+ kk_now_ms(void)
+ {
+@@ -817,7 +845,9 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+       desc.options = opts;
+ 
+       NSError *error;
++      kk_compile_begin();
+       id<MTLLibrary> lib = [comp newLibraryWithDescriptor:desc error:&error];
++      kk_compile_end();
+       kk_note_library(kk_now_ms() - lib_t0, strlen(src));
+ 
+       if (lib == nil) {
+@@ -864,9 +894,11 @@ mtl_new_compute_pipeline_state(mtl_compiler *compiler,
+       if (!hit) {
+          if (kk_serializer)
+             pthread_rwlock_rdlock(&kk_compile_lock);
++         kk_compile_begin();
+          pipeline = [comp newComputePipelineStateWithDescriptor:desc
+                                             compilerTaskOptions:kk_task_options
+                                                           error:&error];
++         kk_compile_end();
+          if (kk_serializer)
+             pthread_rwlock_unlock(&kk_compile_lock);
+       }
+@@ -995,9 +1027,11 @@ mtl_new_render_pipeline(mtl_compiler *compiler, mtl_render_pass_descriptor *desc
+       if (!hit) {
+          if (kk_serializer)
+             pthread_rwlock_rdlock(&kk_compile_lock);
++         kk_compile_begin();
+          pipeline = [comp newRenderPipelineStateWithDescriptor:desc
+                                            compilerTaskOptions:kk_task_options
+                                                          error:&error];
++         kk_compile_end();
+          if (kk_serializer)
+             pthread_rwlock_unlock(&kk_compile_lock);
+       }
+-- 
+2.56.0
+

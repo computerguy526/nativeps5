@@ -3,6 +3,22 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.1 (unreleased, candidate)
+
+Everything in v1.0.3, plus our own Metal compute kernels. Needs a fresh shader-cache prepare (`nps5 cache prepare`).
+
+- **Our Metal shaders (compute).** For the compute kernels listed in `games/<title id>/metal-shaders.tsv`, KosmicKrisp
+  runs a kernel translated straight from the PS5 shader to Metal by Kyty's new MSL back end instead of its own
+  SPIR-V -> NIR -> MSL kernel. Nothing derived from a game is shipped: the list holds keys only (hashes), and
+  `nps5 cache prepare` generates the kernels on your Mac from your own dump between its two passes ("Metal shaders:
+  N/T" in the terminal), keeps a kernel only when it is byte-identical to the one that was verified (GPU differential
+  test against KosmicKrisp's kernel on the same inputs, benchmark, in-game smoke and play test), and compiles them
+  once under the progress card in pass 2. Normal starts load them as prebuilt Metal libraries in the background;
+  KosmicKrisp's own kernel runs until a replacement is ready and whenever one fails. ASTRO BOT: 64 compute kernels.
+  Opt out with `NPS5_METAL_SHADERS=0`. `nps5 cache status` shows how many are in use; `nps5 cache metal <id>`
+  regenerates them. KosmicKrisp patches 0023-0025 (`KK_MSL_OVERRIDE_DIR`, `KK_MSL_OVERRIDE_ASYNC`, compile counts
+  for the progress card); new tool `kyty_msl_dump` in the Kyty fork.
+
 ## v1.0.3 (2026-11-18)
 
 Needs a fresh shader-cache prepare (`nps5 cache prepare`) if you prepared with a v1.0.3 candidate that had fast math on.

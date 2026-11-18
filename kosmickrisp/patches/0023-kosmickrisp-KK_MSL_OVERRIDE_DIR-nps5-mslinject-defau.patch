@@ -1,0 +1,350 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 10:54:12 +0000
+Subject: [PATCH 23/25] kosmickrisp: KK_MSL_OVERRIDE_DIR (nps5 mslinject,
+ default off): replacement MSL for app compute pipelines
+
+<dir>/<b3>.metal (b3 = first 16 hex of BLAKE3 of KK's own MSL text) is compiled next to
+KK's kernel (header '// kk-mslinject v1 local_size X Y Z entry NAME math M'); dispatches use
+the replacement pipeline and threadgroup size, no loop-state binding. Runtime-only fields
+in kk_shader (info/serialized blob unchanged -> warm caches stay valid). Fallback to KK's
+kernel on compile failure. KK_MSL_OVERRIDE_PERIOD=<s>: in-run A/B phases (even=replacement),
+KK_MSL_OVERRIDE_LOG=1: log every app compute key. Logs '[kk-mslinject] override <b3> ...'.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_dispatch.c |  19 ++-
+ src/kosmickrisp/vulkan/kk_shader.c       | 181 +++++++++++++++++++++--
+ src/kosmickrisp/vulkan/kk_shader.h       |  15 ++
+ 3 files changed, 193 insertions(+), 22 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+index 5214539..3a4f6fa 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+@@ -25,14 +25,14 @@ void kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t n
+ 
+ /* False: the dispatch must be skipped (no loop state for a guarded kernel). */
+ static bool
+-kk_flush_compute_state(struct kk_cmd_buffer *cmd)
++kk_flush_compute_state(struct kk_cmd_buffer *cmd, bool inj)
+ {
+    mtl_compute_encoder *encoder = cs_get_compute(cmd);
+ 
+    /* nps5 loopcap: a kernel with guarded loops reads its loop state (the
+     * submission's abort word address + its own hit word) at slot 3. */
+    const struct kk_shader *cs = cmd->state.shaders[MESA_SHADER_COMPUTE];
+-   if (cs->info.cs.loop_sites) {
++   if (cs->info.cs.loop_sites && !inj) {
+       uint64_t state = kk_safe_loop_state(
+          kk_cmd_buffer_device(cmd), &cmd->loop, cs->info.cs.loop_key,
+          cs->info.cs.loop_sites, cs->info.cs.loop_barrier_sites,
+@@ -56,8 +56,9 @@ kk_flush_compute_state(struct kk_cmd_buffer *cmd)
+    if (desc->root.addr)
+       kk_cmd_bind_root_to_argument_table(cmd, desc->root.addr);
+ 
++   /* nps5 mslinject: the replacement kernel (KK_MSL_OVERRIDE_DIR) */
+    mtl_compute_set_pipeline_state(
+-      encoder, cmd->state.shaders[MESA_SHADER_COMPUTE]->pipeline.cs);
++      encoder, inj ? cs->mslinject_cs : cs->pipeline.cs);
+    return true;
+ }
+ 
+@@ -104,7 +105,8 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+    desc->root.cs.base_group[2] = baseGroupZ;
+ 
+    struct kk_shader *cs = cmd->state.shaders[MESA_SHADER_COMPUTE];
+-   struct mtl_size local_size = cs->info.cs.local_size;
++   const bool inj = kk_mslinject_use(cs);
++   struct mtl_size local_size = inj ? cs->mslinject_local_size : cs->info.cs.local_size;
+    kk_prof_dispatch(cmd, cs->msl_z[MESA_SHADER_COMPUTE].raw_len ? cs->msl_z[MESA_SHADER_COMPUTE].raw_len
+                          : (cs->msl_data[MESA_SHADER_COMPUTE].code ? (uint32_t)strlen(cs->msl_data[MESA_SHADER_COMPUTE].code) + 1 : 0),
+                     (uint32_t)local_size.x, (uint32_t)local_size.y, (uint32_t)local_size.z);
+@@ -126,7 +128,7 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+       kk_predicate_compute(cmd, patched.gpu, patched.gpu);
+ 
+       /* Flush compute state after predication dispatch */
+-      if (!kk_flush_compute_state(cmd))
++      if (!kk_flush_compute_state(cmd, inj))
+          return;
+       mtl_dispatch_threadgroups_with_indirect_buffer(encoder, patched.gpu,
+                                                      local_size);
+@@ -137,7 +139,7 @@ kk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGroupX,
+          .z = groupCountZ * local_size.z,
+       };
+ 
+-      if (!kk_flush_compute_state(cmd))
++      if (!kk_flush_compute_state(cmd, inj))
+          return;
+       mtl_dispatch_threads(encoder, grid_size, local_size);
+    }
+@@ -158,7 +160,8 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+    desc->root.cs.base_group[2] = 0;
+ 
+    struct kk_shader *cs = cmd->state.shaders[MESA_SHADER_COMPUTE];
+-   struct mtl_size local_size = cs->info.cs.local_size;
++   const bool inj = kk_mslinject_use(cs);
++   struct mtl_size local_size = inj ? cs->mslinject_local_size : cs->info.cs.local_size;
+    kk_prof_dispatch(cmd, cs->msl_z[MESA_SHADER_COMPUTE].raw_len ? cs->msl_z[MESA_SHADER_COMPUTE].raw_len
+                          : (cs->msl_data[MESA_SHADER_COMPUTE].code ? (uint32_t)strlen(cs->msl_data[MESA_SHADER_COMPUTE].code) + 1 : 0),
+                     (uint32_t)local_size.x, (uint32_t)local_size.y, (uint32_t)local_size.z);
+@@ -190,7 +193,7 @@ kk_CmdDispatchIndirect2KHR(VkCommandBuffer commandBuffer,
+    }
+ 
+    /* Flush compute state after the helper dispatches */
+-   if (!kk_flush_compute_state(cmd))
++   if (!kk_flush_compute_state(cmd, inj))
+       return;
+    mtl_dispatch_threadgroups_with_indirect_buffer(encoder, addr, local_size);
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index f5947f3..b488e62 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -33,6 +33,9 @@
+ #include "vk_pipeline.h"
+ 
+ #include <compression.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <time.h>
+ #include <stdatomic.h>
+ 
+ /* MSL source memory (KK_MSL_COMPRESS, KK_MSL_STATS).
+@@ -1026,6 +1029,9 @@ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+    if (shader->info.stage == MESA_SHADER_COMPUTE) {
+       mtl_release(pipe->cs);
+       pipe->cs = NULL;
++      if (shader->mslinject_cs)
++         mtl_release(shader->mslinject_cs);
++      shader->mslinject_cs = NULL;
+    } else if (kk_stage_holds_pipeline(shader->info.stage)) {
+       /* Pre-render compute pipelines. */
+       for (uint32_t i = 0u; i < pipe->gfx.pre_render_count; ++i) {
+@@ -1524,6 +1530,165 @@ kk_compile_compute_pipeline(struct kk_device *device,
+    return VK_SUCCESS;
+ }
+ 
++/* nps5 mslinject: KK_MSL_OVERRIDE_DIR=<dir> holds replacement kernels for
++ * application compute shaders, <dir>/<b3>.metal where <b3> is the first 16 hex
++ * digits of the BLAKE3 of KK's own MSL text (`b3sum file | cut -c1-16`). The
++ * replacement must use KK's binding convention (root table at buffer(0),
++ * sampler table at buffer(1); Kyty MSL backend "kk-bda") and start with
++ *   // kk-mslinject v1 local_size X Y Z entry NAME math safe|relaxed|fast
++ * The original pipeline is still built (warm from the KK caches), so a failed
++ * replacement falls back to it and KK_MSL_OVERRIDE_PERIOD=<s> can alternate
++ * replacement (even phases) and original (odd phases) inside one run, logged as
++ * '[kk-mslinject] phase N on|off t=<s>'. KK_MSL_OVERRIDE_LOG=1 logs the key of
++ * every application compute pipeline ('[kk-mslinject] seen <b3> len=<n>').
++ * Default (unset): no lookup, behaviour unchanged. */
++static const char *kk_inj_dir;
++static bool kk_inj_log;
++static double kk_inj_period;
++static pthread_once_t kk_inj_once = PTHREAD_ONCE_INIT;
++static uint64_t kk_inj_t0_ns;
++static atomic_int kk_inj_last_phase = -1;
++
++static uint64_t
++kk_inj_now_ns(void)
++{
++   struct timespec ts;
++   clock_gettime(CLOCK_MONOTONIC, &ts);
++   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
++}
++
++static void
++kk_inj_init(void)
++{
++   const char *d = getenv("KK_MSL_OVERRIDE_DIR");
++   kk_inj_dir = d && d[0] ? d : NULL;
++   const char *l = getenv("KK_MSL_OVERRIDE_LOG");
++   kk_inj_log = l && l[0] && strcmp(l, "0") != 0;
++   const char *p = getenv("KK_MSL_OVERRIDE_PERIOD");
++   kk_inj_period = p ? atof(p) : 0.0;
++   kk_inj_t0_ns = kk_inj_now_ns();
++   if (kk_inj_dir)
++      fprintf(stderr, "[kk-mslinject] dir %s period %.1f s\n", kk_inj_dir, kk_inj_period);
++}
++
++bool
++kk_mslinject_phase_on(void)
++{
++   if (kk_inj_period <= 0.0)
++      return true;
++   const double t = (double)(kk_inj_now_ns() - kk_inj_t0_ns) * 1e-9;
++   const int phase = (int)(t / kk_inj_period);
++   if (atomic_exchange(&kk_inj_last_phase, phase) != phase)
++      fprintf(stderr, "[kk-mslinject] phase %d %s t=%.2f\n", phase,
++              (phase & 1) ? "off" : "on", t);
++   return (phase & 1) == 0;
++}
++
++/* Replacement text for `code` (malloc'd) or NULL; fills the header fields. */
++static char *
++kk_mslinject_find(const char *code, char hex[17], struct mtl_size *ls,
++                  char entry[128], enum mtl_math_mode *math)
++{
++   pthread_once(&kk_inj_once, kk_inj_init);
++   if (!kk_inj_dir && !kk_inj_log)
++      return NULL;
++   const size_t len = strlen(code);
++   blake3_hash hash;
++   _mesa_blake3_compute(code, len, hash);
++   for (unsigned i = 0; i < 8; i++)
++      snprintf(hex + 2 * i, 3, "%02x", hash[i]);
++   if (kk_inj_log)
++      fprintf(stderr, "[kk-mslinject] seen %s len=%zu\n", hex, len);
++   if (!kk_inj_dir)
++      return NULL;
++   char path[1200];
++   snprintf(path, sizeof(path), "%s/%s.metal", kk_inj_dir, hex);
++   FILE *f = fopen(path, "rb");
++   if (!f)
++      return NULL;
++   fseek(f, 0, SEEK_END);
++   long n = ftell(f);
++   fseek(f, 0, SEEK_SET);
++   char *text = n > 0 ? malloc((size_t)n + 1) : NULL;
++   if (!text || fread(text, 1, (size_t)n, f) != (size_t)n) {
++      fclose(f);
++      free(text);
++      fprintf(stderr, "[kk-mslinject] %s: cannot read %s\n", hex, path);
++      return NULL;
++   }
++   fclose(f);
++   text[n] = 0;
++   unsigned x = 0, y = 0, z = 0;
++   char mm[16] = "safe";
++   if (sscanf(text, "// kk-mslinject v1 local_size %u %u %u entry %127s math %15s",
++              &x, &y, &z, entry, mm) < 4 || !x || !y || !z || x * y * z > 1024) {
++      fprintf(stderr, "[kk-mslinject] %s: bad header in %s\n", hex, path);
++      free(text);
++      return NULL;
++   }
++   ls->x = x;
++   ls->y = y;
++   ls->z = z;
++   *math = !strcmp(mm, "fast")      ? MTL_MATH_MODE_FAST
++           : !strcmp(mm, "relaxed") ? MTL_MATH_MODE_RELAXED
++                                    : MTL_MATH_MODE_SAFE;
++   return text;
++}
++
++/* Application compute pipeline: KK's own kernel, plus a replacement when
++ * KK_MSL_OVERRIDE_DIR has one for it (see above). */
++static VkResult
++kk_compile_app_compute_pipeline(struct kk_device *device, struct kk_shader *s)
++{
++   const uint32_t local_size_threads =
++      s->info.cs.local_size.x * s->info.cs.local_size.y * s->info.cs.local_size.z;
++   VkResult result = kk_compile_compute_pipeline(
++      device, &s->msl_data[MESA_SHADER_COMPUTE], &s->msl_z[MESA_SHADER_COMPUTE],
++      local_size_threads, &s->pipeline.cs);
++   if (result != VK_SUCCESS)
++      return result;
++
++   char *tmp;
++   const char *code = kk_msl_text(&s->msl_data[MESA_SHADER_COMPUTE],
++                                  &s->msl_z[MESA_SHADER_COMPUTE], &tmp);
++   if (code == NULL)
++      return VK_SUCCESS;
++   char hex[17] = {0}, entry[128] = {0};
++   struct mtl_size ls = {0};
++   enum mtl_math_mode math = MTL_MATH_MODE_SAFE;
++   char *text = kk_mslinject_find(code, hex, &ls, entry, &math);
++   free(tmp);
++   if (text == NULL)
++      return VK_SUCCESS;
++
++   struct kk_physical_device *pdev = kk_device_physical(device);
++   const uint64_t t0 = kk_inj_now_ns();
++   mtl_compute_pipeline_state *pipeline = NULL;
++   mtl_library *library = mtl_new_library(device->mtl_compiler_handle, text,
++                                          pdev->info.msl_version, math,
++                                          MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
++   free(text);
++   if (library) {
++      mtl_function_descriptor *function =
++         mtl_new_library_function_descriptor(library, entry);
++      pipeline = mtl_new_compute_pipeline_state(
++         device->mtl_compiler_handle, function, ls.x * ls.y * ls.z);
++      mtl_release(function);
++      mtl_release(library);
++   }
++   if (pipeline == NULL) {
++      fprintf(stderr, "[kk-mslinject] override %s FAILED to compile: KK kernel kept\n", hex);
++      return VK_SUCCESS;
++   }
++   s->mslinject_cs = pipeline;
++   s->mslinject_local_size = ls;
++   fprintf(stderr, "[kk-mslinject] override %s local_size %u %u %u (KK %u %u %u) %.1f ms\n",
++           hex, (unsigned)ls.x, (unsigned)ls.y, (unsigned)ls.z,
++           (unsigned)s->info.cs.local_size.x, (unsigned)s->info.cs.local_size.y,
++           (unsigned)s->info.cs.local_size.z, (double)(kk_inj_now_ns() - t0) * 1e-6);
++   return VK_SUCCESS;
++}
++
+ static mtl_depth_stencil_state *
+ kk_compile_ds_state(struct kk_device *device, struct kk_shader_info *info)
+ {
+@@ -2078,13 +2243,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+     */
+    if (shaders[0]->vk.stage == MESA_SHADER_COMPUTE) {
+       struct kk_shader *s = shaders[0];
+-      uint32_t local_size_threads = s->info.cs.local_size.x *
+-                                    s->info.cs.local_size.y *
+-                                    s->info.cs.local_size.z;
+-      result =
+-         kk_compile_compute_pipeline(dev, &s->msl_data[MESA_SHADER_COMPUTE],
+-                                     &s->msl_z[MESA_SHADER_COMPUTE],
+-                                     local_size_threads, &s->pipeline.cs);
++      result = kk_compile_app_compute_pipeline(dev, s);
+    } else {
+       gather_graphics_pipeline_create_info(state, shaders, total_shaders);
+       result = kk_compile_graphics_pipeline(dev, shaders[0]);
+@@ -2240,13 +2399,7 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+    }
+ 
+    if (info.stage == MESA_SHADER_COMPUTE) {
+-      uint32_t local_size_threads = shader->info.cs.local_size.x *
+-                                    shader->info.cs.local_size.y *
+-                                    shader->info.cs.local_size.z;
+-      result = kk_compile_compute_pipeline(
+-         dev, &shader->msl_data[MESA_SHADER_COMPUTE],
+-         &shader->msl_z[MESA_SHADER_COMPUTE], local_size_threads,
+-         &shader->pipeline.cs);
++      result = kk_compile_app_compute_pipeline(dev, shader);
+    } else if (kk_stage_holds_pipeline(info.stage)) {
+       result = kk_compile_graphics_pipeline(dev, shader);
+    }
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 2fdecb2..13be9d8 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -170,8 +170,23 @@ struct kk_shader {
+    struct msl_compile_data gs_main;
+    struct kk_msl_z msl_z[MESA_SHADER_MESH_STAGES];
+    struct kk_msl_z gs_main_z;
++
++   /* nps5 mslinject (runtime only, never serialized): a compute shader whose KK
++    * MSL has a replacement in KK_MSL_OVERRIDE_DIR also holds the replacement's
++    * pipeline and threadgroup size; kk_mslinject_use() picks one per dispatch. */
++   mtl_compute_pipeline_state *mslinject_cs;
++   struct mtl_size mslinject_local_size;
+ };
+ 
++/* nps5 mslinject: true when this dispatch runs the replacement kernel
++ * (KK_MSL_OVERRIDE_PERIOD=<s> alternates replacement/original phases). */
++bool kk_mslinject_phase_on(void);
++static inline bool
++kk_mslinject_use(const struct kk_shader *s)
++{
++   return s->mslinject_cs != NULL && kk_mslinject_phase_on();
++}
++
+ VK_DEFINE_NONDISP_HANDLE_CASTS(kk_shader, vk.base, VkShaderEXT,
+                                VK_OBJECT_TYPE_SHADER_EXT);
+ 
+-- 
+2.56.0
+

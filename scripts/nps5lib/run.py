@@ -476,6 +476,9 @@ def shader_cache_words(tid, environ, app0):
             return []
         words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")))
         out = [(k, v, None) for k, v in words + cachemod.launch_words(cx, app0)]
+        mwarn = cachemod.metalmod.launch_words(cx.dir, os.path.join(cx.p.dir, cachemod.metalmod.LIST_NAME), environ)[1]
+        if mwarn:
+            out.append((None, None, mwarn))
         if cachemod.status(cx)[0] != "prepared":
             out.append((None, None, "the shader cache of this stack is not prepared: this start builds the whole list behind the loading card "
                                     "(\"PREPARING SHADERS X / T\", several minutes, once). `nps5 cache prepare %s` does it ahead, with prebuilt Metal libraries" % tid))

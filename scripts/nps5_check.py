@@ -77,7 +77,32 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 # carries a title ID in its path is treated as a dump.
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
-                 "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv"}
+                 "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
+                 "metal-shaders.tsv"}
+# games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
+# program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
+METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,]{0,32}$")
+METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-keys\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40})$")
+
+
+def check_metal_keys(data):
+    """-> reasons a games/<id>/metal-shaders.tsv is refused: anything but comments, header lines and key rows (hashes)."""
+    if b"\0" in data or len(data) > (1 << 20):
+        return ["a Metal keys list is a short text file"]
+    bad = []
+    for n, line in enumerate(data.split(b"\n"), 1):
+        if not line:
+            continue
+        if line.startswith(b"#"):          # prose comments only: nothing that reads like shader source
+            if len(line) <= 200 and not re.match(rb"#\s*(include|pragma|define|if|endif)\b", line) and not re.search(rb"[;{}]|\[\[", line):
+                continue
+            bad.append("line %d is a comment that looks like shader source" % n)
+            continue
+        if not (METAL_ROW_RE.match(line) or METAL_HEAD_RE.match(line)):
+            bad.append("line %d is not a key row (hashes only) or a header line" % n)
+            if len(bad) >= 3:
+                break
+    return bad
 # shared shader lists (nps5 cache share): games/<title id>/contrib/<date>-<8 hex>.kyplst with its .verified record
 CONTRIB_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/contrib/\d{4}-\d{2}-\d{2}-[0-9a-f]{8}\.kyplst(\.verified)?$")
 # pad scripts (input timings only): games/<title id>/pad/<name>.vpad
@@ -408,6 +433,10 @@ class Check:
             return
         if profile and profile.group(2) not in PROFILE_FILES:
             F(": not a profile file (games/README.md lists them); game-derived data stays out")
+        if profile and profile.group(2) == "metal-shaders.tsv":
+            for why in check_metal_keys(data):
+                F(f": {why}")
+            return
         if ext == "kyplst":
             for why in check_kyplst(path, data, sibling(path + ".verified")):
                 F(f": {why}")
@@ -489,10 +518,13 @@ def selftest():
         "games/PPSA00000/shaders.tsv": b"not a profile file\n",
         "games/PPSA00000/vs_0001.metallib": b"MTLB" + b"\0" * 16,
         "vendor/lib/eboot.bin": b"\x54\x14\xf5\xeejunk", "docs/packed.md": b"\xfd7zXZ\x00" + b"\0" * 16,     # a third-party folder, a renamed archive
+        "games/PPSA00001/metal-shaders.tsv": b"format\tnps5-metal-keys\t1\n#include <metal_stdlib>\n",   # MSL in a keys list
         "late.txt": b"text\n" * 4000 + b"\0\1\2", "flags.mk": b"CFLAGS=-I/Users/" + b"somebody/include\n",     # binary after a text start, a path behind a flag
     }
     clean = {"3rdparty/lib/a.c": b"// built in /Users/" + b"author/src\nint x;\n", "ok.sh": b"cd \"$NPS5_ROOT\" && ls /Users/Shared\n", "ok.md": b"mail nobody@example.com\n",
-             "games/PPSA00000/game.tsv": b"title_id\tPPSA00000\n", "games/PPSA00000/README.md": b"# Example\n"}
+             "games/PPSA00000/game.tsv": b"title_id\tPPSA00000\n", "games/PPSA00000/README.md": b"# Example\n",
+             "games/PPSA00000/metal-shaders.tsv": b"# keys\nformat\tnps5-metal-keys\t1\ntitle\tPPSA00000\t01.000.000\nemitter\tabcdef0\n" +
+             b"0" * 32 + b"\t" + b"1" * 16 + b"\t" + b"2" * 16 + b"\t" + b"3" * 64 + b"\t64x1x1\texact\n"}
     with tempfile.TemporaryDirectory() as d:
         git("init", "-q", cwd=d)
         for k, v in {**planted, **clean}.items():

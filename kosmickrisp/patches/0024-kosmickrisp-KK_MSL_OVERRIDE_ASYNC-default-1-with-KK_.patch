@@ -1,0 +1,213 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 13:26:28 +0000
+Subject: [PATCH 24/25] kosmickrisp: KK_MSL_OVERRIDE_ASYNC (default 1 with
+ KK_MSL_OVERRIDE_DIR): compile replacement kernels on a GCD queue
+
+Dispatches keep KK's own kernel until the replacement pipeline is published
+(release store / acquire load; decision taken once per dispatch), so a
+replacement no longer stalls pipeline creation (up to 1.7 s each in game).
+Shader destroy waits for its job. KK_MSL_OVERRIDE_ASYNC=0 = old synchronous path.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_dispatch.c |   2 +-
+ src/kosmickrisp/vulkan/kk_shader.c       | 102 +++++++++++++++++------
+ src/kosmickrisp/vulkan/kk_shader.h       |   8 +-
+ 3 files changed, 85 insertions(+), 27 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+index 3a4f6fa..fd3ea52 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_dispatch.c
+@@ -58,7 +58,7 @@ kk_flush_compute_state(struct kk_cmd_buffer *cmd, bool inj)
+ 
+    /* nps5 mslinject: the replacement kernel (KK_MSL_OVERRIDE_DIR) */
+    mtl_compute_set_pipeline_state(
+-      encoder, inj ? cs->mslinject_cs : cs->pipeline.cs);
++      encoder, inj ? __atomic_load_n(&cs->mslinject_cs, __ATOMIC_ACQUIRE) : cs->pipeline.cs);
+    return true;
+ }
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index b488e62..f2910e4 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -37,6 +37,7 @@
+ #include <stdio.h>
+ #include <time.h>
+ #include <stdatomic.h>
++#include <dispatch/dispatch.h>
+ 
+ /* MSL source memory (KK_MSL_COMPRESS, KK_MSL_STATS).
+  *
+@@ -1029,6 +1030,11 @@ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+    if (shader->info.stage == MESA_SHADER_COMPUTE) {
+       mtl_release(pipe->cs);
+       pipe->cs = NULL;
++      if (shader->mslinject_group) {
++         dispatch_group_wait((dispatch_group_t)shader->mslinject_group, DISPATCH_TIME_FOREVER);
++         dispatch_release((dispatch_group_t)shader->mslinject_group);
++         shader->mslinject_group = NULL;
++      }
+       if (shader->mslinject_cs)
+          mtl_release(shader->mslinject_cs);
+       shader->mslinject_cs = NULL;
+@@ -1545,6 +1551,7 @@ kk_compile_compute_pipeline(struct kk_device *device,
+ static const char *kk_inj_dir;
+ static bool kk_inj_log;
+ static double kk_inj_period;
++static bool kk_inj_async = true;
+ static pthread_once_t kk_inj_once = PTHREAD_ONCE_INIT;
+ static uint64_t kk_inj_t0_ns;
+ static atomic_int kk_inj_last_phase = -1;
+@@ -1567,8 +1574,10 @@ kk_inj_init(void)
+    const char *p = getenv("KK_MSL_OVERRIDE_PERIOD");
+    kk_inj_period = p ? atof(p) : 0.0;
+    kk_inj_t0_ns = kk_inj_now_ns();
++   const char *as = getenv("KK_MSL_OVERRIDE_ASYNC");
++   kk_inj_async = !(as && as[0] == '0');
+    if (kk_inj_dir)
+-      fprintf(stderr, "[kk-mslinject] dir %s period %.1f s\n", kk_inj_dir, kk_inj_period);
++      fprintf(stderr, "[kk-mslinject] dir %s period %.1f s async %d\n", kk_inj_dir, kk_inj_period, (int)kk_inj_async);
+ }
+ 
+ bool
+@@ -1635,6 +1644,52 @@ kk_mslinject_find(const char *code, char hex[17], struct mtl_size *ls,
+    return text;
+ }
+ 
++struct kk_inj_job {
++   struct kk_device *device;
++   struct kk_shader *s;
++   char *text;
++   struct mtl_size ls;
++   enum mtl_math_mode math;
++   char hex[17], entry[128];
++};
++
++/* Compile one replacement (on a GCD worker when async) and publish it. */
++static void
++kk_inj_compile_job(void *arg)
++{
++   struct kk_inj_job *job = arg;
++   struct kk_device *device = job->device;
++   struct kk_shader *s = job->s;
++   struct mtl_size ls = job->ls;
++   struct kk_physical_device *pdev = kk_device_physical(device);
++   const uint64_t t0 = kk_inj_now_ns();
++   mtl_compute_pipeline_state *pipeline = NULL;
++   mtl_library *library = mtl_new_library(device->mtl_compiler_handle, job->text,
++                                          pdev->info.msl_version, job->math,
++                                          MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
++   if (library) {
++      mtl_function_descriptor *function =
++         mtl_new_library_function_descriptor(library, job->entry);
++      pipeline = mtl_new_compute_pipeline_state(
++         device->mtl_compiler_handle, function, ls.x * ls.y * ls.z);
++      mtl_release(function);
++      mtl_release(library);
++   }
++   if (pipeline == NULL) {
++      fprintf(stderr, "[kk-mslinject] override %s FAILED to compile: KK kernel kept\n", job->hex);
++   } else {
++      s->mslinject_local_size = ls;
++      __atomic_store_n(&s->mslinject_cs, pipeline, __ATOMIC_RELEASE);
++      fprintf(stderr, "[kk-mslinject] override %s local_size %u %u %u (KK %u %u %u) %.1f ms%s\n",
++              job->hex, (unsigned)ls.x, (unsigned)ls.y, (unsigned)ls.z,
++              (unsigned)s->info.cs.local_size.x, (unsigned)s->info.cs.local_size.y,
++              (unsigned)s->info.cs.local_size.z, (double)(kk_inj_now_ns() - t0) * 1e-6,
++              kk_inj_async ? " async" : "");
++   }
++   free(job->text);
++   free(job);
++}
++
+ /* Application compute pipeline: KK's own kernel, plus a replacement when
+  * KK_MSL_OVERRIDE_DIR has one for it (see above). */
+ static VkResult
+@@ -1660,32 +1715,31 @@ kk_compile_app_compute_pipeline(struct kk_device *device, struct kk_shader *s)
+    free(tmp);
+    if (text == NULL)
+       return VK_SUCCESS;
+-
+-   struct kk_physical_device *pdev = kk_device_physical(device);
+-   const uint64_t t0 = kk_inj_now_ns();
+-   mtl_compute_pipeline_state *pipeline = NULL;
+-   mtl_library *library = mtl_new_library(device->mtl_compiler_handle, text,
+-                                          pdev->info.msl_version, math,
+-                                          MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
+-   free(text);
+-   if (library) {
+-      mtl_function_descriptor *function =
+-         mtl_new_library_function_descriptor(library, entry);
+-      pipeline = mtl_new_compute_pipeline_state(
+-         device->mtl_compiler_handle, function, ls.x * ls.y * ls.z);
+-      mtl_release(function);
+-      mtl_release(library);
++   if (s->mslinject_group || __atomic_load_n(&s->mslinject_cs, __ATOMIC_ACQUIRE)) {
++      free(text); /* already compiled / compiling for this shader */
++      return VK_SUCCESS;
+    }
+-   if (pipeline == NULL) {
+-      fprintf(stderr, "[kk-mslinject] override %s FAILED to compile: KK kernel kept\n", hex);
++
++   struct kk_inj_job *job = calloc(1, sizeof(*job));
++   if (!job) {
++      free(text);
+       return VK_SUCCESS;
+    }
+-   s->mslinject_cs = pipeline;
+-   s->mslinject_local_size = ls;
+-   fprintf(stderr, "[kk-mslinject] override %s local_size %u %u %u (KK %u %u %u) %.1f ms\n",
+-           hex, (unsigned)ls.x, (unsigned)ls.y, (unsigned)ls.z,
+-           (unsigned)s->info.cs.local_size.x, (unsigned)s->info.cs.local_size.y,
+-           (unsigned)s->info.cs.local_size.z, (double)(kk_inj_now_ns() - t0) * 1e-6);
++   job->device = device;
++   job->s = s;
++   job->text = text;
++   job->ls = ls;
++   job->math = math;
++   memcpy(job->hex, hex, sizeof(job->hex));
++   memcpy(job->entry, entry, sizeof(job->entry));
++   if (kk_inj_async) {
++      dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
++      dispatch_group_t g = dispatch_group_create();
++      s->mslinject_group = g;
++      dispatch_group_async_f(g, q, job, kk_inj_compile_job);
++   } else {
++      kk_inj_compile_job(job);
++   }
+    return VK_SUCCESS;
+ }
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 13be9d8..7065db4 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -174,8 +174,12 @@ struct kk_shader {
+    /* nps5 mslinject (runtime only, never serialized): a compute shader whose KK
+     * MSL has a replacement in KK_MSL_OVERRIDE_DIR also holds the replacement's
+     * pipeline and threadgroup size; kk_mslinject_use() picks one per dispatch. */
+-   mtl_compute_pipeline_state *mslinject_cs;
++   mtl_compute_pipeline_state *mslinject_cs; /* set once (release), read acquire */
+    struct mtl_size mslinject_local_size;
++   /* KK_MSL_OVERRIDE_ASYNC (default 1): the replacement is compiled on a GCD
++    * queue; dispatches use KK's own kernel until it is ready (no hitch at
++    * pipeline creation). Shader destroy waits for the job. */
++   void *mslinject_group; /* dispatch_group_t or NULL */
+ };
+ 
+ /* nps5 mslinject: true when this dispatch runs the replacement kernel
+@@ -184,7 +188,7 @@ bool kk_mslinject_phase_on(void);
+ static inline bool
+ kk_mslinject_use(const struct kk_shader *s)
+ {
+-   return s->mslinject_cs != NULL && kk_mslinject_phase_on();
++   return __atomic_load_n(&s->mslinject_cs, __ATOMIC_ACQUIRE) != NULL && kk_mslinject_phase_on();
+ }
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(kk_shader, vk.base, VkShaderEXT,
+-- 
+2.56.0
+
