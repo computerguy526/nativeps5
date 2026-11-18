@@ -20,6 +20,7 @@
 ## Safety
 
 - [ ] CI is green (`scripts/check.sh --tree --tests` and the other checks in CONTRIBUTING.md, "CI")
+- [ ] `scripts/ci/run-local.sh` passes (run before pushing)
 - [ ] No game files, shaders, journals, frame dumps, caches or anything extracted from a game in the diff (a profile's `pipelines.kyplst` only with its `.verified` record from `scripts/verify-pipeline-list.sh`)
 - [ ] No secrets, personal paths or machine names (`scripts/check.sh` is clean)
 - [ ] New behaviour is off by default behind an environment switch, or the evidence above shows it is neutral or better on the title and the gates
