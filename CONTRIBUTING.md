@@ -93,6 +93,28 @@ credits its author (`Co-authored-by`), and is then closed rather than merged; th
 agree that your change is licensed under the licence of the repository it goes into (GPL-2.0-only; MIT for
 `kosmickrisp/`).
 
+## CI
+
+Before pushing, run `scripts/ci/run-local.sh` (commit first): it runs every job of `.github/workflows/ci.yml` from a clean checkout of HEAD (same steps, fresh venv, no submodules); `--job <id>` runs one, `--x86` runs the macOS job under Rosetta like the Intel hosted runner. See docs/ci.md.
+
+Be gentle with GitHub (contributors and agents): no pushes until `scripts/ci/run-local.sh` passes; at most one push per branch, batching commits; do not poll `gh` in loops (look at most every ~5 minutes, or use one `gh run watch <run-id>`); never re-run jobs to test for flakiness (reproduce locally); no bulk API calls. Hammering the API gets the account suspended.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`; no secrets, game data or GPU.
+Each check is one command locally:
+
+| Job | What | Locally |
+|---|---|---|
+| check | game-data / secrets / personal-path check of every tracked file, plus the unit tests (macOS) | `scripts/check.sh --tree --tests` |
+| privacy | the same check on the commits of the PR, commit e-mails must be GitHub noreply, no personal path or e-mail in added lines | `BASE=origin/main TIP=HEAD scripts/ci/privacy.sh` (= `scripts/check.sh --range origin/main..HEAD && scripts/ci/check_identity.sh origin/main..HEAD`) |
+| lint | `ruff` (bug-finding rules, `ruff.toml`) | `pip install ruff && ruff check .` |
+| lint | `shellcheck -S warning` (known findings in `.shellcheckrc`) | `git ls-files -z '*.sh' \| xargs -0 shellcheck -S warning` |
+| lint | `components.lock` format, pipeline list records, internal markdown links | `python3 scripts/ci/check_components_lock.py`, `scripts/ci/check_kyplst_records.sh`, `python3 scripts/ci/check_md_links.py` |
+| workflows | workflow syntax | `actionlint` |
+
+Not in CI, because they need a game dump, a GPU or a Metal 4 Mac: the regression gates, the shader gate, the title runs, and
+`scripts/verify-pipeline-list.sh` (a maintainer reruns the proof). A PR needs green CI; it does not replace the evidence.
+`.editorconfig` sets the basics (UTF-8, LF, final newline).
+
 ## Reporting a problem
 
 Run `nps5 bug-report` (or `nps5 bug-report <run>` for an earlier run) and attach the zip it writes to the issue. It

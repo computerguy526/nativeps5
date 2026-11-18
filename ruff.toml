@@ -1,0 +1,13 @@
+# Python lint (CI: .github/workflows/ci.yml, job "lint"). Rules that find bugs, not style: the code's dense layout
+# (several statements on a line, short names) is the house style, so those rules are off and `ruff format` is not used.
+# Run: ruff check .      (pip install ruff)
+target-version = "py310"
+extend-exclude = ["titles", "3rdparty", "ps5recomp", "anyps5", "scratch", "build"]
+
+[lint]
+select = ["F", "E9", "B", "PLE"]
+ignore = [
+  "F403", "F405",            # star imports of the rewriter tables
+  "B007", "B904", "B905", "B008", "B023",
+  "F401", "F841",            # baseline: 11 unused imports and 10 unused variables exist today; burn down, then remove these two
+]
