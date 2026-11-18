@@ -854,6 +854,7 @@ KK_TEST_GPU_LOST	kosmickrisp	test hook: injects `<n>` synthetic access-revoked e
 KK_TEST_OOM	kosmickrisp	test hook: injects `<n>` synthetic out-of-memory failures	vulkan/kk_safety.c
 KK_TS_RELAXED	kosmickrisp		bridge/mtl_encoder.m
 KK_VENV	nativeps5		kosmickrisp/build-kosmickrisp.sh
+KK_VS_INVARIANT	nativeps5	1 = vertex Metal texts keep position invariance (the metallib builder then passes -fpreserve-invariance)	scripts/kk-libcache-build.sh
 KK_WIRED_GUARD	kosmickrisp	`0` turns off the residency guard (exit 73 when Metal's allocated size passes the limit before a commit)	vulkan/kk_safety.c
 KK_WIRED_LIMIT_MB	kosmickrisp	limit of the residency guard; default 0.9 of Metal's recommended working set	vulkan/kk_safety.c
 KYTY_A	kyty		tests/U59PresetTests.cpp
@@ -900,6 +901,7 @@ KYTY_BDA_HOT_SYNC	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_HOT_SYNC_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_INCREMENTAL_SYNC	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_INCREMENTAL_SYNC	nativeps5		titles/kyty-preset.env
+KYTY_BDA_PAGETABLE_MB	kyty	size in MiB of the dense BDA page table; default 0 = the whole 512 MiB table; 64 covers guest addresses below 128 GiB and prints a warning if a buffer lies above; no effect with the sparse table	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_PAGETABLE_SPARSE	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_BDA_PAGETABLE_SPARSE	nativeps5		titles/kyty-preset.env
 KYTY_BDA_SHARED_BLOCKS	kyty		src/graphics/host_gpu/renderer/cache/streamBuffer.cpp
@@ -1163,6 +1165,18 @@ KYTY_FAULT_COST_LOG	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP_SECONDS	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
+KYTY_FLIGHTREC	kyty	always-on flight recorder (v1.1): unset or 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
+KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
+KYTY_FLIGHTREC_DIR	kyty	folder of flight-recorder dumps; nps5 run sets <run dir>/flightrec; default ./flightrec	src/common/flightRec.cpp
+KYTY_FLIGHTREC_EXIT	kyty	0 = no dump at process exit; default 1	src/common/flightRec.cpp
+KYTY_FLIGHTREC_HASH_KB	kyty	keyed draws: KiB of each bound guest range that are hashed; default 1024	src/graphics/host_gpu/renderer/flightRecDraw.cpp
+KYTY_FLIGHTREC_KEYS	kyty	comma list of shader hash prefixes whose draws record their full inputs (diagnostic)	src/graphics/host_gpu/renderer/flightRecDraw.cpp
+KYTY_FLIGHTREC_MAXDUMPS	kyty	dumps per run; default 12	src/common/flightRec.cpp
+KYTY_FLIGHTREC_N	kyty	records per thread ring (power of two); default 16384 (light), 65536 (verbose)	src/common/flightRec.cpp
+KYTY_FLIGHTREC_REHASH	kyty	keyed draws: flips after which the guest ranges are hashed again; default 3	src/graphics/host_gpu/renderer/flightRecDraw.cpp
+KYTY_FLIGHTREC_TAG	kyty	dump file name prefix; default flightrec_<pid>	src/common/flightRec.cpp
+KYTY_FLIGHTREC_TRIGGER	kyty	flip numbers (and p<present>) at which a dump is written	src/common/flightRec.cpp
+KYTY_FLIGHTREC_WINDOW_S	kyty	seconds of history a dump holds per ring; default 12 (light), 0 = everything (verbose)	src/common/flightRec.cpp
 KYTY_FLIP_LOG	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_FLIP_WAIT_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_FOLD_LANE_MASKS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1332,6 +1346,7 @@ KYTY_LOD_STATS_PLAIN_VARIANT	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
 KYTY_LOOP_GUARD	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LOOP_GUARD_SHADERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MAD_MODE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_MEMLOG	kyty	1 = a 1 Hz [mem] line (footprint, resident, compressed, swap, guest direct memory) and [slowframe] lines on stderr	src/graphics/presentation/window/swapchain.cpp
 KYTY_MESH_OUTPUT_GUARD	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_MESH_RESTART	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_MESH_RESTART	nativeps5		titles/kyty-preset.env
@@ -1428,6 +1443,7 @@ KYTY_PIPELINE_CACHE_PATH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineC
 KYTY_PIPELINE_CACHE_PATH	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_CACHE_SAVE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PIPELINE_CACHE_SAVE_LEGACY	kyty	1 = the pipeline-cache saver rewrites the driver cache every interval at normal I/O priority (v1.0.3); default 0 = skips unchanged saves, backs off, defers on slow frames, background priority	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_MIN_NEW	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_ON_TERM	kyty	`1` saves the pipeline cache on SIGTERM so a timed run keeps what it compiled	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_CACHE_SAVE_QUIET_S	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1846,6 +1862,7 @@ NPS5_AVPLAYER_SYNC_TOL_MS	ps5recomp	how early a video frame may be shown (defaul
 NPS5_AVPLAYER_VTRACE	ps5recomp	1 = log every video frame and a timing summary	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_BREW_PREFIX	nativeps5		scripts/build.sh
 NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
+NPS5_BUILD_QOS	nativeps5	utility, background or maintenance: run the metallib compilers under taskpolicy -c at that QoS (default plain nice 5)	scripts/kk-libcache-build.sh
 NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_CALL_IC	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_CHECKED_PTR	ps5recomp		pkg/cli/cli.go
@@ -1934,6 +1951,7 @@ NPS5_LOG	ps5recomp		pkg/diag/diag_test.go
 NPS5_LOG_RATE	ps5recomp	first,every: thin repeated periodic log lines (default off)	pkg/runtime/modules/libSceAnyPS5/nps5_log.h
 NPS5_LONG	nativeps5		tests/test_evidence_ab_report.py
 NPS5_LOWERING_ID	ps5recomp		pkg/emitter/lowering.go
+NPS5_METALLIB_STORE	nativeps5	content-addressed store of built Metal libraries; cache prepare sets <cache root>.metallib-store; empty = off	scripts/kk-libcache-build.sh
 NPS5_METAL_SHADERS	nativeps5	0 = do not generate or use our Metal compute kernels (v1.1, games/<id>/metal-shaders.tsv); default on	scripts/nps5lib/metal.py
 NPS5_MISS	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_MKDIR	ps5recomp		pkg/pack/assets/launcher.c
@@ -1966,6 +1984,7 @@ NPS5_PPROF	ps5recomp		cmd/ps4-recomp/main.go
 NPS5_PREBUILD	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREBUILD_SCREEN	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREBUILD_SECONDS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
+NPS5_PREPARE_KEEP_PASS1	nativeps5	0 = cache prepare always runs a fresh second pass; default: pass 2 is skipped when pass 1 loaded every shader from stored metallibs and there is nothing new to generate	scripts/nps5lib/cache.py
 NPS5_PROFILES	ps5recomp		pkg/pack/profile.go
 NPS5_PUBLIC_DIR	nativeps5		scripts/build.sh
 NPS5_RECOMP_DIR	nativeps5		nps5.conf.example

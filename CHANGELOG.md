@@ -42,6 +42,28 @@ fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1
   ones), but the ASTRO BOT list is **empty** in v1.1: no graphics pair has passed verification yet, so every render
   pipeline is KosmicKrisp's own, as in v1.0.3. The Kyty MSL back end gets the graphics-stage pieces (per-invocation LDS,
   integer f32 to f16 round-toward-zero).
+- **Faster `nps5 cache prepare`.** Compiled Metal libraries are kept in a content-addressed store (`NPS5_METALLIB_STORE`),
+  so the first pass only compiles shaders that are new; the library builder no longer shells out per file (biggest-first,
+  `NPS5_BUILD_QOS` to pick the QoS); MSL generation and the vertex-text lookup are incremental; the second pass is skipped
+  when the first pass loaded everything from libraries and there is nothing new to generate (`NPS5_PREPARE_KEEP_PASS1=0`
+  restores it). A second prepare on an unchanged cache is much shorter. `nps5 cache prepare` also works again for the
+  1800 s ceiling (it was refused by the 180 s run cap, rc 78, in v1.0.3).
+- **Fewer periodic stalls from the pipeline-cache saver.** The saver skips a rewrite when nothing changed, backs off,
+  defers while frames are slow and runs at background I/O priority (`KYTY_PIPELINE_CACHE_SAVE_LEGACY=1` restores the old
+  behaviour). `KYTY_MEMLOG=1` prints a 1 Hz `[mem]` line (footprint, resident, swap) and `[slowframe]` lines.
+- **Flight recorder, always on.** A light, bounded recorder (about 13 MB of rings, nothing on the hot path but a ring
+  write) keeps the last seconds of submissions, compile and file events and counters, and writes a dump when something goes
+  wrong (GPU watchdog, a frame or present stall over 2 s, the memory limit, a crash, SIGTERM). A dump holds ids, sizes,
+  hashes and timings only, no game bytes. `nps5 run` writes it to `<run dir>/flightrec`; `KYTY_FLIGHTREC=0` turns it off,
+  `=2` records every draw. Attach one to a bug report.
+- **Symlinked dump folders.** `getdents`/`getdirentries` report a symlink's target type (file or folder) and hide dangling
+  links, so a dump folder that is a tree of symlinks lists correctly (nps5's own translation does not build one; it
+  matters for hand-assembled dumps).
+- **Recompiler lowering fixes** (found by a differential fuzzer of the lifted instructions against Rosetta): `VPHMINPOSUW`
+  with the destination equal to the source returned index 0, `VPERMILPD ymm, imm` selected the wrong upper lane, and
+  `VRCPSS` read a clobbered source. Takes effect after the title is translated again (a fresh `scripts/run-title.sh` translation).
+- `KYTY_BDA_PAGETABLE_MB=<n>` (off by default) sizes the dense BDA page table; 64 saves up to about 450 MiB of footprint on
+  ASTRO BOT when the dense table is in use (its GPU addresses end at 67 GiB).
 - Performance (MacBook Pro M4 Pro, MetalFX 720p default): Sky Garden (`underwater_aerial_garden`) about 17 fps (frame
   time about 59-60 ms; v1.0.3: 14.6 fps, p50 65.7 ms, one run). v1.0.3, one run each: world map 29.9 fps,
   `hoover_beach` 27.0 fps (p50 32.9 ms).

@@ -403,6 +403,7 @@ def compose(tid, opts, environ=None, g=None):
         else:
             kl = environ.get("NPS5_KYTY_GPU_LIB") or os.path.join(environ["NPS5_KYTY_DIR"], "build-arm64", "kyty_gpu.dylib")
         plan.put("NPS5_GPU", "kyty", "back end"); plan.put("NPS5_KYTY_GPU_LIB", kl, "back end")
+        plan.put("KYTY_FLIGHTREC_DIR", os.path.join(run_dir, "flightrec"), "base")   # always-on flight recorder: dumps beside the run log, not in the working directory
         if until:
             # The Kyty back end prints no [pstat] line: the watcher sees its presents and pictures through frame dumps in
             # <run>/frames (one small BMP every 15th present, at most 150). Any later layer may override these words.
