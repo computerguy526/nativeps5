@@ -3,7 +3,7 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.1 (candidate)
+## v1.0.3 (2026-11-18)
 
 Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the generated shaders.
 
