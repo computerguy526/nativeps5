@@ -54,6 +54,24 @@ class T(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     # ---- identity
+    def test_progress_line(self):
+        log = "x\nShader precompile: 89/893 (9%): 89 compiled\n[12:00:01] Pipeline replay: 512/1544 (33%): 500 built, 12 known, 0 failed, 21.0 s\nother\n"
+        self.assertEqual(cache.progress_line(log), "Pipeline replay: 512/1544 (33%): 500 built, 12 known, 0 failed, 21.0 s")
+        self.assertEqual(cache.progress_line("nothing here\n"), "")
+        self.assertLessEqual(len(cache.progress_line("Prepare shaders: " + "x" * 400)), 110)
+
+    def test_progress_tail_prints_new_lines_once(self):
+        import io
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "run.out"), "w") as f: f.write("Pipeline replay: 10/100 (10%): 10 built\n")
+        buf = io.StringIO(); t = cache.ProgressTail(d, "pass 1 of 2", every=0.05, out=buf); t.start()
+        time.sleep(0.3)
+        with open(os.path.join(d, "run.out"), "a") as f: f.write("Pipeline replay: 100/100 (100%): 100 built\n")
+        time.sleep(0.3); t.done(); t.join(2)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines, ["prepare: pass 1 of 2: Pipeline replay: 10/100 (10%): 10 built", "prepare: pass 1 of 2: Pipeline replay: 100/100 (100%): 100 built"])
+        self.assertEqual(cache.ProgressTail(os.path.join(d, "none"), "x").poll(), "")
+
     def test_key_changes_with_every_input(self):
         base = cache.stack_key("l", "k", "kk", "r", "hw")
         self.assertEqual(base, cache.stack_key("l", "k", "kk", "r", "hw"))

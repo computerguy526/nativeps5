@@ -87,6 +87,14 @@ permutation and pipeline is built through KosmicKrisp from your own dump, and th
 runs (ASTRO BOT: 1,259 of 1,260 built in 85 s on an M4 Pro). It fills the Vulkan driver cache, the program cache,
 the KosmicKrisp pipeline archive and a private OS Metal cache. With KosmicKrisp patch 0020 it runs twice: pass 1 collects every shader's MSL (`KK_LIBCACHE_DIR=<cache>/kk-libcache`), `scripts/kk-libcache-build.sh` builds it into Metal libraries, pass 2 prepares again from an empty cache with those libraries in place (a pipeline archived from a source-compiled library never hits when the shader is later loaded from a prebuilt one); runs then load libraries in 0.3 ms instead of compiling them (`--single-pass` skips pass 2).
 
+The prepare's window shows the loading card ("PREPARING SHADERS X / T") from its first frame until the pass ends, and
+the terminal prints the same count every few seconds (`prepare: pass 1 of 2: Pipeline replay: 512/1544 (33%) ...`); the
+Metal library build between the passes has no window and says so. `nps5 run` uses the prepared cache of the current
+stack by itself (cache folder, Metal cache id, the list, the launch phase). Without a prepared cache the same launch
+phase builds the whole list on that start, behind the card, and `nps5 run` says so before it starts; the window never
+sits blank (`NPS5_RUN_SHADER_CACHE=0` or an explicit `cache=` arm turns this off; `KYTY_PIPELINE_LIST_PREPARE_CARD=0`
+is the old prepare without a card).
+
 **Nothing compiles while you play.** A normal run on the Kyty back end starts with a launch phase behind the loading
 card ("PREPARING SHADERS X / T"): every pipeline of the list and of your own journal is created again before the game
 starts (`KYTY_PIPELINE_REPLAY_ALL=1`), together with the renderer's own tile/detile helper pipelines

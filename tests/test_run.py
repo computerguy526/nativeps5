@@ -49,6 +49,12 @@ class T(unittest.TestCase):
         self.assertEqual(c.exception.code, code, str(c.exception)); return str(c.exception)
 
     # ---- layering
+    def test_shader_cache_words_never_raise(self):
+        # the shader cache is an optimisation: an unknown title, a missing list or a broken profile gives a warning or nothing, never an error
+        out = run.shader_cache_words("PPSA99999", dict(os.environ, NPS5_SCRATCH=tempfile.gettempdir()), "/nonexistent/app0")
+        self.assertTrue(all(k is None for k, _, _ in out))
+        self.assertTrue(out == [] or "shader cache not used" in out[0][2])
+
     def test_layer_order(self):
         self.titles('APP0=/dump\nBIN=/b/native\nENV="LAYER=titles T_ONLY=1"\n')
         p = self.plan(["--scene", "scn", "--arm", "x:LAYER=arm,A_ALL=9", "--env", "A_ALL=10"])

@@ -25,7 +25,7 @@ $NPS5_KK_LIBCACHE_BUILD (default scripts/kk-libcache-build.sh) <dir> <jobs> buil
 cache and a fresh Metal cache id with the metallibs in place. (KK's Metal archive keys a pipeline on its library: a pipeline built from
 a source-compiled library never hits when the same shader is later loaded from a metallib, so only pass 2's archive is kept.)
 Tool: $NPS5_KYPLST_TOOL, else <kyty>/build-arm64/kyty_pipeline_list. Exit codes: 0 ok, 1 failed / stale, 2 usage."""
-import hashlib, importlib.util, os, re, shlex, shutil, subprocess, sys, time
+import hashlib, importlib.util, os, re, shlex, shutil, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -640,6 +640,50 @@ def cmd_verify_list(ctx, o, runner):
     return 0
 
 
+PROGRESS_RE = re.compile(r"^(?:\[[^\]]*\]\s*)?((?:Shader precompile|Pipeline replay|Prepare shaders|Helper prewarm): .*)$", re.M)
+
+
+def progress_line(text):
+    """The newest progress line of a prepare's log ('Pipeline replay: 512/1544 (33%): ...'), shortened for a terminal; '' when none."""
+    m = PROGRESS_RE.findall(text)
+    return m[-1].strip()[:110] if m else ""
+
+
+class ProgressTail(threading.Thread):
+    """While a prepare pass runs, print its newest progress line to the terminal every few seconds (the window shows the same count on
+    the loading card). Reads the tail of run.out / run.err of the run folder; never fails the prepare."""
+    def __init__(self, run_dir, label, every=5.0, out=None):
+        super().__init__(daemon=True)
+        self.run_dir, self.label, self.every, self.out, self.stop, self.last = run_dir, label, every, out or sys.stdout, threading.Event(), ""
+
+    def poll(self, since=0.0):
+        best = ""
+        for n in ("run.out", "run.err"):
+            try:
+                p = os.path.join(self.run_dir, n)
+                if os.stat(p).st_mtime < since:
+                    continue                        # the previous pass's log
+                with open(p, "rb") as f:
+                    f.seek(max(0, os.path.getsize(p) - 65536))
+                    line = progress_line(f.read().decode(errors="replace"))
+                if line and (not best or line.startswith("Prepare shaders: done")):
+                    best = line
+            except OSError:
+                pass
+        return best
+
+    def run(self):
+        t0 = time.time()
+        while not self.stop.wait(self.every):
+            line = self.poll(t0 - 2)
+            if line and line != self.last:
+                self.last = line
+                print("prepare: %s: %s" % (self.label, line), file=self.out, flush=True)
+
+    def done(self):
+        self.stop.set()
+
+
 def cmd_prepare(ctx, o, runner):
     app0 = app0_of(ctx, o["dry"])
     if not os.path.isfile(ctx.list_path):
@@ -679,14 +723,27 @@ def cmd_prepare(ctx, o, runner):
     # source never matches the same shader loaded from an offline-built metallib. Pass 1 collects the MSL (source libraries) and the
     # builder makes the metallibs; pass 2 starts a fresh cache and a fresh Metal cache id WITH the metallibs in place, so its archive
     # is the one later runs hit. Only pass 2's archive is kept. No builder, or nothing collected = a single pass, as before.
+    rd = os.path.join(ctx.scratch, "runs", ctx.tid, "cache-prepare")
+
+    def one_pass(label):
+        # The window shows the loading card ("PREPARING SHADERS X / T") for the whole pass; the terminal gets the same count.
+        print("prepare: %s: building the shader list; a window with the progress card is open, the game does not start" % label, flush=True)
+        tail = ProgressTail(rd, label); tail.start()
+        try:
+            return _call(cmd, ctx, runner)
+        finally:
+            tail.done()
+
     fresh_dir()
-    rc = _call(cmd, ctx, runner)
+    rc = one_pass("pass 1 of 2" if not o.get("single") else "pass 1")
+    if rc == 0:
+        print("prepare: building Metal libraries from the collected shaders (no window; this takes a few minutes on a first prepare)", flush=True)
     nlib = build_libs() if rc == 0 else 0
     passes = 1
     if rc == 0 and nlib > 0 and not o.get("single"):
         print("prepare: pass 1 done (%d metallibs); pass 2 re-prepares with them" % nlib)
         fresh_dir(keep_libcache=True)
-        rc = _call(cmd, ctx, runner); passes = 2
+        rc = one_pass("pass 2 of 2"); passes = 2
         if rc == 0:
             nlib = build_libs()
     info = {}

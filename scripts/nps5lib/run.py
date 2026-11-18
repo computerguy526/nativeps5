@@ -431,6 +431,18 @@ def compose(tid, opts, environ=None, g=None):
     cache = arm["pieces"].get("cache")
     if cache:
         plan.put("NPS5_CACHE_DIR", cache if os.path.isabs(cache) else os.path.join(scratch, "cache", tid, cache), "arm")
+    # 4b. the shader cache of this stack (nps5 cache): a normal run on the Kyty back end uses the cache `nps5 cache prepare` fills and
+    #     starts with the launch phase behind the loading card. Not prepared yet = the same phase compiles the list on this start
+    #     (minutes, once; the card counts), so a first launch never sits on a blank window. An explicit cache arm (cache=, or --env
+    #     KYTY_PIPELINE_JOURNAL_PATH=..., as `nps5 cache record|prepare|check` pass) or NPS5_RUN_SHADER_CACHE=0 turns this off.
+    explicit = cache or any(kv.startswith("KYTY_PIPELINE_JOURNAL_PATH=") for kv in opts.get("env", [])) or any(k == "KYTY_PIPELINE_JOURNAL_PATH" for k, _ in arm["env"])
+    if not explicit and environ.get("NPS5_RUN_SHADER_CACHE", "1") != "0" and "kind=kyplst" in (p.one("cache", "") or "") \
+            and (titles.get("GPU") or p.one("gpu", "kyty")) == "kyty" and titles.get("APP0"):
+        for k, v, note in shader_cache_words(tid, environ, titles["APP0"]):
+            if k:
+                plan.put(k, v, "cache")
+            elif note:
+                plan.warnings.append(note)
     # 5. arm, then --env
     for k, v in arm["env"]:
         plan.put(k, v, "arm" + (":" + arm["label"] if arm["label"] else ""))
@@ -449,6 +461,27 @@ def compose(tid, opts, environ=None, g=None):
     plan.sel = select_binary(g, p, titles, arm, opts.get("bin"), opts.get("patch"), environ)
     plan.environ = environ
     return plan
+
+
+def shader_cache_words(tid, environ, app0):
+    """-> [(key, value, None)] + [(None, None, warning)]: the environment that points a normal run at this stack's shader cache
+    (nps5lib/cache.py: cache dir, Metal cache id, the pipeline list, the launch phase). Empty when the title has no list."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import cache as cachemod
+        cx = cachemod.context(tid, environ)
+        if not os.path.isfile(cx.list_path):
+            return []
+        words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")))
+        out = [(k, v, None) for k, v in words + cachemod.launch_words(cx, app0)]
+        if cachemod.status(cx)[0] != "prepared":
+            out.append((None, None, "the shader cache of this stack is not prepared: this start builds the whole list behind the loading card "
+                                    "(\"PREPARING SHADERS X / T\", several minutes, once). `nps5 cache prepare %s` does it ahead, with prebuilt Metal libraries" % tid))
+        return out
+    except Exception as e:                           # the cache is an optimisation: a run never fails on it
+        return [(None, None, "shader cache not used: %s" % (str(e) or type(e).__name__))]
 
 
 def command_line(plan, timeout_bin="gtimeout"):
