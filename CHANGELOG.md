@@ -25,9 +25,10 @@ First publication. History of the forks: upstream history as is, then this proje
 commits, then the changes below as separate commits.
 
 ### Kyty back end (`nativeps5-kyty`)
-- Loading card: a full-screen card ("PREPARING SHADERS X / T", "LOADING... N s") covers the session start until
-  the game's first content frame; afterwards only a stall of at least 4 s with loading work brings it back
-  (`KYTY_LOADCARD_GAP_S`, `KYTY_LOADCARD_MIDGAME=0`). Frame dumps never change the screen.
+- Loading card: a full-screen card ("PREPARING SHADERS X / T", "LOADING... N s") covers the opening load only: it
+  stops for good at the first frame that is not fully black and never shows over a playing video (studio logo).
+  Later loads show just the small bottom-left "compiling" badge; `KYTY_LOADCARD_MIDGAME=1` (off by default)
+  brings the full card back after a stall of `KYTY_LOADCARD_GAP_S` (4 s). Frame dumps never change the screen.
 - Two hitch switches, both off by default: `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=<n>` (per-page, per-frame
   limit for served read faults) and `KYTY_OCCLUSION_QUERY_DRAW_SKIP=1` (skip query-only draws when occlusion
   results are synthetic).

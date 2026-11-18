@@ -4,7 +4,22 @@ Play your own PlayStation 5 games natively on Apple silicon Macs. The game's x86
 
 It is not an emulator: there is no JIT and no interpreter. Nothing from any game is in this repository or in its component repositories, and the project is not affiliated with Sony Interactive Entertainment or any game publisher. "PlayStation" and "PS5" are trademarks of their owners.
 
-[Games](#games) · [How it fits together](#how-it-fits-together) · [Requirements](#requirements) · [How to play](#how-to-play) · [For developers](#for-developers) · [Acknowledgements](#acknowledgements) · [License](#license)
+[Status and limitations](#status-and-limitations) · [Games](#games) · [How it fits together](#how-it-fits-together) · [Requirements](#requirements) · [How to play](#how-to-play) · [For developers](#for-developers) · [Acknowledgements](#acknowledgements) · [License](#license)
+
+## Status and limitations
+
+- **Early preview.** One game, ASTRO BOT version 01.007, tested on one Mac (MacBook Pro, M4 Pro, 24 GB, macOS 26). Apple silicon only.
+- **You need your own legally dumped copy** of the game; nothing from any game is here or in the components.
+- **Speed:** about 20-30 fps on the world map and the early levels at 1080p; heavy levels (Sky Garden, the ninja castle) about 12-15 fps. The GPU back end is the limit and is being worked on.
+- **MetalFX upscaling (720p/900p) is experimental and off by default:** at the lower sizes some of the game's passes still assume 1080p, which shows as blocky squares and jagged edges on moving objects and dust. A fix is in progress.
+- **Shaders:** a cache prepare step builds the game's shaders before the first run; it can take several minutes and shows its progress in the terminal only. The first visit to a level that is not in the shipped shader list may still compile some shaders (short stutters).
+- **Saves:** a save written in some situations can crash the game when it is loaded again (under investigation). Keep a backup of your save folder.
+- **Crashes:** about 9 % of world-map runs end in a guest bus error (SIGBUS; not yet diagnosed). Closing the window exits at once and skips the shader-cache flush.
+- **Picture:** PlayStation symbols look garbled in the warp from the world map into a level. The `hoover_beach` fluid read-fault storm is mitigated in the profile.
+- **Controller:** DualSense, DualShock 4, Switch Pro and Xbox pads through SDL; DualSense haptics; motion controls need a pad with a gyro.
+- **No online features and no trophies.**
+
+Details and causes: [ASTRO BOT known issues](games/PPSA21564/README.md#known-issues).
 
 ## Games
 
@@ -12,7 +27,7 @@ Each game's note records the tested version and Mac, frame rates, settings and k
 
 | Game | Title ID | Version | Status |
 |---|---|---|---|
-| [ASTRO BOT](games/PPSA21564/README.md) | `PPSA21564` | 01.007 | Boots; the title screen, the world map and every level tried show a picture, and the controller works. About 28 fps on the world map and 24 fps in the first level on an M4 Pro; 12 to 47 fps depending on the scene. Not finished: about 9 % of world-map runs crash, some effects flicker, nobody has played beyond the start of a level. |
+| [ASTRO BOT](games/PPSA21564/README.md) | `PPSA21564` | 01.007 | Boots; the title screen, the world map and every level tried show a picture, and the controller works. About 20-30 fps on the world map and the early levels at 1080p on an M4 Pro, 12-15 fps in the heaviest levels. Early preview: see [Status and limitations](#status-and-limitations). |
 | [A Game About Digging A Hole](games/PPSA30552/README.md) | `PPSA30552` | not recorded | Second bring-up target, on the AnyPS5 back end; boots, and the menu, intro cutscene and gameplay run. Not finished; see its note. |
 
 Frame rates are below the console's in most scenes. A 16 GB Mac will not run an ASTRO BOT level. [games/README.md](games/README.md) explains the per-game profiles.

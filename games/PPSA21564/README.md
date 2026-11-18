@@ -16,11 +16,11 @@ from here.
   world map 36.0 ms (about 28 fps), `hoover_beach` 41.1 ms (about 24 fps; p95 122 ms, bimodal between runs).
   Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
   Patches), shader caches prepared from the shipped pipeline list.
-- **Known issues at release:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not
-  diagnosed); the flower and turtle effects flicker in some places (a fix exists and is not in this release);
-  PlayStation symbols look garbled in the warp from the world map into a level; `hoover_beach` has a read-fault
-  storm in about half the runs; closing the window exits at once without flushing the shader caches. Details in
-  "Known issues" below.
+- **Known issues:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not diagnosed); a save
+  written in some situations crashes the game when loaded again (keep a backup); MetalFX 720p/900p upscaling shows
+  block artefacts (experimental, off by default); PlayStation symbols look garbled in the warp from the world map
+  into a level; closing the window exits at once without flushing the shader caches. Details in "Known issues"
+  below.
 - **Status as of 2026-11-17** on a Mac16,8 (M4 Pro, 24 GB), macOS 26.6: boots; title, world map and every level
   tried show a picture; controller works; 12-47 fps depending on the scene. [validated.tsv](validated.tsv) has the
   component commits.
@@ -129,11 +129,16 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | Levels with about 5,000 draws per frame at 12-13 fps | `underwater_aerial_garden`, `shuriken_ninja_castle` | CPU-bound in the back end: per-draw commit cost and a buffer collector that waits for the GPU after every submission ([frame-rate](../../docs/reference/frame-rate.md), "CPU-bound levels") | Read path fixed (104 -> 84 ms together with the completion clock). Open: commit cost per run start (11-14.5 us), one 480x270 effect pass at 211-218 us per draw, the lazy collector settle |
 | First level pays 10.8 ms for one commit | `hoover_beach` | nine serial compute dispatches (five small, four megakernels at the 96-register cap with 3.3-4.4 k spills each) and two passes, serialised by barriers | Open. Knock-out to separate shader cost from barrier cost not done |
 | 66 s of black before some levels | `booster_magic_lamp`, `rocket_space_station` | loading; not a rendering fault | Pad scripts must wait for it |
-| Cold start of a new level compiles for 2-15 s | every first visit without prepared caches | 14-99 pipeline compiles | `scripts/prepare-pipelines.sh PPSA21564` (1,259 of 1,260 pipelines built in 85 s); how many live compiles remain per scene after it has not been measured on a healthy machine |
+| Cold start of a new level compiles for 2-15 s | every first visit without prepared caches | 14-99 pipeline compiles | `scripts/prepare-pipelines.sh PPSA21564` builds the shipped list (1,544 pipelines, 878 shader permutations; about 70 s for the pipelines once the shader libraries are built). A level that is not in the list still compiles on its first visit (short stutters). The prepare shows its progress in the terminal only |
 | `volcano_mountain` is very dark | | unknown; may be right | Compare with a console capture |
 | Title frame time is bimodal with record-time clocks | title | the dynamic-resolution feedback loop | Gone with `cbtime`; do not use 36-40 fps figures from old notes as a baseline |
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
 | About 9 % of world-map runs end in a guest bus error (SIGBUS) | world map | not diagnosed | Open, parked at the first release |
+| MetalFX upscaling at 720p/900p shows blocky squares and jagged edges on moving objects and dust | intro cutscene (ship, alien, floor), crash site sand; with and without MetalFX | the game never renders below 1080p by itself; some passes keep a 1080p-derived size or tile grid when the level-0 size is lowered | Open. `upscaling` is off by default; the three DRS-level size helpers (guest `0x77d75f0`, `0x78395f0`, `0x7839680`) and the 1920x1080 initialisers were ruled out |
+| A save written in some situations crashes the game when it is loaded | loading that save (seen after a play session; the crash is in the game's XML parser) | the save-data read returns the wrong region | Under investigation. Keep a backup of the save folder |
+| All in-game text missing (menu captions, "PRESS ANY BUTTON", copyright) | everywhere | `sceFontGetRenderCharGlyphMetrics` and the rest of the glyph API returned an error, so the layout dropped every character | Fixed (libSceFont glyph API) |
+| Intro video jitter; crash when a video loops | studio logo / intro, looping clips in the hub | frame selection against the clock; codec flush from the demuxer thread | Fixed (frame selection; flush on the decoder thread with a marker packet) |
+| Crash on the way into the crash-site hub (file read returns EFAULT) | `hub_crashsite`, world map | a file read into a guest page the back end had just protected: the kernel returns EFAULT instead of faulting, so the game got an error for a valid buffer | Fixed (the read opens the range again and repeats) |
 | Flower and turtle effects flicker | some places in levels | late depth test after instrumented (`GET_LOD_STATS`) pixel shaders misses the pre-pass depth | Fixed: early depth/stencil tests for those shaders (`KYTY_LOD_STATS_EARLY_TESTS`, default on; `hoover_beach` burst frames gone). Needs a fresh shader-cache prepare |
 | Closing the window exits at once, without the renderer teardown and the on-exit cache flush | any run | the window-close path | Pipelines compiled since the last periodic cache save are lost |
 | `hoover_beach` has a fluid-simulation read-fault storm in about half the runs | `hoover_beach` | page-fault handling for the game's fluid simulation | `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` is on in the profile (game.tsv): the ~340 ms stalls went from 3-33 per minute to 0-1.3 |
@@ -143,7 +148,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 - Arguments: none (title), `-skipIntro` (world map), `-skipIntro -lvl <name>` (a level). Level names are the folder
   names under the title's level data. [bench.tsv](bench.tsv) has the measured routes with their pad scripts and
   windows.
-- First: `scripts/prepare-pipelines.sh PPSA21564` builds the compiled caches for 1,260 pipelines from
+- First: `scripts/prepare-pipelines.sh PPSA21564` builds the compiled caches for 1,544 pipelines from
   [pipelines.kyplst](pipelines.kyplst) and your own dump, so first visits do not stutter on compiles
   ([games/README.md](../README.md), "Pipeline lists").
 - Pictures: `KYTY_DUMP_FRAMES=<n>` with `_EVERY` and `_FROM`; for a level start at present 1,300 or later and dump
