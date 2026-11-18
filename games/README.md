@@ -123,9 +123,10 @@ writes the tag into each journal record, `kyty_pipeline_list export` keeps it an
 recordings; `nps5 cache merge` prints them ("scene tags: 94 pipeline tag(s) in 3 scene(s): ..."). A list without tags
 (recorded by an older runtime) still works; *scene* then prepares everything, like *all*.
 
-Six helper pipelines (the window's present and overlay blits, two compute kernels) only exist once a window is up, so a
-prepare cannot build them: the very first start after a prepare compiles them while the window opens (about half a
-second, before the first frame), later starts take them from the caches.
+Six helper pipelines (the window's present and overlay blits, two compute kernels) only exist once a window is up, so
+the prepare passes cannot build them; the two warm starts at the end of `nps5 cache prepare` do. After a prepare with
+`--no-warm` the first starts compile them while the window opens (about half a second, before the first frame); later
+starts take them from the caches.
 
 ### Share your list
 

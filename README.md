@@ -14,7 +14,7 @@ It is not an emulator: there is no JIT and no interpreter. Nothing from any game
 - **MetalFX upscaling (720p/900p) is optional and off by default (native 1080p):** v1.0.3 fixes the blocky squares on dust, glass and particles (the light-tile grid now follows the render size). Enable it with `NPS5_ASTRO_UPSCALING=metalfx720` or `metalfx900`. It gives little fps today because the game is CPU/vertex-bound in levels, and spatial MetalFX has no anti-aliasing of its own, so edges look more jagged than at native 1080p.
 - **Shaders:** a cache prepare step builds the game's shaders before the first run; it can take several minutes and shows its progress in the terminal only. The first visit to a level that is not in the shipped shader list may still compile some shaders (short stutters).
 - **Saves:** fixed in v1.0.1: a save could crash the game on load (the save-data transfer mount opened the game's own save). Saves are still early-preview data: keep a backup of your save folder.
-- **Crashes:** the world-map bus error (SIGBUS) that ended about 9 % of world-map runs during development (3 of about 35) is fixed: a file read into guest memory failed with EFAULT, and the read retry that fixes it has been in every release since v1.0.0 (0 of 50 title-to-world-map runs since; v1.0.2 extends it to `readv` and `fread`). Closing the window exits at once and skips the shader-cache flush.
+- **Crashes:** the world-map bus error (SIGBUS) that ended about 9 % of world-map runs during development (3 of about 35) is fixed: a file read into guest memory failed with EFAULT, and the read retry that fixes it has been in every release since v1.0.0 (0 of 50 title-to-world-map runs since; v1.0.2 extends it to `readv` and `fread`). Closing the window exits at once; since v1.0.3 it first writes the Vulkan driver pipeline cache (up to about 3 s).
 - **Picture:** PlayStation symbols look garbled in the warp from the world map into a level. The `hoover_beach` fluid read-fault storm is mitigated in the profile.
 - **Controller:** DualSense, DualShock 4, Switch Pro and Xbox pads through SDL; DualSense haptics; motion controls need a pad with a gyro.
 - **No online features and no trophies.**
@@ -97,7 +97,7 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    ```
 
    `--scene worldmap` skips the intro; `--dry-run` prints the environment and command and starts nothing. The profile's canonical settings are in [games/PPSA21564/README.md](games/PPSA21564/README.md). It also lists the optional binary patches, including `nt`, which always takes the non-tiled lighting path and skips the tiled-lighting compute kernels; that changes the picture and has not been reviewed.
-8. **Quit** by closing the window. This exits at once, without flushing the shader caches, so pipelines compiled since the last periodic save are lost. Only one title runs at a time, and `nps5 run` refuses to start while another GPU process is running.
+8. **Quit** by closing the window. This exits at once, without the renderer teardown; since v1.0.3 the Vulkan driver pipeline cache is written first (up to about 3 s), and the pipeline journals are written as they grow. Only one title runs at a time, and `nps5 run` refuses to start while another GPU process is running.
 
 `nps5 run` sets a memory limit from your RAM, silences audio by default and scrubs the environment. These rules exist because breaking them has rebooted the development machine; read "Running safely" in [AGENTS.md](AGENTS.md) before doing GPU work of your own.
 

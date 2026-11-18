@@ -22,7 +22,7 @@ from here.
   Patches), shader caches prepared from the shipped pipeline list.
 - **Known issues:** MetalFX 720p/900p upscaling is optional and off by default (the block artefacts are fixed in v1.0.3; edges are
   more jagged than native); PlayStation symbols look garbled in the warp from the world map
-  into a level; closing the window exits at once without flushing the shader caches. Details in "Known issues"
+  into a level; closing the window exits at once without the renderer teardown (v1.0.3 writes the driver pipeline cache first). Details in "Known issues"
   below.
 - **Status as of 2026-11-17** on a Mac16,8 (M4 Pro, 24 GB), macOS 26.6: boots; title, world map and every level
   tried show a picture; controller works; 12-47 fps depending on the scene. [validated.tsv](validated.tsv) has the
@@ -143,7 +143,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | Intro video jitter; crash when a video loops | studio logo / intro, looping clips in the hub | frame selection against the clock; codec flush from the demuxer thread | Fixed (frame selection; flush on the decoder thread with a marker packet) |
 | Crash on the way into the crash-site hub (file read returns EFAULT) | `hub_crashsite`, world map | a file read into a guest page the back end had just protected: the kernel returns EFAULT instead of faulting, so the game got an error for a valid buffer | Fixed (the read opens the range again and repeats) |
 | Flower and turtle effects flicker | some places in levels | late depth test after instrumented (`GET_LOD_STATS`) pixel shaders misses the pre-pass depth | Fixed: early depth/stencil tests for those shaders (`KYTY_LOD_STATS_EARLY_TESTS`, default on; `hoover_beach` burst frames gone). Needs a fresh shader-cache prepare |
-| Closing the window exits at once, without the renderer teardown and the on-exit cache flush | any run | the window-close path | Pipelines compiled since the last periodic cache save are lost |
+| Closing the window exits at once, without the renderer teardown and the on-exit cache flush | any run | the window-close path | Partly fixed in v1.0.3: the close writes the Vulkan driver pipeline cache first (up to about 3 s) and the last-scene memory; the rest of the teardown is still skipped |
 | `hoover_beach` has a fluid-simulation read-fault storm in about half the runs | `hoover_beach` | page-fault handling for the game's fluid simulation | `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` is on in the profile (game.tsv): the ~340 ms stalls went from 3-33 per minute to 0-1.3 |
 
 ## How to reach a scene

@@ -23,9 +23,9 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the
   screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. Upscaling stays off by default (native 1080p);
   little fps gain today because the game is CPU/vertex-bound in levels.
 - Tooling: a scripted pad no longer also relays the real pad's input in the Kyty host (`KYTY_PAD_RELAY_WITH_SCRIPT=1`
-  restores that), and a pad script accepts `shake=<seconds>` (10 Hz accelerometer/gyro shake) for motion tests.
-- File reads into guest memory (`readv`, `fread`) repeat when the page was protected again before the kernel copied
-  (EFAULT), as `read`/`pread` already did: the world-map bus error is closed (see v1.0.2).
+  restores that), and a pad script accepts `shake=<seconds>` (10 Hz accelerometer/gyro shake, at most 30 s) for motion tests.
+- Carried over from v1.0.2 (no new change): file reads into guest memory (`readv`, `fread`) repeat when the page was
+  protected again before the kernel copied (EFAULT), as `read`/`pread` already did; the world-map bus error is closed.
 - Fault handling switches, off by default: `KYTY_HOSTED_RETRIED_WRITES=1` (guest write faults on GPU-owned pages take
   the side path instead of draining the command processor) and `KYTY_READ_RELAX=<n>` (served read-watched pages are not
   re-watched until the next GPU write). Together `hoover_beach` p50 45.9 -> 37.9 ms, 20.1 -> 22.9 fps (two runs each, ABBA);

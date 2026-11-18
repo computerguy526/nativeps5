@@ -864,7 +864,7 @@ KYTY_APR_HASHED_IDS	kyty		src/libs/libAmpr.cpp
 KYTY_APR_KEEP_FILES	kyty		src/libs/libAmpr.cpp
 KYTY_APR_PREPARE_WRITE	kyty		src/libs/libAmpr.cpp
 KYTY_ASTRO_CB_SCALE	kyty		src/loader/gamePatch.cpp
-KYTY_ASTRO_TILE_GRID	kyty	`auto` or `<tx>x<ty>`: ASTRO BOT light-tile grid for a forced internal size (fixes the 720p/900p blocks; set by the upscaling setting; acts only with MetalFX)	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_ASTRO_TILE_GRID	kyty	`auto` or `<tx>x<ty>` (at most 240x135): ASTRO BOT light-tile grid for a forced internal size (fixes the 720p/900p blocks; set by the upscaling setting; `auto` acts only with MetalFX)	src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_AUDIO2_UNLOCKED_PUSH	kyty		src/libs/libAudio2.cpp
 KYTY_AUDIO_CLOCK_SKEW_PPM	kyty		src/libs/audio.cpp
 KYTY_AUDIO_DIAG	kyty		src/libs/audioDiag.h
