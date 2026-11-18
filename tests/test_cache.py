@@ -196,6 +196,7 @@ class T(unittest.TestCase):
         w = " ".join(runs[2])
         self.assertIn("KYTY_PIPELINE_REPLAY_ALL=1", w); self.assertNotIn("KYTY_PIPELINE_LIST_PREPARE=1", w)   # a normal start, not a prepare
         self.assertIn("KK_LIBCACHE_DIR=%s" % lcd, w)
+        p1 = runs[0]; self.assertEqual(p1[p1.index("--secs") + 1], str(cache.PREPARE_SECS))            # a prepare is not cut at 180 s
         runs.clear()
         self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], runner)[0], 0)
         self.assertEqual(len(runs), 2)

@@ -35,6 +35,7 @@ sys.path.insert(0, HERE)
 import run as runmod  # noqa: E402
 
 STALL_MS = 250.0
+PREPARE_SECS = 1800
 KEY_FIELDS = ("list", "kyty", "kk", "ps5recomp", "hw")
 
 
@@ -691,7 +692,9 @@ def cmd_prepare(ctx, o, runner):
     if not os.path.isfile(ctx.list_path):
         raise CacheError("no %s" % ctx.list_path, 2)
     words = cache_env(ctx.tid, ctx.dir, ctx.metal) + prepare_words(ctx, app0)
-    cmd = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or 180, words)
+    # A prepare exits by itself when the list is built; --secs is only its ceiling. 180 s (the old default) cut a first prepare of
+    # ~1,600 pipelines on a busy Mac (no until target: the watcher ends a run at its secs), so the default is 30 min.
+    cmd = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words)
     if o["dry"]:
         print("[dry-run] stack key %s\n  cache dir %s\n  metal id  %s\n  would remove %s and %s, then:\n  %s" % (
             ctx.key, ctx.dir, ctx.metal, ctx.dir, os_metal_dir(ctx.metal) or "<OS metal cache>", " ".join(shlex.quote(c) for c in cmd)))
