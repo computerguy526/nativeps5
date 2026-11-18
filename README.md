@@ -13,7 +13,7 @@ It is not an emulator: there is no JIT and no interpreter. Nothing from any game
 - **Speed:** about 20-30 fps on the world map and the early levels at 1080p; heavy levels (Sky Garden, the ninja castle) about 12-15 fps. The GPU back end is the limit and is being worked on.
 - **MetalFX upscaling (720p/900p) is experimental and off by default:** at the lower sizes some of the game's passes still assume 1080p, which shows as blocky squares and jagged edges on moving objects and dust. A fix is in progress.
 - **Shaders:** a cache prepare step builds the game's shaders before the first run; it can take several minutes and shows its progress in the terminal only. The first visit to a level that is not in the shipped shader list may still compile some shaders (short stutters).
-- **Saves:** a save written in some situations can crash the game when it is loaded again (under investigation). Keep a backup of your save folder.
+- **Saves:** fixed in v1.0.1: a save could crash the game on load (the save-data transfer mount opened the game's own save). Saves are still early-preview data: keep a backup of your save folder.
 - **Crashes:** about 9 % of world-map runs end in a guest bus error (SIGBUS; not yet diagnosed). Closing the window exits at once and skips the shader-cache flush.
 - **Picture:** PlayStation symbols look garbled in the warp from the world map into a level. The `hoover_beach` fluid read-fault storm is mitigated in the profile.
 - **Controller:** DualSense, DualShock 4, Switch Pro and Xbox pads through SDL; DualSense haptics; motion controls need a pad with a gyro.

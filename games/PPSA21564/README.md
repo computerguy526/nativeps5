@@ -16,8 +16,7 @@ from here.
   world map 36.0 ms (about 28 fps), `hoover_beach` 41.1 ms (about 24 fps; p95 122 ms, bimodal between runs).
   Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
   Patches), shader caches prepared from the shipped pipeline list.
-- **Known issues:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not diagnosed); a save
-  written in some situations crashes the game when loaded again (keep a backup); MetalFX 720p/900p upscaling shows
+- **Known issues:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not diagnosed); MetalFX 720p/900p upscaling shows
   block artefacts (experimental, off by default); PlayStation symbols look garbled in the warp from the world map
   into a level; closing the window exits at once without flushing the shader caches. Details in "Known issues"
   below.
@@ -135,7 +134,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
 | About 9 % of world-map runs end in a guest bus error (SIGBUS) | world map | not diagnosed | Open, parked at the first release |
 | MetalFX upscaling at 720p/900p shows blocky squares and jagged edges on moving objects and dust | intro cutscene (ship, alien, floor), crash site sand; with and without MetalFX | the game never renders below 1080p by itself; some passes keep a 1080p-derived size or tile grid when the level-0 size is lowered | Open. `upscaling` is off by default; the three DRS-level size helpers (guest `0x77d75f0`, `0x78395f0`, `0x7839680`) and the 1920x1080 initialisers were ruled out |
-| A save written in some situations crashes the game when it is loaded | loading that save (seen after a play session; the crash is in the game's XML parser) | the save-data read returns the wrong region | Under investigation. Keep a backup of the save folder |
+| ~~A save written in some situations crashes the game when it is loaded~~ | - | Fixed in v1.0.1: the save-data transfer mount opened the game's own save, so its XML parser read it from the wrong offset | Update to v1.0.1 (`nativeps5-recomp` 7c91175) |
 | All in-game text missing (menu captions, "PRESS ANY BUTTON", copyright) | everywhere | `sceFontGetRenderCharGlyphMetrics` and the rest of the glyph API returned an error, so the layout dropped every character | Fixed (libSceFont glyph API) |
 | Intro video jitter; crash when a video loops | studio logo / intro, looping clips in the hub | frame selection against the clock; codec flush from the demuxer thread | Fixed (frame selection; flush on the decoder thread with a marker packet) |
 | Crash on the way into the crash-site hub (file read returns EFAULT) | `hub_crashsite`, world map | a file read into a guest page the back end had just protected: the kernel returns EFAULT instead of faulting, so the game got an error for a valid buffer | Fixed (the read opens the range again and repeats) |
