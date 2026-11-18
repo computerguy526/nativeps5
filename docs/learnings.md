@@ -44,6 +44,20 @@ Do not retry these without a new angle. "Neutral" means inside run-to-run noise.
 
 | Date | Idea | Scene | Result | Why |
 |---|---|---|---|---|
+| 2026-11-18 | Compute prologue: record compute dispatches that sit between draws into a separate command buffer so the render pass stays open (AnyPS5 #15548 idea) | PPSA21564 world map, Sky Garden | Counted only about 2 (world map) and 4.5 (Sky Garden) hoistable pass splits per frame; ceiling under 1 % (at most 0.15 of 36 ms and 0.5 of 65 ms); not implemented | Kyty runs mesh draws as native mesh pipelines, so the compute-between-draws pattern AnyPS5 fixed barely exists here; most splits are depth-layout flips caused by the draws themselves |
+| 2026-11-18 | Render-pass merging into one Metal command buffer (wolf-kosmickrisp idea) | PPSA21564 | Not built | KosmicKrisp already records one Metal command buffer per Vulkan command buffer; merging further only saves CPU time and these scenes are GPU-bound |
+| 2026-11-18 | Bound the render area of attachment-less passes to the scissor (shadPS4 #5452) | PPSA21564 Sky Garden | about 37 such passes per frame, all already 128x128 | Already done: the render area comes from the scissor union (KytyPS5 PR #108); the remaining ~1.7 ms is per-encoder overhead, not area |
+| 2026-11-18 | Primitive restart off on list topologies (shadPS4 #5161) | PPSA21564 Sky Garden | 0 list draws with restart enabled out of ~5,000 per frame | Kyty already disables restart for lists; KosmicKrisp unrolls only ~2 draws per frame, for its indexed-indirect robustness workaround |
+| 2026-11-18 | Move mid-pass buffer copies to a pre-pass upload command buffer (shadPS4 #5458) | PPSA21564 Sky Garden | about 0.2 such copies per frame | Nothing to move |
+| 2026-11-18 | Periodic or count-based submit | PPSA21564 | Not retried | Same mechanism as the earlier PPSA30552 dead end (mid-pass segment commit, [playbook.md](playbook.md) row 8) |
+| 2026-11-18 | Draw distance: bias the game's own model LOD selection (LodRatioBias in the renderer's debug settings, exposed as a `far_detail` setting) | PPSA21564 Sky Garden, warm cache | 0 to 4 % (p50 63.0 -> 60.7 ms at the strongest bias), distant props visibly thin out | The cost is near-field: grass and hedges, nearby G-buffer geometry, lighting compute and shadow casters. Caveat: measured at the level start (the scripted pad did not move the player) |
+| 2026-11-18 | Lower texture quality far away: extra sampler mip bias (+1) and an anisotropy cap of 4 | PPSA21564 Sky Garden | -1 to -5 % GPU time per frame, inside noise (contended machine, no clean ABBA) | Texture bandwidth is not the limit in this scene |
+| 2026-11-18 | Switch off the game's own render stages (SSR, SSAO, screen-space shadows, depth of field, both fogs, voxel particles) through their enable flags | PPSA21564 Sky Garden | All seven together about -2.5 ms (3.6 %), borderline; each alone within +-3 ms noise | The frame is shader- and vertex-bound in the G-buffer, lighting and compute passes, not in post effects |
+| 2026-11-18 | Game-side CPU patches (physics substeps, job counts) | PPSA21564 gameplay samples | Guest code is 0.8 % of samples | Not where the time goes |
+| 2026-11-18 | Let KosmicKrisp follow the app's Vulkan barriers instead of a full barrier at every encoder end (`KK_VKSYNC`, same idea as Mesa MR !46247) | PPSA21564 Sky Garden, Hoover | Neutral; vertex, fragment and compute overlap rose by only 0.5 % | 92 % of Kyty's 250-600 barriers per frame ask for all stages on both sides; the app side has to narrow first (in progress) |
+| 2026-11-18 | Keep a sampled depth target in the feedback layout to avoid pass splits (`KYTY_DEPTH_FEEDBACK_ASPECT`) | PPSA21564 Sky Garden | GPU watchdog hang shortly after the path turned on | Covers about 5 draws per frame; shelved |
+| 2026-11-18 | Wider write-fault service window (1 MiB) | PPSA21564 Sky Garden | 12.55 vs 12.70 fps, neutral | Faults per frame halve but each costs more; the window already adapts (256 KiB) |
+| 2026-11-18 | Selective buffer-collector settle (`KYTY_GC_SETTLE_SELECTIVE=1`) | PPSA21564 Sky Garden under memory pressure | Fast (p50 73-75 -> 62 ms) but wrong: a flicker on the player's helmet, reproduced with the switch on and gone with it off | A buffer can be retired and reused while a pending readback or GPU use still covers it; off by default until a correct version exists |
 | 2026-11-15 | Batching or folding submissions | PPSA30552 menu | submits 53.5 -> 18.3 per frame; frame time +0.05 ms (8 pairs) | The title was 94 % GPU-bound; the wait moved |
 | 2026-11-15 | Mid-pass segment commit | PPSA30552 | forced: 28.3-29.8 against 27.0-27.4 ms: a loss | More submissions, same GPU work |
 | 2026-11-15 | Cheaper fence polls, lock-free hand-off, verify memo | PPSA30552 menu | CPU -5 ms per frame; fps +0 to +2 % | CPU fell, fps did not: the polls were a busy wait for the GPU |
@@ -75,6 +89,21 @@ Do not retry these without a new angle. "Neutral" means inside run-to-run noise.
 Still open, built but without a title number (do not quote them as wins): fewer and cheaper barriers in the
 driver, vectorised loads in NIR, mip skip, the texture reuse tracker, the lazy collector settle, MetalFX in place of
 the game's upscaler, per-shader NaN-guard removal on the megakernels.
+
+
+Secondary leads from these results (not yet tried or still open):
+
+- Narrow the destination side of Kyty's barriers (later work waits only for what it consumes), then let vertex work of
+  one pass overlap fragment work of the previous one. In Sky Garden vertex 16.4, fragment 15.2 and compute 13.3 ms per
+  frame never overlap.
+- Shadow casters draw as many indices as the G-buffer (about 12 million each per frame): a separate LOD or culling
+  choice for the shadow pass may pay where the general LOD bias did not.
+- Compute megakernels: direct MSL generation (one 2.0 ms kernel ran in 0.30 ms, bit-identical, offline) and a lower
+  Metal optimisation level for very large shaders.
+- Fast shader math per shader instead of globally (an allow list of shaders whose output does not change).
+- A correct selective collector settle (retire only buffers whose last GPU use and pending readbacks have completed).
+- Near-field density: grass and hedge pipelines are the heaviest geometry; no global density knob was found, so this
+  needs per-material work.
 
 ## 3. What we learned about measuring
 
