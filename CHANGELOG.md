@@ -63,6 +63,8 @@ commits, then the changes below as separate commits.
   A prepare-only start shows the same card for the whole pass (`KYTY_PIPELINE_LIST_PREPARE_CARD=0`: no card), and
   `nps5 cache prepare` prints the count in the terminal; `nps5 run` uses the prepared cache of the stack by itself and,
   without one, builds the list in the launch phase behind the card (`NPS5_RUN_SHADER_CACHE=0` turns that off).
+  `nps5 cache prepare` ends with two short normal starts that build the window's own helper pipelines (present /
+  overlay blits, two kernels: in no list), so the player's first starts compile none of them (`--no-warm` skips them).
 
 ### Runtime and translator (`nativeps5-recomp`)
 - Lifter: 32-bit SHLD/SHRD by a CL count of 0 zero-extends the destination (PS4Recomp 27e12b0).

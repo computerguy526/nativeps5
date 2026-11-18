@@ -7,9 +7,11 @@
                                                                       (keys only, verified); prints how many pipelines are new and how to send it
   nps5 cache merge   <id> --contrib FILE... [--write]                  MAINTAINER: fold verified contributions into the shipped list
   nps5 cache verify-list <id> [--list FILE] [--shaders JOURNAL ...]   no game code in the list; writes <list>.verified
-  nps5 cache prepare <id> [--secs N] [--single-pass] [--dry-run]      USERS RUN THIS ONCE: fresh cache + fresh Metal cache id, builds
+  nps5 cache prepare <id> [--secs N] [--single-pass] [--no-warm] [--dry-run]
+                                                                      USERS RUN THIS ONCE: fresh cache + fresh Metal cache id, builds
                                                                       every listed pipeline in a start that exits before the game runs;
-                                                                      two starts with KK's library cache (see below), --single-pass = one
+                                                                      two starts with KK's library cache (see below), --single-pass = one;
+                                                                      then two short warm starts (window helper pipelines), --no-warm = none
   nps5 cache check   <id> [--scene NAME ...] [--secs N] [--dry-run]   first-visit runs on a clone of the prepared cache: live compiles, stalls
   nps5 cache status  <id>                                              fresh | partial | prepared | stale (exit 0 only when prepared)
 
@@ -746,6 +748,9 @@ def cmd_prepare(ctx, o, runner):
         rc = one_pass("pass 2 of 2"); passes = 2
         if rc == 0:
             nlib = build_libs()
+    warm = 0
+    if rc == 0 and passes == 2 and not o.get("nowarm"):
+        warm = warm_starts(ctx, app0, o, runner, build_libs)
     info = {}
     try:
         info = parse_info(runner([tool_path(ctx), "info", ctx.list_path], env=ctx.environ, capture=True)[1])
@@ -755,11 +760,34 @@ def cmd_prepare(ctx, o, runner):
     with open(pt + ".tmp", "w") as f:
         f.write("# written by nps5 cache prepare; read by nps5 cache status (a key mismatch means stale)\n")
         for k, v in [("key", ctx.key), ("gpu", ctx.gpu), ("metal_id", ctx.metal), ("date", time.strftime("%Y-%m-%d", time.gmtime())),
-                     ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?")), ("passes", passes), ("metallibs", nlib)] + list(ctx.identity().items()):
+                     ("rc", rc), ("wall_s", int(time.time() - t0)), ("pipelines", info.get("pipelines", "?")), ("passes", passes), ("metallibs", nlib), ("warm", warm)] + list(ctx.identity().items()):
             f.write("%s=%s\n" % (k, v))
     os.replace(pt + ".tmp", pt)            # whole or absent: status never reads a half-written record
     print("prepare: rc=%s, %s" % (rc, ctx.dir))
     return 0 if rc == 0 else 1
+
+
+def warm_starts(ctx, app0, o, runner, build_libs):
+    """Two short normal starts after the two passes (--no-warm skips them). The renderer's presentation / overlay blits and a few
+    kernels exist only once a real start opens its window, so no list holds them: start 1 compiles them from source and KK collects
+    their MSL, the library build turns that into metallibs, start 2 builds them from the metallibs so the Metal archive holds them
+    under the identity every later start uses. Without them the first two starts of the player compile 5-6 of these (in the
+    window-open half second, never in game). A failed warm start is only a warning: the prepared list is complete either way.
+    -> number of warm starts that ended rc 0."""
+    scenes = scene_names(ctx, [])
+    scene = scenes[0] if scenes else None
+    words = cache_env(ctx.tid, ctx.dir, ctx.metal) + launch_words(ctx, app0)
+    ok = 0
+    for i in (1, 2):
+        print("prepare: warm start %d of 2: a short normal start builds the window's own helper pipelines (%s)" % (i, scene or "title"), flush=True)
+        rc = _call(run_cmd(ctx.tid, "cache-warm-%d" % i, scene, o["secs"] or 120, words), ctx, runner)
+        if rc != 0:
+            print("prepare: warning: warm start %d ended rc=%s; the first normal starts may compile a few helper pipelines" % (i, rc), flush=True)
+            break
+        ok += 1
+        if i == 1:
+            build_libs()
+    return ok
 
 
 def libcache_builder(ctx):
@@ -839,7 +867,7 @@ def default_runner(cmd, env=None, capture=False):
 
 
 def parse(argv):
-    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, list=None, shaders=[], contrib=[], pr=False, confirm=None, **{"from": []})
+    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, nowarm=False, list=None, shaders=[], contrib=[], pr=False, confirm=None, **{"from": []})
     pos, i = [], 0
     VAL = {"--scene": "scene", "--from": "from", "--shaders": "shaders", "--secs": "secs", "--list": "list"}
     while i < len(argv):
@@ -854,8 +882,8 @@ def parse(argv):
             if isinstance(o[k], list): o[k].append(v)
             else: o[k] = v
             i += 1
-        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass", "--pr"):
-            o[{"--dry-run": "dry", "--single-pass": "single"}.get(a, a[2:])] = True
+        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass", "--pr", "--no-warm"):
+            o[{"--dry-run": "dry", "--single-pass": "single", "--no-warm": "nowarm"}.get(a, a[2:])] = True
         elif a.startswith("--"):
             raise CacheError("unknown option %s" % a, 2)
         else:

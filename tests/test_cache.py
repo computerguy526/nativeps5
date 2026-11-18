@@ -175,10 +175,37 @@ class T(unittest.TestCase):
             return 0
         rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
         self.assertEqual(rc, 0, err)
-        self.assertEqual(calls, ["run", "build", "run", "build"])
+        self.assertEqual(calls, ["run", "build", "run", "build", "run", "build", "run"])     # 2 passes, then 2 warm starts (library build between)
         self.assertEqual(seen_at_pass2, {"lib": True, "old": False})
         kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv"))
-        self.assertEqual((kv["passes"], kv["metallibs"]), ("2", "1"))
+        self.assertEqual((kv["passes"], kv["metallibs"], kv["warm"]), ("2", "1", "2"))
+
+    def test_prepare_warm_starts_are_normal_starts_and_optional(self):
+        c = self.ctx(); os.makedirs(c.dir)
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        lcd = os.path.join(c.dir, "kk-libcache"); runs = []
+        def runner(cmd, env=None, capture=False, fail_warm=None):
+            if capture: return 0, ""
+            if cmd[0] == "bash":
+                os.makedirs(lcd + "/lib", exist_ok=True); open(lcd + "/lib/k1.metallib", "w").write("m"); return 0
+            os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write("src")
+            runs.append(cmd); return 0
+        self.assertEqual(self.run_main(["prepare", "PPSA00001"], runner)[0], 0)
+        tags = [r[r.index("--tag") + 1] for r in runs]
+        self.assertEqual(tags, ["cache-prepare", "cache-prepare", "cache-warm-1", "cache-warm-2"])
+        w = " ".join(runs[2])
+        self.assertIn("KYTY_PIPELINE_REPLAY_ALL=1", w); self.assertNotIn("KYTY_PIPELINE_LIST_PREPARE=1", w)   # a normal start, not a prepare
+        self.assertIn("KK_LIBCACHE_DIR=%s" % lcd, w)
+        runs.clear()
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], runner)[0], 0)
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(cache.read_kv(os.path.join(c.dir, "prepared.tsv"))["warm"], "0")
+        def failing(cmd, env=None, capture=False):
+            if not capture and cmd[0] != "bash" and "cache-warm-1" in cmd: return 5
+            return runner(cmd, env, capture)
+        rc, out, _ = self.run_main(["prepare", "PPSA00001"], failing)
+        self.assertEqual(rc, 0); self.assertIn("warm start 1 ended rc=5", out)                         # a warning, still prepared
+        self.assertEqual(cache.status(self.ctx())[0], "prepared")
 
     def test_prepare_single_pass_flag_and_nothing_collected(self):
         c = self.ctx(); self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__); lcd = os.path.join(c.dir, "kk-libcache"); calls = []
