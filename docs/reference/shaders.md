@@ -142,6 +142,13 @@ logs the key of every compute kernel. Which kernels are replaced is decided per 
 `games/<id>/metal-shaders.tsv` and generated locally by `nps5 cache prepare` (scripts/nps5lib/metal.py; games/README.md).
 Rules for a row: bit-identical (or within 4 ulp for the documented relaxed-contraction class) to KosmicKrisp's kernel on
 seeded inputs in the differential harness, not slower, and part of a set that passed an in-game smoke and a play test.
+Graphics: patch 0026 does the same for a plain vertex + fragment render pipeline: `KK_MSL_OVERRIDE_DIR` holds
+`<vs>_<fs>.vs.metal` and `<vs>_<fs>.fs.metal` (`<vs>`/`<fs>` = the 16-hex BLAKE3 keys of KosmicKrisp's own vertex and
+fragment MSL), a second render pipeline is built from the same descriptor, and a pair is swapped only when both keys are
+present (compute stays `<b3>.metal`). The list is `games/<id>/metal-gfx-pairs.tsv` (hashes plus the layout numbers the
+emitter needs: descriptor offsets, vertex attributes, colour mask); `metal.generate_gfx` emits the fragment text, then the
+vertex text linked to the fragment's reads and to KosmicKrisp's vertex text (found in the cache's `kk-libcache/msl` by its
+BLAKE3 key), and keeps both only when their sha256 equal the list's.
 Ballots and votes use `simd_or` of lane bits (an `if`-converted `simd_ballot` sees all lanes on macOS 26), and LDS reads
 after LDS writes without a barrier get a simdgroup fence (Apple GPUs do not run 32 lanes in lockstep).
 

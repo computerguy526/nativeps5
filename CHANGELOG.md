@@ -18,6 +18,14 @@ Everything in v1.0.3, plus our own Metal compute kernels. Needs a fresh shader-c
   Opt out with `NPS5_METAL_SHADERS=0`. `nps5 cache status` shows how many are in use; `nps5 cache metal <id>`
   regenerates them. KosmicKrisp patches 0023-0025 (`KK_MSL_OVERRIDE_DIR`, `KK_MSL_OVERRIDE_ASYNC`, compile counts
   for the progress card); new tool `kyty_msl_dump` in the Kyty fork.
+- **Our Metal shaders (graphics).** The same mechanism for render pipelines: `games/<title id>/metal-gfx-pairs.tsv` lists
+  verified (vertex, fragment) PAIRS, hashes and a few layout numbers only (draw-capture differential test against
+  KosmicKrisp's own pair, mutation checks). `nps5 cache prepare` generates both stages of a pair on your Mac from your own
+  dump and KosmicKrisp's own vertex text ("Metal graphics: N/T"), keeps a pair only when both texts are byte-identical to the
+  verified ones, and compiles them under the progress card in pass 2 like the compute kernels. KosmicKrisp swaps a pipeline
+  only when BOTH of its stage keys match a listed pair (patch 0026; a replacement verified in one pipeline is never combined
+  with another pipeline's stages), and keeps its own pair when one stage is missing or fails to compile. ASTRO BOT: 7 pairs.
+  The Kyty MSL back end gets the graphics-stage pieces (per-invocation LDS, integer f32 to f16 round-toward-zero).
 - **Faster wave64 votes in the Metal kernels.** The MSL back end now takes one subgroup vote over both halves of a wave64 (`any(a) || any(b)` = `any(a || b)`; `KYTY_MSL_VOTE_MERGE=0` restores the old text), which makes 4 more kernels faster than KosmicKrisp's (68 in all) and 16 others faster than before. Fast math stays off.
 - **Shader compile threads.** The shader precompile workers run at utility priority and the replay workers and the compute prewarm share one fan-out of driver pipeline builds (`NPS5_COMPILE_GATE=0` lifts it); cache prepare gets shorter and the load-time peak lower.
 - **Buffer snapshots (hardening).** Small read-only buffer bindings that the GPU has not written are copied at bind time,

@@ -1364,16 +1364,25 @@ KYTY_MSL_BOUNDS	kyty		src/graphics/shader/recompiler/backend/msl/MslBufferOps.h
 KYTY_MSL_CONVENTION	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
 KYTY_MSL_DEBUG	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_DUMP_NOFORK	kyty		tools/msl-dump/kytyMslDump.cpp
+KYTY_MSL_F16_RTZ_INT	kyty	1 = integer f32->f16 round-toward-zero helper in compute kernels too (default: graphics stages only; the verified compute text keeps the old helper)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_FORCE_DISPATCHER	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_INVARIANT	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
-KYTY_MSL_KK_COLOR_MASK	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
-KYTY_MSL_KK_PS_READS	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
-KYTY_MSL_KK_SET0	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
-KYTY_MSL_KK_VA	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
-KYTY_MSL_KK_VS_OUTS	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_COLOR_MASK	kyty	set by metal.py for kyty_msl_dump: bit i = colour attachment i exists (graphics pair generation)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_COLOR_MASK	nativeps5	set by metal.py for kyty_msl_dump: bit i = colour attachment i exists (graphics pair generation)	scripts/nps5lib/metal.py
+KYTY_MSL_KK_PS_ADCE	kyty	1 = drop fragment-shader instructions whose only reads are dead (opt-in, off; not used by the verified pairs)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_PS_READS	kyty	set by metal.py for kyty_msl_dump: fragment interpolant components the vertex stage must write (from the generated fragment text)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_PS_READS	nativeps5	set by metal.py for kyty_msl_dump: fragment interpolant components the vertex stage must write (from the generated fragment text)	scripts/nps5lib/metal.py
+KYTY_MSL_KK_SET0	kyty	set by metal.py for kyty_msl_dump: descriptor set 0 offsets binding:offset (from games/<id>/metal-gfx-pairs.tsv)	src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_KK_SET0	nativeps5	set by metal.py for kyty_msl_dump: descriptor set 0 offsets binding:offset (from games/<id>/metal-gfx-pairs.tsv)	scripts/nps5lib/metal.py
+KYTY_MSL_KK_VA	kyty	set by metal.py for kyty_msl_dump: vertex attributes loc:binding:format (from games/<id>/metal-gfx-pairs.tsv)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_VA	nativeps5	set by metal.py for kyty_msl_dump: vertex attributes loc:binding:format (from games/<id>/metal-gfx-pairs.tsv)	scripts/nps5lib/metal.py
+KYTY_MSL_KK_VS_OUTS	kyty	set by metal.py for kyty_msl_dump: varying locations KosmicKrisp's own vertex shader writes (read from its text)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_VS_OUTS	nativeps5	set by metal.py for kyty_msl_dump: varying locations KosmicKrisp's own vertex shader writes (read from its text)	scripts/nps5lib/metal.py
+KYTY_MSL_KK_WRITE_MASK	kyty	per-attachment colour write masks for fragment-output liveness (opt-in, off; not used by the verified pairs)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_LDS_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_LOOP_CAP	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
-KYTY_MSL_MIPSTATS_PLAIN	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_MIPSTATS_PLAIN	kyty	1 = emit the fragment shader without the LOD-feedback (MipStats) buffer (the "twin" variant in metal-gfx-pairs.tsv); set by metal.py	src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_MIPSTATS_PLAIN	nativeps5	1 = emit the fragment shader without the LOD-feedback (MipStats) buffer (the "twin" variant in metal-gfx-pairs.tsv); set by metal.py	scripts/nps5lib/metal.py
 KYTY_MSL_VOTE_MERGE	kyty	MSL back end: wave64 halves take one subgroup vote (default 1; 0 = the per-half votes)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAITCNT_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAVE64	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp

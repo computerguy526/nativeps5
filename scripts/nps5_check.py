@@ -78,14 +78,18 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
-                 "metal-shaders.tsv"}
+                 "metal-shaders.tsv", "metal-gfx-pairs.tsv"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,]{0,32}$")
-METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-keys\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40})$")
+# games/<title id>/metal-gfx-pairs.tsv: the same for (vertex, fragment) pairs. Hashes plus three short number fields (descriptor
+# offsets binding:offset, vertex attributes loc:binding:format, colour mask) that the emitter needs; no shader text.
+METAL_GFX_ROW_RE = re.compile(rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t[0-9a-f]{64}"
+                              rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}\t[a-z0-9_+,.-]{0,48}$")
+METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-(?:keys|gfx-pairs)\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40})$")
 
 
-def check_metal_keys(data):
+def check_metal_keys(data, gfx=False):
     """-> reasons a games/<id>/metal-shaders.tsv is refused: anything but comments, header lines and key rows (hashes)."""
     if b"\0" in data or len(data) > (1 << 20):
         return ["a Metal keys list is a short text file"]
@@ -98,7 +102,7 @@ def check_metal_keys(data):
                 continue
             bad.append("line %d is a comment that looks like shader source" % n)
             continue
-        if not (METAL_ROW_RE.match(line) or METAL_HEAD_RE.match(line)):
+        if not ((METAL_GFX_ROW_RE if gfx else METAL_ROW_RE).match(line) or METAL_HEAD_RE.match(line)):
             bad.append("line %d is not a key row (hashes only) or a header line" % n)
             if len(bad) >= 3:
                 break
@@ -433,8 +437,8 @@ class Check:
             return
         if profile and profile.group(2) not in PROFILE_FILES:
             F(": not a profile file (games/README.md lists them); game-derived data stays out")
-        if profile and profile.group(2) == "metal-shaders.tsv":
-            for why in check_metal_keys(data):
+        if profile and profile.group(2) in ("metal-shaders.tsv", "metal-gfx-pairs.tsv"):
+            for why in check_metal_keys(data, profile.group(2) == "metal-gfx-pairs.tsv"):
                 F(f": {why}")
             return
         if ext == "kyplst":
@@ -519,12 +523,15 @@ def selftest():
         "games/PPSA00000/vs_0001.metallib": b"MTLB" + b"\0" * 16,
         "vendor/lib/eboot.bin": b"\x54\x14\xf5\xeejunk", "docs/packed.md": b"\xfd7zXZ\x00" + b"\0" * 16,     # a third-party folder, a renamed archive
         "games/PPSA00001/metal-shaders.tsv": b"format\tnps5-metal-keys\t1\n#include <metal_stdlib>\n",   # MSL in a keys list
+        "games/PPSA00001/metal-gfx-pairs.tsv": b"format\tnps5-metal-gfx-pairs\t1\nfloat4 main0(float4 v) { return v; }\n",   # MSL in a pairs list
         "late.txt": b"text\n" * 4000 + b"\0\1\2", "flags.mk": b"CFLAGS=-I/Users/" + b"somebody/include\n",     # binary after a text start, a path behind a flag
     }
     clean = {"3rdparty/lib/a.c": b"// built in /Users/" + b"author/src\nint x;\n", "ok.sh": b"cd \"$NPS5_ROOT\" && ls /Users/Shared\n", "ok.md": b"mail nobody@example.com\n",
              "games/PPSA00000/game.tsv": b"title_id\tPPSA00000\n", "games/PPSA00000/README.md": b"# Example\n",
              "games/PPSA00000/metal-shaders.tsv": b"# keys\nformat\tnps5-metal-keys\t1\ntitle\tPPSA00000\t01.000.000\nemitter\tabcdef0\n" +
-             b"0" * 32 + b"\t" + b"1" * 16 + b"\t" + b"2" * 16 + b"\t" + b"3" * 64 + b"\t64x1x1\texact\n"}
+             b"0" * 32 + b"\t" + b"1" * 16 + b"\t" + b"2" * 16 + b"\t" + b"3" * 64 + b"\t64x1x1\texact\n",
+             "games/PPSA00000/metal-gfx-pairs.tsv": b"# pairs\nformat\tnps5-metal-gfx-pairs\t1\ntitle\tPPSA00000\t01.000.000\n" + b"gfx\t" + b"0" * 32 + b"\t" + b"1" * 16 + b"\t" +
+             b"2" * 32 + b"\t" + b"3" * 16 + b"\t" + b"4" * 16 + b"\t" + b"5" * 16 + b"\t" + b"6" * 64 + b"\t" + b"7" * 64 + b"\ttwin\t0:0,58:16\t0:0:109\t1\texact\n"}
     with tempfile.TemporaryDirectory() as d:
         git("init", "-q", cwd=d)
         for k, v in {**planted, **clean}.items():

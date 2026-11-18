@@ -151,7 +151,134 @@ class T(unittest.TestCase):
         self.assertTrue(metal.enabled({})); self.assertFalse(metal.enabled({"NPS5_METAL_SHADERS": "off"}))
 
 
+GDUMP = """#!/bin/bash
+# fake kyty_msl_dump for graphics: the fragment text is first (declares its reads), the vertex text needs --link-ps and the reads + KK outputs + layout words
+while [ $# -gt 0 ]; do case $1 in --perm) p=$2; shift;; --out) o=$2; shift;; --link-ps) lp=$2; shift;; esac; shift; done
+[ "$p" = 4 ] && exit 3
+if [ -n "$lp" ]; then
+  [ "$KYTY_MSL_KK_PS_READS" = "1:15" ] || { echo "no ps reads" >&2; exit 5; }
+  printf "// kk-mslinject v1 stage vertex entry main0 math safe\\nvs %s outs=%s set0=%s va=%s cm=%s plain=%s\\n" "$p" "$KYTY_MSL_KK_VS_OUTS" "$KYTY_MSL_KK_SET0" "$KYTY_MSL_KK_VA" "$KYTY_MSL_KK_COLOR_MASK" "${KYTY_MSL_MIPSTATS_PLAIN:-0}" > $o
+else
+  printf "// kk-mslinject v1 stage fragment entry main0 math safe\\n// kk-bda ps_reads 1:15\\nps %s plain=%s\\n" "$p" "${KYTY_MSL_MIPSTATS_PLAIN:-0}" > $o
+fi
+echo "// complete=1 unsupported:" >&2
+"""
+KKVS = "struct VertexOut {\n    float4 position [[position]];\n    float4 vary_00 [[user(vary_00)]];\n};\n"
+
+
+def gfx_text(vs, ps, outs="0:4", set0="0:0,58:16", va="0:0:109", cm="1", plain="1"):
+    v = "// kk-mslinject v1 stage vertex entry main0 math safe\nvs %d outs=%s set0=%s va=%s cm=%s plain=%s\n" % (vs, outs, set0, va, cm, plain)
+    f = "// kk-mslinject v1 stage fragment entry main0 math safe\n// kk-bda ps_reads 1:15\nps %d plain=%s\n" % (ps, plain)
+    return v.encode(), f.encode()
+
+
+def gfx_row(vs, ps, kk_vs, kk_fs, texts, variant="twin", set0="0:0,58:16", va="0:0:109", cm="1", ev="exact"):
+    v, f = texts
+    return "\t".join(["gfx", DG[vs].hex(), metal.spec_key(SP[vs]), DG[ps].hex(), metal.spec_key(SP[ps]), kk_vs, kk_fs,
+                      hashlib.sha256(v).hexdigest(), hashlib.sha256(f).hexdigest(), variant, set0, va, cm, ev])
+
+
+def gfx_list(rows):
+    return "# test\nformat\tnps5-metal-gfx-pairs\t1\ntitle\tPPSA00001\t01.001.000\nemitter\tabc\n" + "\n".join(rows) + "\n"
+
+
+class Gfx(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.dump = os.path.join(self.tmp, "kyty_msl_dump"); open(self.dump, "w").write(GDUMP); os.chmod(self.dump, 0o755)
+        self.env = dict(PATH=os.environ["PATH"], HOME=self.tmp, NPS5_MSL_TOOL=self.dump, KYTY_MSL_KK_SET0="evil")
+        self.prog = os.path.join(self.tmp, "X.programs.bin")
+        # 6 digests, each of them twice as digest16*2 = 32 hex in the list: the rows use DG[i]*2, programs.bin carries 16-byte digests
+        programs(self.prog, [(DG[i] * 1, SP[i]) for i in range(6)])
+        self.kkdir = os.path.join(self.tmp, "kk", "msl"); os.makedirs(self.kkdir)
+        self.kk_vs = metal.blake3_64(KKVS.encode())
+        open(os.path.join(self.kkdir, "opaque-cache-name.metal"), "w").write(KKVS)
+        open(os.path.join(self.kkdir, "other.metal"), "w").write(KKVS + "// another\n")
+        self.out = os.path.join(self.tmp, "c", "metal-shaders")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def lst(self, rows):
+        p = os.path.join(self.tmp, "metal-gfx-pairs.tsv"); open(p, "w").write(gfx_list(rows)); return p
+
+    def gen(self, rows, **kw):
+        return metal.generate_gfx(self.lst(rows), self.prog, self.kkdir, self.out, self.env, out=io.StringIO(), **kw)
+
+    def test_blake3_matches_the_reference(self):
+        self.assertEqual(metal.blake3_64(b""), "af1349b9f5f9a1a6")
+        b3 = shutil.which("b3sum")
+        if b3:
+            for n in (1, 64, 65, 1024, 1025, 2049, 5000, 70000):
+                d = bytes(i * 7 % 251 for i in range(n))
+                ref = __import__("subprocess").run([b3, "--no-names"], input=d, capture_output=True).stdout.decode()[:16]
+                self.assertEqual(metal.blake3_64(d), ref, n)
+
+    def test_pair_is_generated_linked_and_verified(self):
+        t = gfx_text(1, 2)
+        st = self.gen([gfx_row(1, 2, self.kk_vs, "f" * 16, t)])
+        self.assertEqual((st["listed"], st["written"], st["skipped"]), (1, 1, 0), st)
+        pair = "%s_%s" % (self.kk_vs, "f" * 16)
+        self.assertEqual(open(os.path.join(self.out, pair + ".vs.metal"), "rb").read(), t[0])
+        self.assertEqual(open(os.path.join(self.out, pair + ".fs.metal"), "rb").read(), t[1])
+        sha, n = metal.gfx_index_rows(self.out)
+        self.assertEqual(n, 1)
+        self.assertEqual(sha, hashlib.sha256(open(os.path.join(self.tmp, "metal-gfx-pairs.tsv"), "rb").read()).hexdigest())
+
+    def test_any_mismatch_skips_the_whole_pair(self):
+        t = gfx_text(1, 2)
+        bad = gfx_text(1, 2, cm="3")                          # the list says another layout: our text differs from the verified one
+        st = self.gen([gfx_row(1, 2, self.kk_vs, "f" * 16, bad), gfx_row(1, 3, self.kk_vs, "e" * 16, t),
+                       gfx_row(1, 2, "9" * 16, "d" * 16, t), gfx_row(4, 2, self.kk_vs, "c" * 16, t)])
+        self.assertEqual(st["written"], 0, st)
+        self.assertEqual(sorted(st["reasons"]), ["KosmicKrisp vertex text not in the library cache", "text differs from the verified pair",
+                                                 "vertex translation failed"])
+        self.assertEqual([f for f in os.listdir(self.out) if f.endswith(".metal")], [])
+
+    def test_row_is_checked_with_the_list_numbers_and_the_variant(self):
+        t = gfx_text(1, 2, outs="0:4", set0="0:0", va="1:0:103,2:0:109", cm="3", plain="0")
+        st = self.gen([gfx_row(1, 2, self.kk_vs, "f" * 16, t, variant="mipstats", set0="0:0", va="1:0:103,2:0:109", cm="3")])
+        self.assertEqual(st["written"], 1, st)
+
+    def test_regeneration_drops_pairs_of_another_list(self):
+        t = gfx_text(1, 2)
+        self.gen([gfx_row(1, 2, self.kk_vs, "f" * 16, t)])
+        st = self.gen([gfx_row(1, 2, self.kk_vs, "a" * 16, t)])
+        self.assertEqual(sorted(f for f in os.listdir(self.out) if f.endswith(".metal")),
+                         ["%s_%s.fs.metal" % (self.kk_vs, "a" * 16), "%s_%s.vs.metal" % (self.kk_vs, "a" * 16)])
+        self.assertEqual(st["written"], 1)
+
+    def test_list_rules(self):
+        t = gfx_text(1, 2)
+        r = gfx_row(1, 2, self.kk_vs, "f" * 16, t)
+        with self.assertRaises(metal.MetalError):
+            metal.parse_gfx_list(gfx_list([r.replace("\ttwin\t", "\tgreen\t")]))
+        with self.assertRaises(metal.MetalError):
+            metal.parse_gfx_list(gfx_list([r + "\textra"]))
+        with self.assertRaises(metal.MetalError):                          # one pair, two different texts
+            metal.parse_gfx_list(gfx_list([r, r.replace(hashlib.sha256(t[0]).hexdigest(), "0" * 64)]))
+        with self.assertRaises(metal.MetalError):
+            metal.parse_gfx_list("format\tnps5-metal-keys\t1\n" + r + "\n")
+
+    def test_launch_words_need_both_current_lists(self):
+        t = gfx_text(1, 2)
+        lp = os.path.join(self.tmp, "metal-shaders.tsv"); open(lp, "w").write("")
+        self.gen([gfx_row(1, 2, self.kk_vs, "f" * 16, t)])
+        w, warn = metal.launch_words(os.path.join(self.tmp, "c"), lp, self.env)
+        self.assertEqual((w, warn), ([("KK_MSL_OVERRIDE_DIR", self.out)], None))
+        open(os.path.join(self.tmp, "metal-gfx-pairs.tsv"), "a").write("# changed\n")
+        w, warn = metal.launch_words(os.path.join(self.tmp, "c"), lp, self.env)
+        self.assertEqual(w, []); self.assertIn("metal-gfx-pairs.tsv", warn)
+
+    def test_the_numbers_of_the_real_list_parse(self):
+        p = os.path.join(HERE, "..", "games", "PPSA21564", metal.GFX_LIST_NAME)
+        if os.path.isfile(p):
+            meta, rows = metal.parse_gfx_list(open(p).read())
+            self.assertTrue(rows and all(len(r["b_vs"]) == 64 for r in rows))
+
+
 class Prepare(unittest.TestCase):
+    kktext = "src"
     """`nps5 cache prepare` with a keys list: pass 1 logs keys, generation runs between the passes, pass 2 compiles the kernels
     synchronously, the dir survives pass 2's fresh cache, prepared.tsv and launch words carry them; NPS5_METAL_SHADERS=0 = v1.0."""
     def setUp(self):
@@ -179,7 +306,7 @@ class Prepare(unittest.TestCase):
             runs.append(dict(w.split("=", 1) for w in words))
             os.makedirs(rd, exist_ok=True)
             if len(runs) == 1:
-                os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write("src")
+                os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write(self.kktext)
                 programs(os.path.join(c.dir, "PPSA00001.programs.bin"), list(zip(DG, SP)))
                 open(os.path.join(rd, "run.err"), "w").write("[kk-mslinject] seen %s len=1\n" % ("0" * 16))
             elif len(runs) == 2:
@@ -217,6 +344,35 @@ class Prepare(unittest.TestCase):
         self.assertIn("Metal shaders: skipped", out)
         self.assertFalse(any("KK_MSL_OVERRIDE_DIR" in r for r in runs))
         self.assertEqual(cache.read_kv(os.path.join(c.dir, "prepared.tsv"))["metal_shaders"], "0/0")
+
+
+class GfxPrepare(Prepare):
+    """The same flow with a graphics pairs list only: the vertex text comes from the pass-1 library cache, the pair is generated between
+    the passes, pass 2 compiles it (log line 'gfx override'), prepared.tsv records it and the launch words point at the dir."""
+    kktext = KKVS
+
+    def setUp(self):
+        Prepare.setUp(self)
+        gd = os.path.join(self.tmp, "games", "PPSA00001")
+        os.remove(os.path.join(gd, "metal-shaders.tsv"))
+        dump = os.path.join(self.tmp, "kyty_msl_dump"); open(dump, "w").write(GDUMP); os.chmod(dump, 0o755)
+        self.kk_vs = metal.blake3_64(KKVS.encode())
+        open(os.path.join(gd, "metal-gfx-pairs.tsv"), "w").write(gfx_list([gfx_row(0, 1, self.kk_vs, "f" * 16, gfx_text(0, 1))]))
+
+    def test_prepare_generates_pairs_between_passes(self):
+        rc, c, runs, out = self.prepare()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(runs[0].get("KK_MSL_OVERRIDE_LOG"), "1")
+        self.assertEqual(runs[1]["KK_MSL_OVERRIDE_DIR"], os.path.join(c.dir, "metal-shaders"))
+        self.assertEqual(runs[2].get("KK_MSL_OVERRIDE_DIR"), os.path.join(c.dir, "metal-shaders"))
+        self.assertTrue(os.path.isfile(os.path.join(c.dir, "metal-shaders", "%s_%s.vs.metal" % (self.kk_vs, "f" * 16))))
+        kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv"))
+        self.assertEqual((kv["metal_gfx"], kv["metal_shaders"]), ("1/1", "0/0"))
+        self.assertIn("Metal graphics: 1 of 1 verified vertex+fragment pairs generated", out)
+
+    test_prepare_generates_between_passes = None
+    test_prepare_opt_out_is_v10 = None
+    test_prepare_without_tool_still_prepares = None
 
 
 if __name__ == "__main__":

@@ -57,6 +57,11 @@ The folder holds:
   of our MSL, local size, evidence tag. No shader code: `nps5 cache prepare` generates the kernels on the player's Mac from
   the player's dump and keeps one only when it hashes to the listed sha256 (scripts/nps5lib/metal.py; `NPS5_METAL_SHADERS=0`
   turns it off). `scripts/check.sh` accepts the file only as hashes, header lines and prose comments.
+- **`metal-gfx-pairs.tsv`** (optional, v1.1): the same for graphics, VERIFIED (vertex, fragment) PAIRS. Each row: program digests and
+  specialization keys of both stages, KosmicKrisp's MSL key of both stages, sha256 of both of our texts, variant, and three short
+  number fields the emitter needs (descriptor offsets, vertex attributes, colour mask). No shader code: `nps5 cache prepare`
+  generates both stages on the player's Mac and keeps the pair only when BOTH texts hash to the listed sha256.
+  `scripts/check.sh` accepts the file only in that form.
 
 ## Pipeline lists
 

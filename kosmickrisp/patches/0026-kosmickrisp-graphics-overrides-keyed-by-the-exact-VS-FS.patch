@@ -1,0 +1,289 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 16:09:00 +0000
+Subject: [PATCH 26/26] kosmickrisp: graphics overrides (nps5 Metal shaders) keyed by the exact (VS key, FS key) pair
+
+KK_MSL_OVERRIDE_DIR/<vs>_<fs>.vs.metal + .fs.metal (the <vs>/<fs> are the 16
+hex digits of the BLAKE3 of KK's own vertex / fragment MSL text). A plain
+VS/FS pipeline (no mesh / tess / GS pre-render passes) whose pair of keys has
+both files gets a second render pipeline built from the same descriptor
+(attachment formats, samples, topology class, amplification) with the
+replacement functions; draws bind it (KK_MSL_OVERRIDE_PERIOD phases as
+compute). A replacement verified in one pipeline is never combined with
+another pipeline's VS or FS; only one stage present or a failed compile keeps
+KK's pair (logged with KK_MSL_OVERRIDE_LOG=1). Compute overrides unchanged
+(<key>.metal). Runtime-only field kk_shader.mslinject_render (never
+serialized; warm caches stay valid).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+  src/kosmickrisp/vulkan/kk_cmd_draw.c |    3 -
+  src/kosmickrisp/vulkan/kk_shader.c   |  148 +++++++++++++++++++++++++++++++---
+  src/kosmickrisp/vulkan/kk_shader.h   |   11 +++
+  3 files changed, 149 insertions(+), 13 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 4d472ba..e28c463 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -1021,7 +1021,8 @@ kk_flush_pipeline(struct kk_cmd_buffer *cmd)
+ 
+    if (IS_SHADER_DIRTY(VERTEX)) {
+       struct kk_shader *vs = cmd->state.shaders[MESA_SHADER_VERTEX];
+-      mtl_render_set_pipeline_state(enc, vs->pipeline.gfx.render);
++      /* nps5 mslgfx: replacement VS+FS pair (KK_MSL_OVERRIDE_DIR) */
++      mtl_render_set_pipeline_state(enc, kk_mslinject_render(vs));
+       if (gfx->depth_stencil_state)
+          mtl_set_depth_stencil_state(enc, gfx->depth_stencil_state);
+    }
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index f2910e4..e67028a 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1048,6 +1048,9 @@ kk_shader_destroy(struct vk_device *vk_dev, struct kk_shader *shader,
+ 
+       /* Graphics pipeline. */
+       mtl_release(pipe->gfx.render);
++      if (shader->mslinject_render)
++         mtl_release(shader->mslinject_render);
++      shader->mslinject_render = NULL;
+       if (pipe->gfx.ds_handle)
+          mtl_release(pipe->gfx.ds_handle);
+       pipe->gfx.render = NULL;
+@@ -1593,25 +1596,41 @@ kk_mslinject_phase_on(void)
+    return (phase & 1) == 0;
+ }
+ 
+-/* Replacement text for `code` (malloc'd) or NULL; fills the header fields. */
+-static char *
+-kk_mslinject_find(const char *code, char hex[17], struct mtl_size *ls,
+-                  char entry[128], enum mtl_math_mode *math)
++/* `hex` = key of `code` (BLAKE3-64 of KK's MSL text); false when overrides
++ * are off or only logged. */
++static bool
++kk_mslinject_key(const char *code, char hex[17], const char *kind)
+ {
+    pthread_once(&kk_inj_once, kk_inj_init);
+    if (!kk_inj_dir && !kk_inj_log)
+-      return NULL;
++      return false;
+    const size_t len = strlen(code);
+    blake3_hash hash;
+    _mesa_blake3_compute(code, len, hash);
+    for (unsigned i = 0; i < 8; i++)
+       snprintf(hex + 2 * i, 3, "%02x", hash[i]);
+    if (kk_inj_log)
+-      fprintf(stderr, "[kk-mslinject] seen %s len=%zu\n", hex, len);
+-   if (!kk_inj_dir)
++      fprintf(stderr, "[kk-mslinject] seen %s len=%zu %s\n", hex, len, kind);
++   return kk_inj_dir != NULL;
++}
++
++/* KK_MSL_OVERRIDE_DIR/<name>.metal (malloc'd) or NULL. */
++static char *kk_mslinject_load(const char *name, const char *hex);
++
++/* Replacement text for `code` (malloc'd) or NULL; `hex` gets the key. */
++static char *
++kk_mslinject_read(const char *code, char hex[17], const char *kind)
++{
++   if (!kk_mslinject_key(code, hex, kind))
+       return NULL;
++   return kk_mslinject_load(hex, hex);
++}
++
++static char *
++kk_mslinject_load(const char *name, const char *hex)
++{
+    char path[1200];
+-   snprintf(path, sizeof(path), "%s/%s.metal", kk_inj_dir, hex);
++   snprintf(path, sizeof(path), "%s/%s.metal", kk_inj_dir, name);
+    FILE *f = fopen(path, "rb");
+    if (!f)
+       return NULL;
+@@ -1627,20 +1646,59 @@ kk_mslinject_find(const char *code, char hex[17], struct mtl_size *ls,
+    }
+    fclose(f);
+    text[n] = 0;
++   return text;
++}
++
++static enum mtl_math_mode
++kk_mslinject_math(const char *mm)
++{
++   return !strcmp(mm, "fast")      ? MTL_MATH_MODE_FAST
++          : !strcmp(mm, "relaxed") ? MTL_MATH_MODE_RELAXED
++                                   : MTL_MATH_MODE_SAFE;
++}
++
++/* Replacement text for `code` (malloc'd) or NULL; fills the header fields. */
++static char *
++kk_mslinject_find(const char *code, char hex[17], struct mtl_size *ls,
++                  char entry[128], enum mtl_math_mode *math)
++{
++   char *text = kk_mslinject_read(code, hex, "compute");
++   if (!text)
++      return NULL;
+    unsigned x = 0, y = 0, z = 0;
+    char mm[16] = "safe";
+    if (sscanf(text, "// kk-mslinject v1 local_size %u %u %u entry %127s math %15s",
+               &x, &y, &z, entry, mm) < 4 || !x || !y || !z || x * y * z > 1024) {
+-      fprintf(stderr, "[kk-mslinject] %s: bad header in %s\n", hex, path);
++      fprintf(stderr, "[kk-mslinject] %s: bad header\n", hex);
+       free(text);
+       return NULL;
+    }
+    ls->x = x;
+    ls->y = y;
+    ls->z = z;
+-   *math = !strcmp(mm, "fast")      ? MTL_MATH_MODE_FAST
+-           : !strcmp(mm, "relaxed") ? MTL_MATH_MODE_RELAXED
+-                                    : MTL_MATH_MODE_SAFE;
++   *math = kk_mslinject_math(mm);
++   return text;
++}
++
++/* nps5 mslgfx: replacement for one graphics stage; header
++ *   // kk-mslinject v1 stage vertex|fragment entry NAME math safe|relaxed|fast */
++static char *
++kk_mslinject_find_gfx(const char *pair, const char *hex, const char *stage,
++                      char entry[128], enum mtl_math_mode *math)
++{
++   char name[64];
++   snprintf(name, sizeof(name), "%s.%s", pair, stage[0] == 'v' ? "vs" : "fs");
++   char *text = kk_mslinject_load(name, hex);
++   if (!text)
++      return NULL;
++   char st[16] = {0}, mm[16] = "safe";
++   if (sscanf(text, "// kk-mslinject v1 stage %15s entry %127s math %15s", st, entry,
++              mm) < 2 || strcmp(st, stage) != 0) {
++      fprintf(stderr, "[kk-mslinject] %s: bad %s header\n", hex, stage);
++      free(text);
++      return NULL;
++   }
++   *math = kk_mslinject_math(mm);
+    return text;
+ }
+ 
+@@ -2010,6 +2068,31 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+       free(fs_tmp);
+       return VK_ERROR_INVALID_SHADER_NV;
+    }
++   /* nps5 mslgfx: replacement VS + FS (both or neither) for plain VS/FS
++    * pipelines (no mesh / tess / GS pre-render passes). */
++   char inj_vs_hex[17] = {0}, inj_fs_hex[17] = {0};
++   char inj_vs_entry[128] = {0}, inj_fs_entry[128] = {0};
++   enum mtl_math_mode inj_vs_math = MTL_MATH_MODE_SAFE, inj_fs_math = MTL_MATH_MODE_SAFE;
++   char *inj_vs = NULL, *inj_fs = NULL;
++   if (!mesh && pipe->gfx.pre_render_count == 0) {
++      /* mslrest5: replacements are keyed by the exact (VS key, FS key) PAIR:
++       * <dir>/<vs>_<fs>.vs.metal + .fs.metal, so a VS (or FS) verified in one
++       * pipeline is never combined with another pipeline's replacement. */
++      if (kk_mslinject_key(vs_code, inj_vs_hex, "vertex") &
++          kk_mslinject_key(fs_code, inj_fs_hex, "fragment")) {
++         char pair[40];
++         snprintf(pair, sizeof(pair), "%s_%s", inj_vs_hex, inj_fs_hex);
++         inj_vs = kk_mslinject_find_gfx(pair, inj_vs_hex, "vertex", inj_vs_entry, &inj_vs_math);
++         inj_fs = kk_mslinject_find_gfx(pair, inj_fs_hex, "fragment", inj_fs_entry, &inj_fs_math);
++      }
++      if ((inj_vs != NULL) != (inj_fs != NULL)) {
++         fprintf(stderr, "[kk-mslinject] gfx pair %s/%s: only the %s has a replacement: KK pair kept\n",
++                 inj_vs_hex, inj_fs_hex, inj_vs ? "vertex" : "fragment");
++         free(inj_vs);
++         free(inj_fs);
++         inj_vs = inj_fs = NULL;
++      }
++   }
+    /* KK_MESH_DEBUG=2: the output structs of every mesh function (Metal allows
+     * 32 KiB for max_vertices x vertex struct + max_primitives x primitive
+     * struct, "Total mesh size") */
+@@ -2027,6 +2110,8 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    free(vs_tmp);
+    if (vertex_library == NULL) {
+       free(fs_tmp);
++      free(inj_vs);
++      free(inj_fs);
+       return VK_ERROR_INVALID_SHADER_NV;
+    }
+ 
+@@ -2041,6 +2126,8 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    free(fs_tmp);
+    if (fragment_library == NULL) {
+       result = VK_ERROR_INVALID_SHADER_NV;
++      free(inj_vs);
++      free(inj_fs);
+       goto destroy_vertex;
+    }
+    mtl_function_descriptor *fragment_function =
+@@ -2097,6 +2184,43 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    if (pipe->gfx.render == NULL)
+       result = VK_ERROR_INVALID_SHADER_NV;
+ 
++   /* nps5 mslgfx: the replacement pair in the same descriptor (attachment
++    * formats, sample count, topology class, amplification as KK's). */
++   if (inj_vs && inj_fs && pipe->gfx.render != NULL) {
++      const uint64_t t0 = kk_inj_now_ns();
++      mtl_render_pipeline_state *rp = NULL;
++      mtl_library *vl = mtl_new_library(device->mtl_compiler_handle, inj_vs,
++                                        pdev->info.msl_version, inj_vs_math,
++                                        MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST);
++      mtl_library *fl = vl ? mtl_new_library(device->mtl_compiler_handle, inj_fs,
++                                             pdev->info.msl_version, inj_fs_math,
++                                             MTL_MATH_FLOATING_POINT_FUNCTIONS_FAST)
++                           : NULL;
++      if (vl && fl) {
++         mtl_function_descriptor *vf = mtl_new_library_function_descriptor(vl, inj_vs_entry);
++         mtl_function_descriptor *ff = mtl_new_library_function_descriptor(fl, inj_fs_entry);
++         mtl_render_pipeline_descriptor_set_vertex_shader(pipeline_descriptor, vf);
++         mtl_render_pipeline_descriptor_set_fragment_shader(pipeline_descriptor, ff);
++         rp = mtl_new_render_pipeline(device->mtl_compiler_handle, pipeline_descriptor);
++         mtl_release(vf);
++         mtl_release(ff);
++      }
++      if (fl)
++         mtl_release(fl);
++      if (vl)
++         mtl_release(vl);
++      if (rp == NULL) {
++         fprintf(stderr, "[kk-mslinject] gfx override %s/%s FAILED to compile: KK pair kept\n",
++                 inj_vs_hex, inj_fs_hex);
++      } else {
++         vs->mslinject_render = rp;
++         fprintf(stderr, "[kk-mslinject] gfx override %s/%s %.1f ms\n", inj_vs_hex,
++                 inj_fs_hex, (double)(kk_inj_now_ns() - t0) * 1e-6);
++      }
++   }
++   free(inj_vs);
++   free(inj_fs);
++
+    mtl_release(pipeline_descriptor);
+    mtl_release(fragment_function);
+    mtl_release(fragment_library);
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 7065db4..ae9893c 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -176,6 +176,10 @@ struct kk_shader {
+     * pipeline and threadgroup size; kk_mslinject_use() picks one per dispatch. */
+    mtl_compute_pipeline_state *mslinject_cs; /* set once (release), read acquire */
+    struct mtl_size mslinject_local_size;
++   /* nps5 mslgfx: a non-mesh VS+FS pair whose two KK MSL texts BOTH have a
++    * replacement also holds a second render pipeline (same descriptor, the
++    * replacement vertex + fragment functions); kk_mslinject_render() picks. */
++   mtl_render_pipeline_state *mslinject_render;
+    /* KK_MSL_OVERRIDE_ASYNC (default 1): the replacement is compiled on a GCD
+     * queue; dispatches use KK's own kernel until it is ready (no hitch at
+     * pipeline creation). Shader destroy waits for the job. */
+@@ -190,6 +194,13 @@ kk_mslinject_use(const struct kk_shader *s)
+ {
+    return __atomic_load_n(&s->mslinject_cs, __ATOMIC_ACQUIRE) != NULL && kk_mslinject_phase_on();
+ }
++static inline mtl_render_pipeline_state *
++kk_mslinject_render(const struct kk_shader *vs)
++{
++   return vs->mslinject_render != NULL && kk_mslinject_phase_on()
++             ? vs->mslinject_render
++             : vs->pipeline.gfx.render;
++}
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(kk_shader, vk.base, VkShaderEXT,
+                                VK_OBJECT_TYPE_SHADER_EXT);

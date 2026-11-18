@@ -253,7 +253,8 @@ def status(ctx):
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
     if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0":      # no rc line = a torn or foreign file, not a pass
         ms = metalmod.index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
-        mline = ["  Metal shaders: %d generated kernels%s" % (ms, "" if metalmod.enabled(ctx.environ) else " (off: NPS5_METAL_SHADERS=0)")] if ms or prep.get("metal_shaders") else []
+        gs = metalmod.gfx_index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
+        mline = ["  Metal shaders: %d generated kernels, %d graphics pairs%s" % (ms, gs, "" if metalmod.enabled(ctx.environ) else " (off: NPS5_METAL_SHADERS=0)")] if ms or gs or prep.get("metal_shaders") else []
         return "prepared", lines + ["  prepared %s (%s pipelines): %s" % (prep.get("date", "?"), prep.get("pipelines", "?"), ctx.dir)] + mline
     if os.path.isdir(ctx.dir):
         return "partial", lines + ["  %s exists without a good prepared.tsv: run nps5 cache prepare %s" % (ctx.dir, ctx.tid)]
@@ -698,7 +699,7 @@ def cmd_prepare(ctx, o, runner):
     if not os.path.isfile(ctx.list_path):
         raise CacheError("no %s" % ctx.list_path, 2)
     words = cache_env(ctx.tid, ctx.dir, ctx.metal) + prepare_words(ctx, app0)
-    mlist = metal_list(ctx)
+    mlist = metal_list(ctx) or metal_gfx_list(ctx)
     if mlist:
         words.append(("KK_MSL_OVERRIDE_LOG", "1"))     # pass 1: KK names every compute kernel it builds (how many listed keys it sees)
     # A prepare exits by itself when the list is built; --secs is only its ceiling. 180 s (the old default) cut a first prepare of
@@ -775,6 +776,9 @@ def cmd_prepare(ctx, o, runner):
             if mst and mst.get("written"):
                 mst["active"], mst["failed"] = metalmod.override_counts(run_logs(rd))
                 print("prepare: Metal shaders: %d compiled, %d failed to compile (KosmicKrisp's own kernel is kept for those)" % (mst["active"], mst["failed"]))
+                if mst.get("gfx_written"):
+                    mst["gfx_active"], mst["gfx_failed"] = metalmod.gfx_override_counts(run_logs(rd))
+                    print("prepare: Metal graphics: %d pairs compiled, %d failed to compile (KosmicKrisp's own pair is kept for those)" % (mst["gfx_active"], mst["gfx_failed"]))
     warm = 0
     if rc == 0 and passes == 2 and not o.get("nowarm"):
         warm = warm_starts(ctx, app0, o, runner, build_libs)
@@ -800,6 +804,12 @@ def metal_list(ctx):
     return p if os.path.isfile(p) and metalmod.enabled(ctx.environ) else None
 
 
+def metal_gfx_list(ctx):
+    """games/<id>/metal-gfx-pairs.tsv (verified vertex+fragment pairs) under the same switch, else None."""
+    p = os.path.join(ctx.p.dir, metalmod.GFX_LIST_NAME)
+    return p if os.path.isfile(p) and metalmod.enabled(ctx.environ) else None
+
+
 def run_logs(rd):
     t = ""
     for n in ("run.err", "run.out"):
@@ -812,35 +822,51 @@ def run_logs(rd):
 
 
 def metal_step(ctx, runner, rd=None, label="prepare: "):
-    """Generate <cache dir>/metal-shaders from the keys list and this cache's programs.bin (metal.py). Never fails a prepare:
-    any problem means KosmicKrisp's own kernels, as in v1.0. -> stats dict or None."""
-    mlist = metal_list(ctx)
-    if not mlist:
+    """Generate <cache dir>/metal-shaders (compute kernels, then the verified vertex+fragment pairs) from the keys lists, this cache's
+    programs.bin and KosmicKrisp's collected MSL (metal.py). Never fails a prepare: any problem means KosmicKrisp's own shaders, as in
+    v1.0. -> stats dict (written = kernels + pairs written) or None."""
+    mlist, glist = metal_list(ctx), metal_gfx_list(ctx)
+    if not mlist and not glist:
         return None
-    print("%sgenerating our Metal kernels from your dump (CPU only, no window)" % label, flush=True)
+    print("%sgenerating our Metal shaders from your dump (CPU only, no window)" % label, flush=True)
     seen = metalmod.seen_keys(run_logs(rd)) if rd else None
+    prog = os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)
+    odir = os.path.join(ctx.dir, metalmod.OUT_NAME)
+    st = dict(listed=0, written=0, skipped=0, seen=None, reasons={}, gfx_listed=0, gfx_written=0)
     try:
-        st = metalmod.generate(mlist, os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid), os.path.join(ctx.dir, metalmod.OUT_NAME),
-                               ctx.environ, jobs=compile_jobs(ctx.environ), seen=seen or None, label=label)
+        if mlist:
+            st = dict(st, **metalmod.generate(mlist, prog, odir, ctx.environ, jobs=compile_jobs(ctx.environ), seen=seen or None, label=label))
+            print(label + metalmod.summary(st), flush=True)
+            if st.get("seen") == 0 and st["written"]:
+                print("%swarning: KosmicKrisp built none of the listed kernels here (another KosmicKrisp / macOS MSL): nothing will be swapped" % label)
     except (metalmod.MetalError, OSError) as e:
         print("%sMetal shaders: skipped (%s); KosmicKrisp's own kernels are used" % (label, e), flush=True)
-        return dict(listed=0, written=0, skipped=0, seen=None, reasons={}, error=str(e))
-    print(label + metalmod.summary(st), flush=True)
-    if st.get("seen") == 0 and st["written"]:
-        print("%swarning: KosmicKrisp built none of the listed kernels here (another KosmicKrisp / macOS MSL): nothing will be swapped" % label)
+        st["error"] = str(e)
+    try:
+        if glist:
+            g = metalmod.generate_gfx(glist, prog, os.path.join(ctx.dir, "kk-libcache", "msl"), odir, ctx.environ, jobs=compile_jobs(ctx.environ), label=label,
+                                      lens=metalmod.seen_vertex_lens(run_logs(rd)) if rd else None)
+            st["gfx_listed"], st["gfx_written"] = g["listed"], g["written"]
+            st["written"] += g["written"]
+            print(label + metalmod.gfx_summary(g), flush=True)
+    except (metalmod.MetalError, OSError) as e:
+        print("%sMetal graphics: skipped (%s); KosmicKrisp's own shaders are used" % (label, e), flush=True)
+        st["error"] = str(e)
     return st
 
 
 def metal_fields(st):
     if not st:
         return []
-    return [("metal_shaders", "%d/%d" % (st["written"], st["listed"])), ("metal_seen", "" if st.get("seen") is None else st["seen"]),
-            ("metal_active", st.get("active", "")), ("metal_failed", st.get("failed", ""))]
+    return [("metal_shaders", "%d/%d" % (st["written"] - st.get("gfx_written", 0), st["listed"])), ("metal_seen", "" if st.get("seen") is None else st["seen"]),
+            ("metal_active", st.get("active", "")), ("metal_failed", st.get("failed", "")),
+            ("metal_gfx", "%d/%d" % (st.get("gfx_written", 0), st.get("gfx_listed", 0))), ("metal_gfx_active", st.get("gfx_active", "")),
+            ("metal_gfx_failed", st.get("gfx_failed", ""))]
 
 
 def cmd_metal(ctx, o, runner):
-    if not metal_list(ctx):
-        print("no games/%s/%s, or NPS5_METAL_SHADERS=0: nothing to generate" % (ctx.tid, metalmod.LIST_NAME)); return 0
+    if not metal_list(ctx) and not metal_gfx_list(ctx):
+        print("no games/%s/%s or %s, or NPS5_METAL_SHADERS=0: nothing to generate" % (ctx.tid, metalmod.LIST_NAME, metalmod.GFX_LIST_NAME)); return 0
     if o["dry"]:
         print("[dry-run] would generate %s from %s and %s/%s.programs.bin" % (os.path.join(ctx.dir, metalmod.OUT_NAME), metal_list(ctx), ctx.dir, ctx.tid))
         return 0
