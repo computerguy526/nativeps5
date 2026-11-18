@@ -9,27 +9,36 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`) if you prepared with a
 
 - Fast math is **off** (`KYTY_FAST_MATH` default 0, the v1 shaders). It is opt-in with `KYTY_FAST_MATH=1`
   (pixel and compute shaders drop the IEEE signed-zero/Inf/NaN preservation and contraction limits, so KosmicKrisp
-  compiles them with Metal fast math; vertex shaders and the position math stay exact; about 2 ms per frame on the
-  world map), but it gives a faint 1-frame-in-3 brightness flicker on the sky, far ridges, rocks and Astro's visor at
+  compiles them with Metal fast math; vertex shaders and the position math stay exact), but it gives a faint 1-frame-in-3 brightness flicker on the sky, far ridges, rocks and Astro's visor at
   the crash site, so it is not the default. A shader cache prepared without it is the normal one; with `=1` the
   shaders compile live. Making it safe per shader is planned for a later release.
 - Buffer collector, selective settle (`KYTY_GC_SETTLE_SELECTIVE=1`): under memory pressure it skips buffers that still
   have readbacks in flight instead of waiting for the GPU (Sky Garden with the budget forced low: 73-75 -> 62 ms per
   frame). **Off by default in v1.0.3:** with the video memory budget forced to 4096 MB it let a flicker through at the
   top left of Astro's helmet after the crash landing (it can reuse a buffer whose readback or GPU write is still in
-  flight); with it off, same conditions, no flicker. Known issue until the collector is reworked.
+  flight). Known issue until the collector is reworked.
 - MetalFX 720p upscaling is now the default (user decision after a playtest). Opt out with `NPS5_ASTRO_UPSCALING=off` (native 1080p) or pick `metalfx900`. The blocky squares on dust, glass and particles are gone. The game takes the
   light-tile grid of its forward-lit transparents from a 1080p table while the light culling pass sizes its grid
   from the real target; the `metalfx720`/`metalfx900` options now set `KYTY_ASTRO_TILE_GRID=auto` (grid =
   ceil(MetalFX input / 16 px)), which corrects the table. Checked at 720p on the intro cutscene dumps (logos, title
-  screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. `NPS5_ASTRO_UPSCALING` defaults to `metalfx720`;
-  little fps gain today because the game is CPU/vertex-bound in levels.
+  screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. `NPS5_ASTRO_UPSCALING` defaults to `metalfx720`.
+  Frame rates: see "Performance" below.
 - Gentler rumble on controllers that are not a DualSense (the game's haptics audio drives the two motors): the envelope
   now has a deadband, a curve and a smooth release and is scaled to half strength, where it used to reach full strength
   at half the signal (`NPS5_RUMBLE_SCALE=0.5`, `NPS5_RUMBLE_FLOOR=0.08`, `NPS5_RUMBLE_GAMMA=1.6`, `NPS5_RUMBLE_DECAY=0.8`;
   `NPS5_RUMBLE_SCALE=0` turns it off). DualSense HD haptics are unchanged.
 - Tooling: a scripted pad no longer also relays the real pad's input in the Kyty host (`KYTY_PAD_RELAY_WITH_SCRIPT=1`
   restores that), and a pad script accepts `shake=<seconds>` (10 Hz accelerometer/gyro shake, at most 30 s) for motion tests.
+- Fixes from the v1.0.3 review: the last-scene memory (`shader_prepare=scene`) is also written when the window is
+  closed, so it no longer goes stale on a warm cache; an explicit `KYTY_ASTRO_TILE_GRID` is bounded (at most 240x135,
+  the game's 2160p entry; bad values are refused) and `auto` no longer polls forever on an input above 3840 px;
+  `KYTY_PAD_RELAY_WITH_SCRIPT` takes effect only with `=1`; a pad-script `shake=` at the end of a script still plays
+  and ends instead of leaving its first motion sample applied.
+- Performance (MacBook Pro M4 Pro, MetalFX 720p default): world map 29.9 fps (p50 33.5 ms, one 60 s run), about
+  38 fps at the crash site after the landing (median of the game's own frame-rate readings over a playtest). v1.0 at native 1080p on the same Mac: world map 25.6 fps,
+  `hoover_beach` 20.1 fps, Sky Garden about 13-16 fps. `NPS5_ASTRO_UPSCALING=off` gives native 1080p.
+- Known issue: Astro's visor cracks can flicker now and then in the crash-landing close-up. It was there before
+  v1.0.3 and is not the fast-math flicker; a fix is planned for v1.1.
 - Carried over from v1.0.2 (no new change): file reads into guest memory (`readv`, `fread`) repeat when the page was
   protected again before the kernel copied (EFAULT), as `read`/`pread` already did; the world-map bus error is closed.
 - Fault handling switches, off by default: `KYTY_HOSTED_RETRIED_WRITES=1` (guest write faults on GPU-owned pages take
