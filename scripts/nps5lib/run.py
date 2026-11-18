@@ -27,6 +27,7 @@ SCHEMA = 1
 RESERVED = ("bin", "patch", "gpu", "libs", "lib", "kk", "kyty", "workdir", "cache", "save")
 CLASSES = ("func", "perf")
 RUN_CAP_S, RUN_NO_REASON_S, GPU_PROFILE_MAX_S = 180, 90, 40
+CACHE_RUN_CAP_S = 1800                            # `nps5 cache prepare|record|check` runs (tag cache-*): the list ends them, secs is only their ceiling
 PLAY_CAP_S = 7200                                 # --play: an interactive session
 NAME_RE = r"[A-Za-z0-9_][A-Za-z0-9_.+:-]*"       # a tag, a save name, a relative work dir: one path component, never .. or a path
 RUN_JSON_KEYS = ("schema", "title", "tag", "class", "gpu", "scene", "until", "secs", "arm", "build", "lineage", "patches",
@@ -186,7 +187,7 @@ def check_final(g, p, plan, secs, environ, gpu):
     if getattr(plan, "play", False):
         if secs > PLAY_CAP_S:
             raise Refuse("%d s is over the %d s cap of --play" % (secs, PLAY_CAP_S))
-    elif secs > RUN_CAP_S:
+    elif secs > RUN_CAP_S and not (plan.env.get("NPS5_RUN_CLASS") == "func" and str(plan.env.get("NPS5_RUN_TAG") or "").startswith("cache-") and secs <= CACHE_RUN_CAP_S):
         raise Refuse("%d s is over the %d s cap (a person playing: --play)" % (secs, RUN_CAP_S))
     elif secs > RUN_NO_REASON_S and not environ.get("NPS5_RUN_REASON"):
         raise Refuse("runs over %d s need NPS5_RUN_REASON=<why>" % RUN_NO_REASON_S)

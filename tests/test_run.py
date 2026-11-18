@@ -102,6 +102,9 @@ class T(unittest.TestCase):
         self.refused(["--env", "NPS5_SELF_MEM_LIMIT_MB=20000"], env=dict(NPS5_SELF_MEM_LIMIT_MB="12000"))   # above this Mac's own max
         self.refused(["--env", "KYTY_EOP_TIMESTAMPS=gpu"]); self.refused(["--env", "APS5_PROFILE_GPU=1"])
         self.refused(["--secs", "200"]); self.refused(["--secs", "120"])
+        # `nps5 cache prepare` runs (tag cache-*, class func) ask for a 1800 s ceiling; any other tag / class / larger value is still capped
+        self.assertEqual(self.plan(["--tag", "cache-prepare", "--secs", "1800"], dict(NPS5_RUN_REASON="nps5 cache")).secs, 1800)
+        self.refused(["--tag", "cache-prepare", "--secs", "1801"], env=dict(NPS5_RUN_REASON="x")); self.refused(["--tag", "mytag", "--secs", "1800"], env=dict(NPS5_RUN_REASON="x"))
         self.assertEqual(self.plan(["--secs", "120"], dict(NPS5_RUN_REASON="cold cache")).secs, 120)
         self.refused(["--scene", "sl"])                     # scene says 170 s: needs a reason
         self.refused(["--scene", "nope"], 2); self.refused(["--class", "fast"], 2); self.refused(["--gpu", "x"], 2)
