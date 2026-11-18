@@ -817,9 +817,13 @@ KK_MSL_COMPRESS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_DUMP_DIR	nativeps5	diagnostic: writes generated MSL per shader hash; output is game data	tools/xray/tests/run_tests.sh
 KK_MSL_OPT	kosmickrisp	bit mask of MSL code-generation changes, part of the pipeline cache key; default 1039 (bits 1,2,4,8,1024: result-preserving). Table in docs/reference/shaders.md	vulkan/kk_physical_device.c
 KK_MSL_OPT	nativeps5	bit mask of MSL code-generation changes, part of the pipeline cache key; default 1039 (bits 1,2,4,8,1024: result-preserving). Table in docs/reference/shaders.md	tools/xray/tests/run_tests.sh
+KK_MSL_OVERRIDE	nativeps5		tests/test_metal.py
 KK_MSL_OVERRIDE_ASYNC	kosmickrisp	1 (default) = compile replacement kernels on a background queue, KosmicKrisp's kernel runs until ready; 0 = at pipeline creation (cache prepare pass 2)	vulkan/kk_shader.c
+KK_MSL_OVERRIDE_ASYNC	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_OVERRIDE_DIR	kosmickrisp	directory of replacement compute kernels <b3>.metal (b3 = first 16 hex of BLAKE3 of KosmicKrisp's own MSL); unset = off. Set by nps5 to <cache dir>/metal-shaders (v1.1)	vulkan/kk_shader.c
+KK_MSL_OVERRIDE_DIR	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_OVERRIDE_LOG	kosmickrisp	1 = log the key of every application compute kernel ('[kk-mslinject] seen <b3>'); cache prepare pass 1 sets it	vulkan/kk_shader.c
+KK_MSL_OVERRIDE_LOG	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_OVERRIDE_PERIOD	kosmickrisp	<s> = alternate replacement (even phases) and KosmicKrisp's kernel (odd phases) inside one run, for A/B	vulkan/kk_shader.c
 KK_MSL_STATS	kosmickrisp		vulkan/kk_shader.c
 KK_MSL_STATS	nativeps5		kosmickrisp/tests/msldrop/run.sh
@@ -1356,6 +1360,22 @@ KYTY_MOVREL_KNOWN_ZEROS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MOVREL_RANGE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MOVREL_SWITCH	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MRT_SPLIT	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
+KYTY_MSL_BOUNDS	kyty		src/graphics/shader/recompiler/backend/msl/MslBufferOps.h
+KYTY_MSL_CONVENTION	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_DEBUG	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_DUMP_NOFORK	kyty		tools/msl-dump/kytyMslDump.cpp
+KYTY_MSL_FORCE_DISPATCHER	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_INVARIANT	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_COLOR_MASK	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_PS_READS	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_SET0	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_KK_VA	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_VS_OUTS	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_LDS_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_LOOP_CAP	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_MIPSTATS_PLAIN	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_WAITCNT_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_WAVE64	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MUTEX_HANDOFF_US	kyty		src/kernel/pthread.cpp
 KYTY_NATIVE_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_NATIVE_FMINMAX	nativeps5		titles/kyty-preset.env
