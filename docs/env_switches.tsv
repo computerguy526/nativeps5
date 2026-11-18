@@ -817,6 +817,10 @@ KK_MSL_COMPRESS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_DUMP_DIR	nativeps5	diagnostic: writes generated MSL per shader hash; output is game data	tools/xray/tests/run_tests.sh
 KK_MSL_OPT	kosmickrisp	bit mask of MSL code-generation changes, part of the pipeline cache key; default 1039 (bits 1,2,4,8,1024: result-preserving). Table in docs/reference/shaders.md	vulkan/kk_physical_device.c
 KK_MSL_OPT	nativeps5	bit mask of MSL code-generation changes, part of the pipeline cache key; default 1039 (bits 1,2,4,8,1024: result-preserving). Table in docs/reference/shaders.md	tools/xray/tests/run_tests.sh
+KK_MSL_OVERRIDE_ASYNC	kosmickrisp	1 (default) = compile replacement kernels on a background queue, KosmicKrisp's kernel runs until ready; 0 = at pipeline creation (cache prepare pass 2)	vulkan/kk_shader.c
+KK_MSL_OVERRIDE_DIR	kosmickrisp	directory of replacement compute kernels <b3>.metal (b3 = first 16 hex of BLAKE3 of KosmicKrisp's own MSL); unset = off. Set by nps5 to <cache dir>/metal-shaders (v1.1)	vulkan/kk_shader.c
+KK_MSL_OVERRIDE_LOG	kosmickrisp	1 = log the key of every application compute kernel ('[kk-mslinject] seen <b3>'); cache prepare pass 1 sets it	vulkan/kk_shader.c
+KK_MSL_OVERRIDE_PERIOD	kosmickrisp	<s> = alternate replacement (even phases) and KosmicKrisp's kernel (odd phases) inside one run, for A/B	vulkan/kk_shader.c
 KK_MSL_STATS	kosmickrisp		vulkan/kk_shader.c
 KK_MSL_STATS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_ZERO_INIT_SSA	kosmickrisp		compiler/nir_to_msl.c
@@ -1898,8 +1902,10 @@ NPS5_LOG	ps5recomp		pkg/diag/diag_test.go
 NPS5_LOG_RATE	ps5recomp	first,every: thin repeated periodic log lines (default off)	pkg/runtime/modules/libSceAnyPS5/nps5_log.h
 NPS5_LONG	nativeps5		tests/test_evidence_ab_report.py
 NPS5_LOWERING_ID	ps5recomp		pkg/emitter/lowering.go
+NPS5_METAL_SHADERS	nativeps5	0 = do not generate or use our Metal compute kernels (v1.1, games/<id>/metal-shaders.tsv); default on	scripts/nps5lib/metal.py
 NPS5_MISS	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_MKDIR	ps5recomp		pkg/pack/assets/launcher.c
+NPS5_MSL_TOOL	nativeps5	kyty_msl_dump used by the Metal shader generation (default <NPS5_KYTY_DIR>/build-arm64/kyty_msl_dump)	scripts/nps5lib/metal.py
 NPS5_NO_BUNDLE	ps5recomp		pkg/cli/diag_hook.go
 NPS5_NO_HLE_COUNT	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_NO_LEVEL_ALIAS	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
