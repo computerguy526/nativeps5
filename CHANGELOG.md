@@ -22,6 +22,10 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the
   ceil(MetalFX input / 16 px)), which corrects the table. Checked at 720p on the intro cutscene dumps (logos, title
   screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. Upscaling stays off by default (native 1080p);
   little fps gain today because the game is CPU/vertex-bound in levels.
+- Gentler rumble on controllers that are not a DualSense (the game's haptics audio drives the two motors): the envelope
+  now has a deadband, a curve and a smooth release and is scaled to half strength, where it used to reach full strength
+  at half the signal (`NPS5_RUMBLE_SCALE=0.5`, `NPS5_RUMBLE_FLOOR=0.08`, `NPS5_RUMBLE_GAMMA=1.6`, `NPS5_RUMBLE_DECAY=0.8`;
+  `NPS5_RUMBLE_SCALE=0` turns it off). DualSense HD haptics are unchanged.
 - Tooling: a scripted pad no longer also relays the real pad's input in the Kyty host (`KYTY_PAD_RELAY_WITH_SCRIPT=1`
   restores that), and a pad script accepts `shake=<seconds>` (10 Hz accelerometer/gyro shake, at most 30 s) for motion tests.
 - Carried over from v1.0.2 (no new change): file reads into guest memory (`readv`, `fread`) repeat when the page was

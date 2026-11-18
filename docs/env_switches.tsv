@@ -1935,6 +1935,11 @@ NPS5_REGRESS_SKIP	nativeps5		scripts/nps5lib/regress.py
 NPS5_REPO	ps5recomp		pkg/pack/build.go
 NPS5_ROOT	nativeps5		nps5.conf.example
 NPS5_ROOT	ps5recomp		pkg/diag/tools.go
+NPS5_RUMBLE_DECAY	kyty	rumble release per haptics grain for non-DualSense pads (default 0.80; 0..<1)	src/libs/dualSenseHaptics.cpp
+NPS5_RUMBLE_FLOOR	kyty	rumble deadband on the haptics envelope for non-DualSense pads (default 0.08)	src/libs/dualSenseHaptics.cpp
+NPS5_RUMBLE_GAMMA	kyty	rumble curve exponent for non-DualSense pads (default 1.6; faint stays faint)	src/libs/dualSenseHaptics.cpp
+NPS5_RUMBLE_LOG	kyty	1 = one line per second: envelope histogram and motor values (diagnostic)	src/libs/dualSenseHaptics.cpp
+NPS5_RUMBLE_SCALE	kyty	rumble strength for non-DualSense pads, 0..1 (default 0.5; 0 = off, 1 = the curve at full strength)	src/libs/dualSenseHaptics.cpp
 NPS5_RUNS_BY_TAG	nativeps5		scripts/nps5lib/bugreport.py
 NPS5_RUNS_DIR	anyps5		core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
 NPS5_RUNS_DIR	nativeps5		scripts/nps5lib/run.py
