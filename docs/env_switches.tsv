@@ -1797,7 +1797,7 @@ NPS5_ASM	ps5recomp		pkg/cli/asmpipe.go
 NPS5_ASTRO_FAST_LIGHTING	ps5recomp		pkg/cli/settingsdialog_test.go
 NPS5_ASTRO_REALTIME	nativeps5		tests/compare_env.sh
 NPS5_ASTRO_REALTIME	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
-NPS5_ASTRO_UPSCALING	ps5recomp	ASTRO BOT upscaling setting: off (default) | metalfx900 | metalfx720 (experimental)	pkg/cli/settingsdialog_test.go
+NPS5_ASTRO_UPSCALING	ps5recomp	ASTRO BOT upscaling setting: off (native 1080p) | metalfx900 | metalfx720 (default since v1.0.3)	pkg/cli/settingsdialog_test.go
 NPS5_AUDIO_CAPTURE	ps5recomp		pkg/runtime/modules/libSceAudioOut/nps5_audio_capture.c
 NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	scripts/nps5lib/run.py
 NPS5_AUDIO_NULL	ps5recomp	`1` silent audio device; the default in run-title.sh	pkg/runtime/modules/libSceAudioOut/ps4_audioout.c

@@ -16,11 +16,11 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the
   frame). **Off by default in v1.0.3:** with the video memory budget forced to 4096 MB it let a flicker through at the
   top left of Astro's helmet after the crash landing (it can reuse a buffer whose readback or GPU write is still in
   flight); with it off, same conditions, no flicker. Known issue until the collector is reworked.
-- MetalFX upscaling at 720p/900p: the blocky squares on dust, glass and particles are gone. The game takes the
+- MetalFX 720p upscaling is now the default (user decision after a playtest). Opt out with `NPS5_ASTRO_UPSCALING=off` (native 1080p) or pick `metalfx900`. The blocky squares on dust, glass and particles are gone. The game takes the
   light-tile grid of its forward-lit transparents from a 1080p table while the light culling pass sizes its grid
   from the real target; the `metalfx720`/`metalfx900` options now set `KYTY_ASTRO_TILE_GRID=auto` (grid =
   ceil(MetalFX input / 16 px)), which corrects the table. Checked at 720p on the intro cutscene dumps (logos, title
-  screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. Upscaling stays off by default (native 1080p);
+  screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. `NPS5_ASTRO_UPSCALING` defaults to `metalfx720`;
   little fps gain today because the game is CPU/vertex-bound in levels.
 - Gentler rumble on controllers that are not a DualSense (the game's haptics audio drives the two motors): the envelope
   now has a deadband, a curve and a smooth release and is scaled to half strength, where it used to reach full strength
