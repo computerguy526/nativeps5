@@ -5,6 +5,16 @@ pinned commits are in [components.lock](components.lock).
 
 ## Unreleased
 
+## v1.0.2 (2026-11-18)
+
+- Runtime: `readv` and `fread` into guest memory are repeated after an EFAULT from a page the back end protected again
+  (the savedata and libc `fread` paths and the `readv` system call), as `read`, `pread` and `preadv` already were; the
+  file or stream position is put back first. Unit-tested (`TestHostAccessHooks`). Runtime only: no retranslate, no
+  shader-cache re-prepare.
+- ASTRO BOT known issue closed: the world-map bus error (SIGBUS, about 9 % of world-map runs during development) was
+  that EFAULT read race, already fixed by the read retry in v1.0.0; 0 of 50 title-to-world-map runs since.
+- `docs/learnings.md`: the 2026-11-18 ASTRO BOT optimisation experiments that did not win, with reasons and leads.
+
 ## v1.0.1 (2026-11-18)
 
 - ASTRO BOT shipped pipeline list refreshed from play testing: 1,596 pipelines (was 1,544), 893 shader permutations (was 878). References and keys only, no game code; proof record regenerated.

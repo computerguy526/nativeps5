@@ -20,7 +20,7 @@ from here.
   frames in both of its runs; with the hitch fixes 0-2 frames per run take over 100 ms).
   Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
   Patches), shader caches prepared from the shipped pipeline list.
-- **Known issues:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not diagnosed); MetalFX 720p/900p upscaling shows
+- **Known issues:** MetalFX 720p/900p upscaling shows
   block artefacts (experimental, off by default); PlayStation symbols look garbled in the warp from the world map
   into a level; closing the window exits at once without flushing the shader caches. Details in "Known issues"
   below.
@@ -136,7 +136,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | `volcano_mountain` is very dark | | unknown; may be right | Compare with a console capture |
 | Title frame time is bimodal with record-time clocks | title | the dynamic-resolution feedback loop | Gone with `cbtime`; do not use 36-40 fps figures from old notes as a baseline |
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
-| About 9 % of world-map runs end in a guest bus error (SIGBUS) | world map | not diagnosed | Open, parked at the first release |
+| ~~About 9 % of world-map runs end in a guest bus error (SIGBUS)~~ | world map, 2-3 s after `ui_world_map_galaxy_scan_dlc1` opens | a file read into a guest page failed with EFAULT (the back end protected the page again before the kernel copied), so a 0x6b0-byte animation blob was never written and the loader followed a garbage offset | Fixed: the read retry of the crash-site hub row below, in every release since v1.0.0; 0 of 50 title-to-world-map runs since (3 of about 35 before). v1.0.2 also repeats `readv` and `fread` |
 | MetalFX upscaling at 720p/900p shows blocky squares and jagged edges on moving objects and dust | intro cutscene (ship, alien, floor), crash site sand; with and without MetalFX | the game never renders below 1080p by itself; some passes keep a 1080p-derived size or tile grid when the level-0 size is lowered | Open. `upscaling` is off by default; the three DRS-level size helpers (guest `0x77d75f0`, `0x78395f0`, `0x7839680`) and the 1920x1080 initialisers were ruled out |
 | ~~A save written in some situations crashes the game when it is loaded~~ | - | Fixed in v1.0.1: the save-data transfer mount opened the game's own save, so its XML parser read it from the wrong offset | Update to v1.0.1 or later (the `nativeps5-recomp` commit pinned in components.lock) |
 | All in-game text missing (menu captions, "PRESS ANY BUTTON", copyright) | everywhere | `sceFontGetRenderCharGlyphMetrics` and the rest of the glyph API returned an error, so the layout dropped every character | Fixed (libSceFont glyph API) |

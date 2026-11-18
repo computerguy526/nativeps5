@@ -90,7 +90,6 @@ Still open, built but without a title number (do not quote them as wins): fewer 
 driver, vectorised loads in NIR, mip skip, the texture reuse tracker, the lazy collector settle, MetalFX in place of
 the game's upscaler, per-shader NaN-guard removal on the megakernels.
 
-
 Secondary leads from these results (not yet tried or still open):
 
 - Narrow the destination side of Kyty's barriers (later work waits only for what it consumes), then let vertex work of

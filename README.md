@@ -14,7 +14,7 @@ It is not an emulator: there is no JIT and no interpreter. Nothing from any game
 - **MetalFX upscaling (720p/900p) is experimental and off by default:** at the lower sizes some of the game's passes still assume 1080p, which shows as blocky squares and jagged edges on moving objects and dust. A fix is in progress.
 - **Shaders:** a cache prepare step builds the game's shaders before the first run; it can take several minutes and shows its progress in the terminal only. The first visit to a level that is not in the shipped shader list may still compile some shaders (short stutters).
 - **Saves:** fixed in v1.0.1: a save could crash the game on load (the save-data transfer mount opened the game's own save). Saves are still early-preview data: keep a backup of your save folder.
-- **Crashes:** about 9 % of world-map runs end in a guest bus error (SIGBUS; not yet diagnosed). Closing the window exits at once and skips the shader-cache flush.
+- **Crashes:** the world-map bus error (SIGBUS) that ended about 9 % of world-map runs during development (3 of about 35) is fixed: a file read into guest memory failed with EFAULT, and the read retry that fixes it has been in every release since v1.0.0 (0 of 50 title-to-world-map runs since; v1.0.2 extends it to `readv` and `fread`). Closing the window exits at once and skips the shader-cache flush.
 - **Picture:** PlayStation symbols look garbled in the warp from the world map into a level. The `hoover_beach` fluid read-fault storm is mitigated in the profile.
 - **Controller:** DualSense, DualShock 4, Switch Pro and Xbox pads through SDL; DualSense haptics; motion controls need a pad with a gyro.
 - **No online features and no trophies.**
