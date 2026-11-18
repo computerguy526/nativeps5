@@ -1,0 +1,6 @@
+# shellcheck baseline (CI: job "shellcheck", `shellcheck -S warning`): warnings the scripts had when CI came in.
+# Remove a line when the script is fixed. New code must not add findings of any other kind.
+disable=SC1072,SC1073   # tools/agxdis/tests/run_tests.sh:32 builds a test from "$4" (parse error in shellcheck only)
+disable=SC1090          # host/machine_guard.sh sources a non-constant path
+disable=SC2010,SC2033,SC2034,SC2046,SC2062,SC2155
+disable=SC2221,SC2222   # host/machine_guard.sh:43 overlapping case patterns, harmless
