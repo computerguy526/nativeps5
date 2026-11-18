@@ -9,19 +9,27 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the
 
 - Faster pixel and compute shaders: they no longer ask for IEEE signed-zero/Inf/NaN preservation and contraction
   limits, so KosmicKrisp compiles them with Metal fast math (`KYTY_FAST_MATH=1`, default on; vertex shaders and the
-  position math stay exact). World map GPU time 37.7 -> 35.4 ms per frame, 26.4 -> 28.2 fps in paired runs; no
-  visual change found. `KYTY_FAST_MATH=0` restores the v1 shaders (with a cache prepared that way).
-- Buffer collector: under memory pressure it no longer waits for the GPU after nearly every submission; it skips the
-  buffers that still have readbacks in flight (`KYTY_GC_SETTLE_SELECTIVE=1`, default on). Sky Garden with the budget
-  forced low: 73-75 -> 62 ms per frame; no change when memory use is below the collector trigger.
+  position math stay exact). World map (60 s windows, ABBA, v1 / v1.1 / v1.1 / v1): frame time p50 39.0 -> 37.0 ms, 25.6 -> 27.2 fps;
+  `hoover_beach` p50 45.9 -> 45.0 ms, 20.1 -> 20.9 fps; no visual change found. `KYTY_FAST_MATH=0` restores the v1 shaders (with a cache prepared that way).
+- Buffer collector, selective settle (`KYTY_GC_SETTLE_SELECTIVE=1`): under memory pressure it skips buffers that still
+  have readbacks in flight instead of waiting for the GPU (Sky Garden with the budget forced low: 73-75 -> 62 ms per
+  frame). **Off by default in v1.1:** with the video memory budget forced to 4096 MB it let a flicker through at the
+  top left of Astro's helmet after the crash landing (it can reuse a buffer whose readback or GPU write is still in
+  flight); with it off, same conditions, no flicker. Known issue until the collector is reworked.
 - MetalFX upscaling at 720p/900p: the blocky squares on dust, glass and particles are gone. The game takes the
   light-tile grid of its forward-lit transparents from a 1080p table while the light culling pass sizes its grid
   from the real target; the `metalfx720`/`metalfx900` options now set `KYTY_ASTRO_TILE_GRID=auto` (grid =
-  ceil(MetalFX input / 16 px)), which corrects the table. Upscaling stays off by default.
+  ceil(MetalFX input / 16 px)), which corrects the table. Checked at 720p on the intro cutscene dumps (logos, title
+  screen, warp tunnel, ship, asteroid field): no 16x16 block pattern. Upscaling stays off by default (native 1080p);
+  little fps gain today because the game is CPU/vertex-bound in levels.
+- Tooling: a scripted pad no longer also relays the real pad's input in the Kyty host (`KYTY_PAD_RELAY_WITH_SCRIPT=1`
+  restores that), and a pad script accepts `shake=<seconds>` (10 Hz accelerometer/gyro shake) for motion tests.
+- File reads into guest memory (`readv`, `fread`) repeat when the page was protected again before the kernel copied
+  (EFAULT), as `read`/`pread` already did: the world-map bus error is closed (see v1.0.2).
 - Fault handling switches, off by default: `KYTY_HOSTED_RETRIED_WRITES=1` (guest write faults on GPU-owned pages take
   the side path instead of draining the command processor) and `KYTY_READ_RELAX=<n>` (served read-watched pages are not
-  re-watched until the next GPU write). Together `hoover_beach` 21.3 -> 22.4 fps in paired runs; not yet validated on
-  every scene.
+  re-watched until the next GPU write). Together `hoover_beach` p50 45.9 -> 37.9 ms, 20.1 -> 22.9 fps (two runs each, ABBA);
+  not yet validated on every scene.
 - No compiles at run time on a prepared cache: a launch phase behind the loading card creates every known pipeline
   before the game starts (`KYTY_PIPELINE_REPLAY_ALL=1`, on in the preset) and builds the renderer's tile/detile
   helper pipelines (`KYTY_HELPER_PREWARM=1`); a prepare now records those helpers and waits for KosmicKrisp's
