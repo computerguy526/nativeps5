@@ -148,7 +148,8 @@ fragment MSL), a second render pipeline is built from the same descriptor, and a
 present (compute stays `<b3>.metal`). The list is `games/<id>/metal-gfx-pairs.tsv` (hashes plus the layout numbers the
 emitter needs: descriptor offsets, vertex attributes, colour mask); `metal.generate_gfx` emits the fragment text, then the
 vertex text linked to the fragment's reads and to KosmicKrisp's vertex text (found in the cache's `kk-libcache/msl` by its
-BLAKE3 key), and keeps both only when their sha256 equal the list's.
+BLAKE3 key), and keeps both only when their sha256 equal the list's. In v1.1 the ASTRO BOT list has no pair rows (none
+verified yet): a header-only list skips the graphics step.
 Ballots and votes use `simd_or` of lane bits (an `if`-converted `simd_ballot` sees all lanes on macOS 26), and LDS reads
 after LDS writes without a barrier get a simdgroup fence (Apple GPUs do not run 32 lanes in lockstep).
 

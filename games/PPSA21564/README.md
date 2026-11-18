@@ -23,9 +23,14 @@ from here.
 - **v1.0.3** (MetalFX 720p default, fast math off, same Mac): world map 29.9 fps (p50 33.5 ms, one 60 s run); about 38 fps at the crash site after the landing
   (`hub_crashsite_tutorial`, median of the game's `[framerate]` readings over a playtest). v1.0 at native 1080p:
   world map 25.6 fps, `hoover_beach` 20.1 fps, `underwater_aerial_garden` about 13-16 fps. Native 1080p:
-  `NPS5_ASTRO_UPSCALING=off`.
-- **Known issues:** Astro's visor cracks can flicker now and then in the crash-landing close-up (v1.1 adds the
-  `KYTY_SNAPSHOT_CLEAN_READS` hardening for it); MetalFX 720p upscaling is the default (`NPS5_ASTRO_UPSCALING=off` = native 1080p, `metalfx900` = 900p; the block artefacts are fixed in v1.0.3; edges are
+  `NPS5_ASTRO_UPSCALING=off`. v1.0.3 also (one run each): `hoover_beach` 27.0 fps (p50 32.9 ms), `underwater_aerial_garden`
+  (Sky Garden) 14.6 fps (p50 65.7 ms).
+- **v1.1** (v1.0.3 + 68 of our Metal compute kernels + `KYTY_GC_SETTLE_SELECTIVE` on, same Mac): Sky Garden about 17 fps
+  (frame time about 59-60 ms). The kernels alone: 16.2 against 14.4-14.7 fps (A-B-A, about +11 %; frames over 100 ms
+  5-6 -> 0); the selective settle about -4 ms per frame on top.
+- **Known issues:** Sky Garden's flower-pod switch does not pop up and the pull bar is already out (the puzzle cannot be
+  finished; also without our Metal kernels; under investigation); Astro's visor cracks could flicker now and then in the
+  crash-landing close-up (v1.1 adds `KYTY_SNAPSHOT_CLEAN_READS` for it); MetalFX 720p upscaling is the default (`NPS5_ASTRO_UPSCALING=off` = native 1080p, `metalfx900` = 900p; the block artefacts are fixed in v1.0.3; edges are
   more jagged than native); PlayStation symbols look garbled in the warp from the world map
   into a level; closing the window exits at once without the renderer teardown (v1.0.3 writes the driver pipeline cache first). Details in "Known issues"
   below.
@@ -149,7 +154,8 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | Crash on the way into the crash-site hub (file read returns EFAULT) | `hub_crashsite`, world map | a file read into a guest page the back end had just protected: the kernel returns EFAULT instead of faulting, so the game got an error for a valid buffer | Fixed (the read opens the range again and repeats) |
 | Flower and turtle effects flicker | some places in levels | late depth test after instrumented (`GET_LOD_STATS`) pixel shaders misses the pre-pass depth | Fixed: early depth/stencil tests for those shaders (`KYTY_LOD_STATS_EARLY_TESTS`, default on; `hoover_beach` burst frames gone). Needs a fresh shader-cache prepare |
 | Closing the window exits at once, without the renderer teardown and the on-exit cache flush | any run | the window-close path | Partly fixed in v1.0.3: the close writes the Vulkan driver pipeline cache first (up to about 3 s) and the last-scene memory; the rest of the teardown is still skipped |
-| Astro's visor cracks flicker now and then | crash-landing close-up (`hub_crashsite_tutorial`) | intermittent; small clean read bindings were not copied at bind | v1.1: `KYTY_SNAPSHOT_CLEAN_READS` hardening (default on); user check pending |
+| Astro's visor cracks flicker now and then | crash-landing close-up (`hub_crashsite_tutorial`) | intermittent; a per-frame constant buffer inside a big cache buffer was bound without a snapshot (small clean read bindings were not copied at bind) | v1.1: `KYTY_SNAPSHOT_CLEAN_READS` (default on); clean in the v1.1 checks (300 consecutive frames) and the play test, also with `KYTY_GC_SETTLE_SELECTIVE` on |
+| Sky Garden: the flower-pod switch does not pop up and the pull bar is already out | `underwater_aerial_garden`, first part | unknown; also without our Metal kernels (not caused by v1.1) | Under investigation (physics timing is one suspect) |
 | `hoover_beach` has a fluid-simulation read-fault storm in about half the runs | `hoover_beach` | page-fault handling for the game's fluid simulation | `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` is on in the profile (game.tsv): the ~340 ms stalls went from 3-33 per minute to 0-1.3 |
 
 ## How to reach a scene

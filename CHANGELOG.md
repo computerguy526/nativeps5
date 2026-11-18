@@ -5,7 +5,8 @@ pinned commits are in [components.lock](components.lock).
 
 ## v1.1 (unreleased, candidate)
 
-Everything in v1.0.3, plus our own Metal compute kernels. Needs a fresh shader-cache prepare (`nps5 cache prepare`).
+Everything in v1.0.3, plus our own Metal compute kernels and the selective buffer-collector settle on by default. Needs a
+fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1.0.3.
 
 - **Our Metal shaders (compute).** For the compute kernels listed in `games/<title id>/metal-shaders.tsv`, KosmicKrisp
   runs a kernel translated straight from the PS5 shader to Metal by Kyty's new MSL back end instead of its own
@@ -14,23 +15,38 @@ Everything in v1.0.3, plus our own Metal compute kernels. Needs a fresh shader-c
   N/T" in the terminal), keeps a kernel only when it is byte-identical to the one that was verified (GPU differential
   test against KosmicKrisp's kernel on the same inputs, benchmark, in-game smoke and play test), and compiles them
   once under the progress card in pass 2. Normal starts load them as prebuilt Metal libraries in the background;
-  KosmicKrisp's own kernel runs until a replacement is ready and whenever one fails. ASTRO BOT: 68 compute kernels.
-  Opt out with `NPS5_METAL_SHADERS=0`. `nps5 cache status` shows how many are in use; `nps5 cache metal <id>`
-  regenerates them. KosmicKrisp patches 0023-0025 (`KK_MSL_OVERRIDE_DIR`, `KK_MSL_OVERRIDE_ASYNC`, compile counts
-  for the progress card); new tool `kyty_msl_dump` in the Kyty fork.
-- **Our Metal shaders (graphics).** The same mechanism for render pipelines: `games/<title id>/metal-gfx-pairs.tsv` lists
-  verified (vertex, fragment) PAIRS, hashes and a few layout numbers only (draw-capture differential test against
-  KosmicKrisp's own pair, mutation checks). `nps5 cache prepare` generates both stages of a pair on your Mac from your own
-  dump and KosmicKrisp's own vertex text ("Metal graphics: N/T"), keeps a pair only when both texts are byte-identical to the
-  verified ones, and compiles them under the progress card in pass 2 like the compute kernels. KosmicKrisp swaps a pipeline
-  only when BOTH of its stage keys match a listed pair (patch 0026; a replacement verified in one pipeline is never combined
-  with another pipeline's stages), and keeps its own pair when one stage is missing or fails to compile. ASTRO BOT: 7 pairs.
-  The Kyty MSL back end gets the graphics-stage pieces (per-invocation LDS, integer f32 to f16 round-toward-zero).
-- **Faster wave64 votes in the Metal kernels.** The MSL back end now takes one subgroup vote over both halves of a wave64 (`any(a) || any(b)` = `any(a || b)`; `KYTY_MSL_VOTE_MERGE=0` restores the old text), which makes 4 more kernels faster than KosmicKrisp's (68 in all) and 16 others faster than before. Fast math stays off.
-- **Shader compile threads.** The shader precompile workers run at utility priority and the replay workers and the compute prewarm share one fan-out of driver pipeline builds (`NPS5_COMPILE_GATE=0` lifts it); cache prepare gets shorter and the load-time peak lower.
-- **Buffer snapshots (hardening).** Small read-only buffer bindings that the GPU has not written are copied at bind time,
-  like those the CPU changed (`KYTY_SNAPSHOT_CLEAN_READS`, default on; `=0` restores the v1.0.3 behaviour). Aimed at the
-  intermittent visor flicker in the crash-landing close-up. Fast math stays off, as in v1.0.3.
+  KosmicKrisp's own kernel runs until a replacement is ready and whenever one fails. ASTRO BOT: 68 compute kernels;
+  Sky Garden about +11 % (16.2 against 14.4-14.7 fps, p50 62.3 against 66.1-67.3 ms, frames over 100 ms 5-6 -> 0,
+  A-B-A on v1.0.3). Opt out with `NPS5_METAL_SHADERS=0`. `nps5 cache status` shows how many are in use;
+  `nps5 cache metal <id>` regenerates them. KosmicKrisp patches 0023-0025 (`KK_MSL_OVERRIDE_DIR`,
+  `KK_MSL_OVERRIDE_ASYNC`, compile counts for the progress card); new tool `kyty_msl_dump` in the Kyty fork.
+- **Faster wave64 votes in the Metal kernels.** The MSL back end now takes one subgroup vote over both halves of a
+  wave64 (`any(a) || any(b)` = `any(a || b)`; `KYTY_MSL_VOTE_MERGE=0` restores the old text), which makes 4 more kernels
+  faster than KosmicKrisp's (68 in all) and 16 others faster than before.
+- **Buffer collector, selective settle on by default** (`KYTY_GC_SETTLE_SELECTIVE`, default 1; `=0` restores the v1.0.3
+  behaviour). A collection pass no longer waits for the GPU to finish every pending readback; it skips the buffers those
+  readbacks cover and looks at them again later. In Sky Garden the command-processor thread's settle waits drop from
+  about 20 to about 6 ms per frame (about -4 ms per frame, +1 fps). v1.0.3 kept it off because of a flicker on Astro's
+  helmet; that case was a stale per-frame constant buffer, which the buffer snapshots below now copy, and with both on
+  the crash-site flicker checks (300 consecutive frames: sky, ridges, rocks, visor) and the play test are clean.
+  `KYTY_GC_SIDE_SETTLE_LAZY`/`_LAZY_CRITICAL` have no effect while it is on.
+- **Buffer snapshots.** Small read-only buffer bindings that the GPU has not written are copied at bind time, like those
+  the CPU changed (`KYTY_SNAPSHOT_CLEAN_READS`, default on; `=0` restores the v1.0.3 behaviour). Aimed at the
+  intermittent visor flicker in the crash-landing close-up.
+- **Gentler shader prepare.** The shader precompile workers run at utility priority, and the replay workers and the
+  compute prewarm share one fan-out of driver pipeline builds (`NPS5_COMPILE_GATE=0` lifts it): a prepare took 285
+  instead of 333 s and the load average peaked at about 27 instead of 84 (one measurement), so the Mac stays usable.
+- **Our Metal shaders (graphics): mechanism only, no pairs yet.** The same path for render pipelines exists
+  (`games/<title id>/metal-gfx-pairs.tsv`, KosmicKrisp patch 0026: a pipeline is swapped only when BOTH of its stage keys
+  match a listed vertex+fragment pair; generation keeps a pair only when both texts are byte-identical to the verified
+  ones), but the ASTRO BOT list is **empty** in v1.1: no graphics pair has passed verification yet, so every render
+  pipeline is KosmicKrisp's own, as in v1.0.3. The Kyty MSL back end gets the graphics-stage pieces (per-invocation LDS,
+  integer f32 to f16 round-toward-zero).
+- Performance (MacBook Pro M4 Pro, MetalFX 720p default): Sky Garden (`underwater_aerial_garden`) about 17 fps (frame
+  time about 59-60 ms; v1.0.3: 14.6 fps, p50 65.7 ms, one run). v1.0.3, one run each: world map 29.9 fps,
+  `hoover_beach` 27.0 fps (p50 32.9 ms).
+- Known issue: in Sky Garden the flower-pod switch does not pop up and the pull bar is already out, so that puzzle
+  cannot be finished. It happens without our Metal kernels too (not caused by v1.1); under investigation.
 
 ## v1.0.3 (2026-11-18)
 

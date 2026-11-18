@@ -60,7 +60,8 @@ The folder holds:
 - **`metal-gfx-pairs.tsv`** (optional, v1.1): the same for graphics, VERIFIED (vertex, fragment) PAIRS. Each row: program digests and
   specialization keys of both stages, KosmicKrisp's MSL key of both stages, sha256 of both of our texts, variant, and three short
   number fields the emitter needs (descriptor offsets, vertex attributes, colour mask). No shader code: `nps5 cache prepare`
-  generates both stages on the player's Mac and keeps the pair only when BOTH texts hash to the listed sha256.
+  generates both stages on the player's Mac and keeps the pair only when BOTH texts hash to the listed sha256. A list with
+  only the header lines (ASTRO BOT in v1.1: no verified pairs yet) means no graphics step and KosmicKrisp's own pipelines.
   `scripts/check.sh` accepts the file only in that form.
 
 ## Pipeline lists

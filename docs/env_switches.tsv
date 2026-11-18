@@ -1174,10 +1174,10 @@ KYTY_FRAME_TIMES_LOG	kyty		src/common/hangTrace.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	kyty		src/common/u59Preset.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	nativeps5		titles/kyty-preset.env
 KYTY_GAME_PATCH_DISABLE	kyty		src/loader/gamePatchFilter.h
-KYTY_GC_SETTLE_SELECTIVE	kyty	buffer collector skips buffers under pending readbacks instead of waiting for the GPU (default 0 in v1.0.3: flicker under memory pressure; 1 = skip)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_GC_SETTLE_SELECTIVE	kyty	buffer collector skips buffers under pending readbacks instead of waiting for the GPU (default 1 since v1.1; 0 = wait for all of them, the v1.0.3 default)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SETTLE_SKIP_EMPTY	kyty	1 = buffer collector does not wait for the GPU without work (default 0)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
-KYTY_GC_SIDE_SETTLE_LAZY	kyty	`1` buffer collector does not wait for pending side readbacks after every submission; off, not measured	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
-KYTY_GC_SIDE_SETTLE_LAZY_CRITICAL	kyty	passes the collector may defer side-readback settles under pressure (default 0 = off)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_GC_SIDE_SETTLE_LAZY	kyty	`1` buffer collector does not wait for pending side readbacks after every submission; off, not measured; no effect while KYTY_GC_SETTLE_SELECTIVE is on (the v1.1 default)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_GC_SIDE_SETTLE_LAZY_CRITICAL	kyty	passes the collector may defer side-readback settles under pressure (default 0 = off; no effect while KYTY_GC_SETTLE_SELECTIVE is on)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GDS_EOP_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_GDS_TRACE	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_GFX_SLICE_DRAWS	kyty		src/graphics/guest_gpu/graphicsRun.cpp

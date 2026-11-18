@@ -273,8 +273,9 @@ class Gfx(unittest.TestCase):
     def test_the_numbers_of_the_real_list_parse(self):
         p = os.path.join(HERE, "..", "games", "PPSA21564", metal.GFX_LIST_NAME)
         if os.path.isfile(p):
-            meta, rows = metal.parse_gfx_list(open(p).read())
-            self.assertTrue(rows and all(len(r["b_vs"]) == 64 for r in rows))
+            meta, rows = metal.parse_gfx_list(open(p).read())     # v1.1 ships it header-only (no verified pairs yet)
+            self.assertEqual(meta["title"][0], "PPSA21564")
+            self.assertTrue(all(len(r["b_vs"]) == 64 and len(r["b_fs"]) == 64 for r in rows))
 
 
 class Prepare(unittest.TestCase):
@@ -345,6 +346,16 @@ class Prepare(unittest.TestCase):
         self.assertFalse(any("KK_MSL_OVERRIDE_DIR" in r for r in runs))
         self.assertEqual(cache.read_kv(os.path.join(c.dir, "prepared.tsv"))["metal_shaders"], "0/0")
 
+    def test_header_only_gfx_list_is_no_graphics_step(self):
+        # v1.1 ships games/<id>/metal-gfx-pairs.tsv without pair rows: compute as before, no graphics step and no gfx fields
+        open(os.path.join(self.tmp, "games", "PPSA00001", "metal-gfx-pairs.tsv"), "w").write(gfx_list([]))
+        rc, c, runs, out = self.prepare()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Metal graphics", out)
+        self.assertIn("Metal shaders: 2 of 2 verified kernels generated", out)
+        self.assertEqual(cache.read_kv(os.path.join(c.dir, "prepared.tsv"))["metal_gfx"], "0/0")
+        self.assertFalse(os.path.exists(os.path.join(c.dir, "metal-shaders", "index-gfx.tsv")))
+
 
 class GfxPrepare(Prepare):
     """The same flow with a graphics pairs list only: the vertex text comes from the pass-1 library cache, the pair is generated between
@@ -373,6 +384,7 @@ class GfxPrepare(Prepare):
     test_prepare_generates_between_passes = None
     test_prepare_opt_out_is_v10 = None
     test_prepare_without_tool_still_prepares = None
+    test_header_only_gfx_list_is_no_graphics_step = None
 
 
 if __name__ == "__main__":

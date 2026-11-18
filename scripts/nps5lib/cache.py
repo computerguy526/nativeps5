@@ -805,9 +805,18 @@ def metal_list(ctx):
 
 
 def metal_gfx_list(ctx):
-    """games/<id>/metal-gfx-pairs.tsv (verified vertex+fragment pairs) under the same switch, else None."""
+    """games/<id>/metal-gfx-pairs.tsv (verified vertex+fragment pairs) under the same switch, else None. A list without pair rows
+    (header only: no verified pairs for this title yet) is None too, so a prepare does not run an empty graphics step."""
     p = os.path.join(ctx.p.dir, metalmod.GFX_LIST_NAME)
-    return p if os.path.isfile(p) and metalmod.enabled(ctx.environ) else None
+    if not (os.path.isfile(p) and metalmod.enabled(ctx.environ)):
+        return None
+    try:
+        with open(p) as f:
+            if not metalmod.parse_gfx_list(f.read())[1]:
+                return None
+    except (metalmod.MetalError, OSError):
+        pass                                            # a malformed list is reported by the graphics step
+    return p
 
 
 def run_logs(rd):
