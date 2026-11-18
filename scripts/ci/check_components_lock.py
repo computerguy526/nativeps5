@@ -21,7 +21,7 @@ for n, line in enumerate(open(path, encoding="utf-8"), 1):
     if name in CLONED:
         if not re.match(r"[0-9a-f]{40}\b", base): errs.append(f"{path}:{n}: upstream base is not a 40-hex commit")
         if not repo.startswith("${NPS5_FORK_BASE}/"): errs.append(f"{path}:{n}: repository must start with ${{NPS5_FORK_BASE}}/")
-        if not branch or branch == "-": errs.append(f"{path}:{n}: missing branch")
+        if not re.fullmatch(r"v[0-9]+(\.[0-9]+){1,2}", branch): errs.append(f"{path}:{n}: the ref must be a release tag (vN.N or vN.N.N), not a branch")
         if not re.fullmatch(r"[0-9a-f]{40}", commit): errs.append(f"{path}:{n}: commit is not 40 hex")
 dup = {x for x in names if names.count(x) > 1}
 if dup: errs.append(f"{path}: duplicate names {sorted(dup)}")
