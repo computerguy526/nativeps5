@@ -537,8 +537,8 @@ APS5_SAMPLE_THREADS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/WorkerSa
 APS5_SAMPLE_WORKER	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/WorkerSampler.cpp
 APS5_SAMPLE_WORKER_QUEUE	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/WorkerSampler.cpp
 APS5_SAVEDATA_TRACE	anyps5		core/libs/prx/libSceSaveData.native/Export.cpp
-APS5_SAVEDATA_TRANSFER_FALLBACK	anyps5		core/libs/prx/libSceSaveData.native/Export.cpp
-APS5_SAVEDATA_TRANSFER_FALLBACK	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
+APS5_SAVEDATA_TRANSFER_FALLBACK	anyps5	AnyPS5 save data: `0` = TransferringMount returns NOT_FOUND; default mounts the own directory read/write (not the ps5recomp default)	core/libs/prx/libSceSaveData.native/Export.cpp
+APS5_SAVEDATA_TRANSFER_FALLBACK	ps5recomp	`self` = TransferringMount mounts the running title's own directory read/write (pre-1.0.1, can crash save loading); default = the source title's save under <save root>/transfer/<titleId>/, read-only, NOT_FOUND if absent	pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 APS5_SAVEEXEC_WRITE_FIRST	anyps5		core/shader/recompiler/Translation/src/ControlFlowInstructions.cpp
 APS5_SCRATCH_POOL_MIB	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp
 APS5_SCRATCH_POOL_TOTAL_MIB	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp

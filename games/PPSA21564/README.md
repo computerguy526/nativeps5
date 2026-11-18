@@ -14,9 +14,10 @@ from here.
 - **Tested:** version 01.007 on a MacBook Pro Mac16,8 (M4 Pro, 24 GB), macOS 26.6, at the component commits of
   [components.lock](../../components.lock) (first public release). Frame time at that release, paired runs, p50:
   world map 36.0 ms (about 28 fps), `hoover_beach` 41.1 ms (about 24 fps; p95 122 ms, bimodal between runs).
-  v1 (native 1080p, hitch fixes on) vs the release defaults, ABBA, 60-110 s window, machine load 11-17: world map p50 36.1 vs
-  37.0 ms (p95 37.4 vs 38.8; about 27.7 vs 27.0 fps); `hoover_beach` p50 44.1 vs 44.5 ms, p95 62 vs 210 ms (the release
-  stack stalls about 200 ms in a third of the frames in the A arms; with the hitch fixes none do).
+  v1 (native 1080p, hitch fixes on) vs the first release's defaults, ABBA (two runs each per scene), 60-110 s window,
+  machine not quiet (load 11-17): world map p50 36.1 vs 37.0 ms (p95 37.4 vs 38.8; about 27.7 vs 27.0 fps);
+  `hoover_beach` p50 44.1 vs 44.5 ms, p95 62 vs 210 ms (the first release stalls about 200 ms in roughly 30 % of the
+  frames in both of its runs; with the hitch fixes 0-2 frames per run take over 100 ms).
   Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
   Patches), shader caches prepared from the shipped pipeline list.
 - **Known issues:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not diagnosed); MetalFX 720p/900p upscaling shows
@@ -137,7 +138,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
 | About 9 % of world-map runs end in a guest bus error (SIGBUS) | world map | not diagnosed | Open, parked at the first release |
 | MetalFX upscaling at 720p/900p shows blocky squares and jagged edges on moving objects and dust | intro cutscene (ship, alien, floor), crash site sand; with and without MetalFX | the game never renders below 1080p by itself; some passes keep a 1080p-derived size or tile grid when the level-0 size is lowered | Open. `upscaling` is off by default; the three DRS-level size helpers (guest `0x77d75f0`, `0x78395f0`, `0x7839680`) and the 1920x1080 initialisers were ruled out |
-| ~~A save written in some situations crashes the game when it is loaded~~ | - | Fixed in v1.0.1: the save-data transfer mount opened the game's own save, so its XML parser read it from the wrong offset | Update to v1.0.1 (`nativeps5-recomp` 7c91175) |
+| ~~A save written in some situations crashes the game when it is loaded~~ | - | Fixed in v1.0.1: the save-data transfer mount opened the game's own save, so its XML parser read it from the wrong offset | Update to v1.0.1 or later (the `nativeps5-recomp` commit pinned in components.lock) |
 | All in-game text missing (menu captions, "PRESS ANY BUTTON", copyright) | everywhere | `sceFontGetRenderCharGlyphMetrics` and the rest of the glyph API returned an error, so the layout dropped every character | Fixed (libSceFont glyph API) |
 | Intro video jitter; crash when a video loops | studio logo / intro, looping clips in the hub | frame selection against the clock; codec flush from the demuxer thread | Fixed (frame selection; flush on the decoder thread with a marker packet) |
 | Crash on the way into the crash-site hub (file read returns EFAULT) | `hub_crashsite`, world map | a file read into a guest page the back end had just protected: the kernel returns EFAULT instead of faulting, so the game got an error for a valid buffer | Fixed (the read opens the range again and repeats) |

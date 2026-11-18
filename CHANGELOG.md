@@ -6,7 +6,7 @@ pinned commits are in [components.lock](components.lock).
 ## Unreleased
 
 - ASTRO BOT shipped pipeline list refreshed from play testing: 1,596 pipelines (was 1,544), 893 shader permutations (was 878). References and keys only, no game code; proof record regenerated.
-- v1.0.1 hotfix: loading a save no longer crashes the game depending on its content. `sceSaveDataTransferringMount` opened the game's own save memory, which the title then parsed as the other title's save (XML parser, wrong offset); it now opens only `<save root>/transfer/<titleId>/user_<id>/<dir>` read-only and returns NOT_FOUND when absent, like the console. `APS5_SAVEDATA_TRANSFER_FALLBACK=self` restores the old behaviour. A new game still creates its save. Runtime only: no retranslate, no shader-cache re-prepare.
+- v1.0.1 hotfix: loading a save no longer crashes the game depending on its content. `sceSaveDataTransferringMount` opened the game's own save memory, which the title then parsed as the other title's save (XML parser, wrong offset); it now opens only `<save root>/transfer/<titleId>/user_<id>/<dir>` read-only and returns NOT_FOUND when absent, like the console (a title id that is not letters and digits is a parameter error; read-only mounts no longer take a save icon). `APS5_SAVEDATA_TRANSFER_FALLBACK=self` restores the old behaviour. A new game still creates its save. Runtime only: no retranslate, no shader-cache re-prepare.
 - In-game UI text renders again (menu captions, "PRESS ANY BUTTON", copyright): the libSceFont glyph API the game uses
   is implemented instead of returning an error.
 - ASTRO BOT `upscaling` setting (`off` default, `metalfx900`, `metalfx720`): renders the scene at 900p/720p and scales
