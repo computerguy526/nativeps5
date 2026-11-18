@@ -1374,6 +1374,7 @@ KYTY_MSL_KK_VS_OUTS	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.
 KYTY_MSL_LDS_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_LOOP_CAP	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_MIPSTATS_PLAIN	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
+KYTY_MSL_VOTE_MERGE	kyty	MSL back end: wave64 halves take one subgroup vote (default 1; 0 = the per-half votes)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAITCNT_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAVE64	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MUTEX_HANDOFF_US	kyty		src/kernel/pthread.cpp
@@ -1839,6 +1840,7 @@ NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
 NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_CALL_IC	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_CHECKED_PTR	ps5recomp		pkg/cli/cli.go
+NPS5_COMPILE_GATE	kyty	shared fan-out of driver pipeline builds for the replay workers and the compute prewarm (default on; 0 lifts it)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 NPS5_COMPILE_THREADS	kyty	number of compile workers (prepare, launch phase, metallib build); default logical cores - 4, at least 2	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 NPS5_COMPILE_THREADS	nativeps5	number of compile workers (prepare, launch phase, metallib build); default logical cores - 4, at least 2	scripts/nps5lib/cache.py
 NPS5_CONF	nativeps5		scripts/nps5-env.sh

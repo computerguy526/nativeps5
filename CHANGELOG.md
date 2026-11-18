@@ -14,10 +14,12 @@ Everything in v1.0.3, plus our own Metal compute kernels. Needs a fresh shader-c
   N/T" in the terminal), keeps a kernel only when it is byte-identical to the one that was verified (GPU differential
   test against KosmicKrisp's kernel on the same inputs, benchmark, in-game smoke and play test), and compiles them
   once under the progress card in pass 2. Normal starts load them as prebuilt Metal libraries in the background;
-  KosmicKrisp's own kernel runs until a replacement is ready and whenever one fails. ASTRO BOT: 64 compute kernels.
+  KosmicKrisp's own kernel runs until a replacement is ready and whenever one fails. ASTRO BOT: 68 compute kernels.
   Opt out with `NPS5_METAL_SHADERS=0`. `nps5 cache status` shows how many are in use; `nps5 cache metal <id>`
   regenerates them. KosmicKrisp patches 0023-0025 (`KK_MSL_OVERRIDE_DIR`, `KK_MSL_OVERRIDE_ASYNC`, compile counts
   for the progress card); new tool `kyty_msl_dump` in the Kyty fork.
+- **Faster wave64 votes in the Metal kernels.** The MSL back end now takes one subgroup vote over both halves of a wave64 (`any(a) || any(b)` = `any(a || b)`; `KYTY_MSL_VOTE_MERGE=0` restores the old text), which makes 4 more kernels faster than KosmicKrisp's (68 in all) and 16 others faster than before. Fast math stays off.
+- **Shader compile threads.** The shader precompile workers run at utility priority and the replay workers and the compute prewarm share one fan-out of driver pipeline builds (`NPS5_COMPILE_GATE=0` lifts it); cache prepare gets shorter and the load-time peak lower.
 - **Buffer snapshots (hardening).** Small read-only buffer bindings that the GPU has not written are copied at bind time,
   like those the CPU changed (`KYTY_SNAPSHOT_CLEAN_READS`, default on; `=0` restores the v1.0.3 behaviour). Aimed at the
   intermittent visor flicker in the crash-landing close-up. Fast math stays off, as in v1.0.3.
