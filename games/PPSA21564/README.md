@@ -20,8 +20,8 @@ from here.
   frames in both of its runs; with the hitch fixes 0-2 frames per run take over 100 ms).
   Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
   Patches), shader caches prepared from the shipped pipeline list.
-- **Known issues:** MetalFX 720p/900p upscaling shows
-  block artefacts (experimental, off by default); PlayStation symbols look garbled in the warp from the world map
+- **Known issues:** MetalFX 720p/900p upscaling is optional and off by default (the block artefacts are fixed in v1.1; edges are
+  more jagged than native); PlayStation symbols look garbled in the warp from the world map
   into a level; closing the window exits at once without flushing the shader caches. Details in "Known issues"
   below.
 - **Status as of 2026-11-17** on a Mac16,8 (M4 Pro, 24 GB), macOS 26.6: boots; title, world map and every level

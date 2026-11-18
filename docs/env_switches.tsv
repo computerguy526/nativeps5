@@ -864,6 +864,7 @@ KYTY_APR_HASHED_IDS	kyty		src/libs/libAmpr.cpp
 KYTY_APR_KEEP_FILES	kyty		src/libs/libAmpr.cpp
 KYTY_APR_PREPARE_WRITE	kyty		src/libs/libAmpr.cpp
 KYTY_ASTRO_CB_SCALE	kyty		src/loader/gamePatch.cpp
+KYTY_ASTRO_TILE_GRID	kyty	`auto` or `<tx>x<ty>`: ASTRO BOT light-tile grid for a forced internal size (fixes the 720p/900p blocks; set by the upscaling setting; acts only with MetalFX)	src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_AUDIO2_UNLOCKED_PUSH	kyty		src/libs/libAudio2.cpp
 KYTY_AUDIO_CLOCK_SKEW_PPM	kyty		src/libs/audio.cpp
 KYTY_AUDIO_DIAG	kyty		src/libs/audioDiag.h
@@ -1143,6 +1144,9 @@ KYTY_FALSE_SHARING_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache
 KYTY_FALSE_SHARING_WRITES_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAST_BACKING_TRANSFERS	nativeps5		titles/kyty-preset.env
 KYTY_FAST_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 1 since v1.1, 0 = v1 codegen; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH_STAGES	kyty	fs|cs|fscs stages KYTY_FAST_MATH covers (default fscs)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH_VS	kyty	1 = vertex shaders fast too, position slice kept exact (= KYTY_FAST_MATH=3)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_PKRTZ	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FATAL_EXIT_PROCESS	kyty		src/common/assert.cpp
 KYTY_FAULT_AHEAD_ADAPT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1162,7 +1166,10 @@ KYTY_FRAME_TIMES_LOG	kyty		src/common/hangTrace.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	kyty		src/common/u59Preset.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	nativeps5		titles/kyty-preset.env
 KYTY_GAME_PATCH_DISABLE	kyty		src/loader/gamePatchFilter.h
+KYTY_GC_SETTLE_SELECTIVE	kyty	buffer collector skips buffers under pending readbacks instead of waiting for the GPU (default 1 since v1.1; 0 = old wait)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_GC_SETTLE_SKIP_EMPTY	kyty	1 = buffer collector does not wait for the GPU without work (default 0)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SIDE_SETTLE_LAZY	kyty	`1` buffer collector does not wait for pending side readbacks after every submission; off, not measured	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_GC_SIDE_SETTLE_LAZY_CRITICAL	kyty	passes the collector may defer side-readback settles under pressure (default 0 = off)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GDS_EOP_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_GDS_TRACE	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_GFX_SLICE_DRAWS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
@@ -1228,6 +1235,7 @@ KYTY_HELPER_PREWARM	kyty	`1` builds the renderer's own tile/detile, D16 and colo
 KYTY_HELPER_PREWARM	nativeps5	`1` builds the renderer's own tile/detile, D16 and colour-transform pipelines at start-up, so a prepare archives them (on in the preset)	scripts/nps5lib/cache.py
 KYTY_HIDPI	kyty	`0` reverts the HiDPI drawable (frame dumps then have the old size)	src/graphics/presentation/window/window.cpp
 KYTY_HOSTED_READ_LOCK	kyty	`1` restores the reader-writer lock on hosted guest reads (87-146 us per draw instead of 9-12)	src/kernel/memory.cpp
+KYTY_HOSTED_RETRIED_WRITES	kyty	1 = guest write faults on GPU-owned pages take the side path instead of a drain (default 0)	src/hybrid/kytyGpuBridge.cpp
 KYTY_HOSTED_SELF_LOADS	kyty		src/hybrid/kytyGpuBridge.cpp
 KYTY_HOST_FTZ_INPUTS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_HOST_INPUT_MIN_PRESS_MS	kyty		src/graphics/presentation/window/hostInput.cpp
@@ -1431,6 +1439,7 @@ KYTY_PIPELINE_LIST_EXE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCac
 KYTY_PIPELINE_LIST_EXE	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_PREPARE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIST_PREPARE	nativeps5		scripts/nps5lib/cache.py
+KYTY_PIPELINE_LIST_PREPARE_CARD	kyty	0 = a prepare-only start shows no loading card	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_MEMO	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_PREFETCH	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_PREFETCH	nativeps5		titles/kyty-preset.env
@@ -1523,6 +1532,8 @@ KYTY_READ_FAULT_PUBLISHED_BURST	kyty		src/graphics/host_gpu/renderer/cache/buffe
 KYTY_READ_FAULT_PUBLISHED_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READ_FAULT_PUBLISHED_FRAME_BURST	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READ_FAULT_PUBLISHED_STRADDLE	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_READ_RELAX	kyty	<n> drop the read watch of served GPU-dirty 16 KiB pages until the next GPU write (default 0 = off)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_READ_RELAX_SPAN_KB	kyty	span in KiB that KYTY_READ_RELAX relaxes per fault	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_REALTIME_CLOCK	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_REBIND_AFTER_JOIN	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_REBIND_AFTER_JOIN	nativeps5		titles/kyty-preset.env
@@ -1543,6 +1554,13 @@ KYTY_RESOURCE_MATERIALIZATION	kyty		src/common/profiler.cpp
 KYTY_RESOURCE_MATERIALIZATION	nativeps5		titles/kyty-preset.env
 KYTY_RESOURCE_REUSE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_RESOURCE_REUSE	nativeps5		titles/kyty-preset.env
+KYTY_RES_AUDIT	kyty	1|2 log images and dispatch grids still sized for 1080p at a forced internal size (diagnostic)	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_RES_AUDIT_BASE	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_RES_AUDIT_DUMP_W	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_RES_AUDIT_FROM_S	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_RES_AUDIT_INTERNAL	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_RES_AUDIT_MAX	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_RES_AUDIT_SHADERS	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_ROBUST_BUFFER_LOADS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_RT_DUMP_DIR	kyty		src/graphics/shader/recompiler/ShaderRecompiler.cpp
 KYTY_RT_FUNCTION	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1923,6 +1941,7 @@ NPS5_RUNS_DIR	ps5recomp		pkg/diag/bundle.go
 NPS5_RUNS_ROOT	nativeps5		scripts/nps5lib/ab.py
 NPS5_RUN_CLASS	nativeps5		scripts/nps5lib/run.py
 NPS5_RUN_REASON	nativeps5	free text; required by scripts/run-title.sh for a run longer than 90 s (cap 180 s)	scripts/run-title.sh
+NPS5_RUN_SHADER_CACHE	nativeps5	0 = `nps5 run` does not point at the stack's prepared shader cache	scripts/nps5lib/run.py
 NPS5_RUN_TAG	anyps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
 NPS5_RUN_TAG	nativeps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	scripts/nps5lib/run.py
 NPS5_SAVEDATA_DIR	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c

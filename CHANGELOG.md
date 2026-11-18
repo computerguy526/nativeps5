@@ -3,6 +3,40 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.1 (candidate)
+
+Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the generated shaders.
+
+- Faster pixel and compute shaders: they no longer ask for IEEE signed-zero/Inf/NaN preservation and contraction
+  limits, so KosmicKrisp compiles them with Metal fast math (`KYTY_FAST_MATH=1`, default on; vertex shaders and the
+  position math stay exact). World map GPU time 37.7 -> 35.4 ms per frame, 26.4 -> 28.2 fps in paired runs; no
+  visual change found. `KYTY_FAST_MATH=0` restores the v1 shaders (with a cache prepared that way).
+- Buffer collector: under memory pressure it no longer waits for the GPU after nearly every submission; it skips the
+  buffers that still have readbacks in flight (`KYTY_GC_SETTLE_SELECTIVE=1`, default on). Sky Garden with the budget
+  forced low: 73-75 -> 62 ms per frame; no change when memory use is below the collector trigger.
+- MetalFX upscaling at 720p/900p: the blocky squares on dust, glass and particles are gone. The game takes the
+  light-tile grid of its forward-lit transparents from a 1080p table while the light culling pass sizes its grid
+  from the real target; the `metalfx720`/`metalfx900` options now set `KYTY_ASTRO_TILE_GRID=auto` (grid =
+  ceil(MetalFX input / 16 px)), which corrects the table. Upscaling stays off by default.
+- Fault handling switches, off by default: `KYTY_HOSTED_RETRIED_WRITES=1` (guest write faults on GPU-owned pages take
+  the side path instead of draining the command processor) and `KYTY_READ_RELAX=<n>` (served read-watched pages are not
+  re-watched until the next GPU write). Together `hoover_beach` 21.3 -> 22.4 fps in paired runs; not yet validated on
+  every scene.
+- No compiles at run time on a prepared cache: a launch phase behind the loading card creates every known pipeline
+  before the game starts (`KYTY_PIPELINE_REPLAY_ALL=1`, on in the preset) and builds the renderer's tile/detile
+  helper pipelines (`KYTY_HELPER_PREWARM=1`); a prepare now records those helpers and waits for KosmicKrisp's
+  archive writer before it ends (it used to lose the last ~30 pipelines it compiled); closing the window saves the
+  driver pipeline cache first. Compile workers = logical cores - 4 (min 2, `NPS5_COMPILE_THREADS`) at utility QoS.
+  The launch phase holds the game's first draw, not the window, so the card counts to X == T
+  (`KYTY_PIPELINE_REPLAY_ALL_HOLD=0`: in the background). Setting **Shader preparation at launch**: all (default) or
+  next scene first (`shader_prepare=all|scene`, `NPS5_SHADER_PREPARE`); recordings tag each pipeline with its scene
+  and the list carries the tags (`nps5 cache merge` prints them).
+  A prepare-only start shows the same card for the whole pass (`KYTY_PIPELINE_LIST_PREPARE_CARD=0`: no card), and
+  `nps5 cache prepare` prints the count in the terminal; `nps5 run` uses the prepared cache of the stack by itself and,
+  without one, builds the list in the launch phase behind the card (`NPS5_RUN_SHADER_CACHE=0` turns that off).
+  `nps5 cache prepare` ends with two short normal starts that build the window's own helper pipelines (present /
+  overlay blits, two kernels: in no list), so the player's first starts compile none of them (`--no-warm` skips them).
+
 ## Unreleased
 
 ## v1.0.2 (2026-11-18)
@@ -22,8 +56,8 @@ pinned commits are in [components.lock](components.lock).
 - In-game UI text renders again (menu captions, "PRESS ANY BUTTON", copyright): the libSceFont glyph API the game uses
   is implemented instead of returning an error.
 - ASTRO BOT `upscaling` setting (`off` default, `metalfx900`, `metalfx720`): renders the scene at 900p/720p and scales
-  it with Apple MetalFX (spatial) inside KosmicKrisp (patches 0021-0022). Experimental: both lower sizes show block
-  artefacts on moving objects (some game passes keep a 1080p size), so the default stays native 1080p.
+  it with Apple MetalFX (spatial) inside KosmicKrisp (patches 0021-0022). Experimental: both lower sizes showed block
+  artefacts on moving objects (fixed in v1.1, see above), so the default stays native 1080p.
 - ASTRO BOT profile: `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` (removes the ~340 ms `hoover_beach` stalls),
   `KYTY_OCCLUSION_QUERY_DRAW_SKIP=1` and `NPS5_VFS_DIRCACHE=1` are on.
 - Flower/turtle flicker fixed: early depth/stencil tests for instrumented `GET_LOD_STATS` pixel shaders
@@ -50,21 +84,6 @@ commits, then the changes below as separate commits.
   an attachment-less render area is bounded by the draw's scissors (pull request #108); fewer optional submission
   boundaries inside rendering instances and WAIT_FLIP_DONE submits only when the queue suspends (pull request #107,
   `KYTY_PASS_SUBMIT_DEFER`, default on: world map p50 37.0 -> 36.0 ms, a level 42.1 -> 41.1 ms in paired runs).
-
-- No compiles at run time on a prepared cache: a launch phase behind the loading card creates every known pipeline
-  before the game starts (`KYTY_PIPELINE_REPLAY_ALL=1`, on in the preset) and builds the renderer's tile/detile
-  helper pipelines (`KYTY_HELPER_PREWARM=1`); a prepare now records those helpers and waits for KosmicKrisp's
-  archive writer before it ends (it used to lose the last ~30 pipelines it compiled); closing the window saves the
-  driver pipeline cache first. Compile workers = logical cores - 4 (min 2, `NPS5_COMPILE_THREADS`) at utility QoS.
-  The launch phase holds the game's first draw, not the window, so the card counts to X == T
-  (`KYTY_PIPELINE_REPLAY_ALL_HOLD=0`: in the background). Setting **Shader preparation at launch**: all (default) or
-  next scene first (`shader_prepare=all|scene`, `NPS5_SHADER_PREPARE`); recordings tag each pipeline with its scene
-  and the list carries the tags (`nps5 cache merge` prints them).
-  A prepare-only start shows the same card for the whole pass (`KYTY_PIPELINE_LIST_PREPARE_CARD=0`: no card), and
-  `nps5 cache prepare` prints the count in the terminal; `nps5 run` uses the prepared cache of the stack by itself and,
-  without one, builds the list in the launch phase behind the card (`NPS5_RUN_SHADER_CACHE=0` turns that off).
-  `nps5 cache prepare` ends with two short normal starts that build the window's own helper pipelines (present /
-  overlay blits, two kernels: in no list), so the player's first starts compile none of them (`--no-warm` skips them).
 
 ### Runtime and translator (`nativeps5-recomp`)
 - Lifter: 32-bit SHLD/SHRD by a CL count of 0 zero-extends the destination (PS4Recomp 27e12b0).
