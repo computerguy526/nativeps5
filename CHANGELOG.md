@@ -3,7 +3,7 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.1 (unreleased, candidate)
+## v1.1 (2026-11-18)
 
 Everything in v1.0.3, plus our own Metal compute kernels and the selective buffer-collector settle on by default. Needs a
 fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1.0.3.
@@ -68,8 +68,13 @@ fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1
 - Performance (MacBook Pro M4 Pro, MetalFX 720p default): Sky Garden (`underwater_aerial_garden`) about 17 fps (frame
   time about 59-60 ms; v1.0.3: 14.6 fps, p50 65.7 ms, one run). v1.0.3, one run each: world map 29.9 fps,
   `hoover_beach` 27.0 fps (p50 32.9 ms).
-- Known issue: in Sky Garden the flower-pod switch does not pop up and the pull bar is already out, so that puzzle
-  cannot be finished. It happens without our Metal kernels too (not caused by v1.1); under investigation.
+- MetalFX 720p upscaling stays the default (720p render, upscaled to the window); `NPS5_ASTRO_UPSCALING=off` gives
+  native 1080p.
+- Sky Garden flower-pod switch and pull bar: the "switch does not pop up / pull bar already out" report came from a
+  test setup whose game folder was a tree of symlinks, so the game found no level joint animations in its directory
+  listings; the directory-listing fix above resolves it, and a dump folder of real files was never affected.
+- Known issue: the level-title font draws K, Y and N with flat tops, slightly different from the console; under
+  investigation.
 
 ## v1.0.3 (2026-11-18)
 
