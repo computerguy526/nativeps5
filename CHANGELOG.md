@@ -9,11 +9,11 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the
 
 - Faster pixel and compute shaders: they no longer ask for IEEE signed-zero/Inf/NaN preservation and contraction
   limits, so KosmicKrisp compiles them with Metal fast math (`KYTY_FAST_MATH=1`, default on; vertex shaders and the
-  position math stay exact). World map (60 s windows, ABBA, v1 / v1.1 / v1.1 / v1): frame time p50 39.0 -> 37.0 ms, 25.6 -> 27.2 fps;
+  position math stay exact). World map (60 s windows, ABBA, v1 / v1.0.3 / v1.0.3 / v1): frame time p50 39.0 -> 37.0 ms, 25.6 -> 27.2 fps;
   `hoover_beach` p50 45.9 -> 45.0 ms, 20.1 -> 20.9 fps; no visual change found. `KYTY_FAST_MATH=0` restores the v1 shaders (with a cache prepared that way).
 - Buffer collector, selective settle (`KYTY_GC_SETTLE_SELECTIVE=1`): under memory pressure it skips buffers that still
   have readbacks in flight instead of waiting for the GPU (Sky Garden with the budget forced low: 73-75 -> 62 ms per
-  frame). **Off by default in v1.1:** with the video memory budget forced to 4096 MB it let a flicker through at the
+  frame). **Off by default in v1.0.3:** with the video memory budget forced to 4096 MB it let a flicker through at the
   top left of Astro's helmet after the crash landing (it can reuse a buffer whose readback or GPU write is still in
   flight); with it off, same conditions, no flicker. Known issue until the collector is reworked.
 - MetalFX upscaling at 720p/900p: the blocky squares on dust, glass and particles are gone. The game takes the
@@ -65,7 +65,7 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the
   is implemented instead of returning an error.
 - ASTRO BOT `upscaling` setting (`off` default, `metalfx900`, `metalfx720`): renders the scene at 900p/720p and scales
   it with Apple MetalFX (spatial) inside KosmicKrisp (patches 0021-0022). Experimental: both lower sizes showed block
-  artefacts on moving objects (fixed in v1.1, see above), so the default stays native 1080p.
+  artefacts on moving objects (fixed in v1.0.3, see above), so the default stays native 1080p.
 - ASTRO BOT profile: `KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48` (removes the ~340 ms `hoover_beach` stalls),
   `KYTY_OCCLUSION_QUERY_DRAW_SKIP=1` and `NPS5_VFS_DIRCACHE=1` are on.
 - Flower/turtle flicker fixed: early depth/stencil tests for instrumented `GET_LOD_STATS` pixel shaders

@@ -1144,7 +1144,7 @@ KYTY_FALSE_SHARING_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache
 KYTY_FALSE_SHARING_WRITES_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAST_BACKING_TRANSFERS	nativeps5		titles/kyty-preset.env
 KYTY_FAST_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
-KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 1 since v1.1, 0 = v1 codegen; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 1 since v1.0.3, 0 = v1 codegen; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_STAGES	kyty	fs|cs|fscs stages KYTY_FAST_MATH covers (default fscs)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_VS	kyty	1 = vertex shaders fast too, position slice kept exact (= KYTY_FAST_MATH=3)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_PKRTZ	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1166,7 +1166,7 @@ KYTY_FRAME_TIMES_LOG	kyty		src/common/hangTrace.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	kyty		src/common/u59Preset.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	nativeps5		titles/kyty-preset.env
 KYTY_GAME_PATCH_DISABLE	kyty		src/loader/gamePatchFilter.h
-KYTY_GC_SETTLE_SELECTIVE	kyty	buffer collector skips buffers under pending readbacks instead of waiting for the GPU (default 0 in v1.1: flicker under memory pressure; 1 = skip)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_GC_SETTLE_SELECTIVE	kyty	buffer collector skips buffers under pending readbacks instead of waiting for the GPU (default 0 in v1.0.3: flicker under memory pressure; 1 = skip)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SETTLE_SKIP_EMPTY	kyty	1 = buffer collector does not wait for the GPU without work (default 0)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SIDE_SETTLE_LAZY	kyty	`1` buffer collector does not wait for pending side readbacks after every submission; off, not measured	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SIDE_SETTLE_LAZY_CRITICAL	kyty	passes the collector may defer side-readback settles under pressure (default 0 = off)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1381,7 +1381,7 @@ KYTY_OPENXR	kyty		src/graphics/presentation/openxrHeadset.cpp
 KYTY_ORDERED_APPEND	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_PACE_LOG	kyty		src/common/paceLog.cpp
 KYTY_PAD_RELAY_US	kyty	pad relay interval, default 4000; 1000 made a scripted stick input ineffective	src/hybrid/kytyGpuBridge.cpp
-KYTY_PAD_RELAY_WITH_SCRIPT	kyty	1 = the host also relays the real pad while a scripted pad plays (default 0: relay off; v1.1)	src/hybrid/kytyGpuBridge.cpp
+KYTY_PAD_RELAY_WITH_SCRIPT	kyty	1 = the host also relays the real pad while a scripted pad plays (default 0: relay off; v1.0.3)	src/hybrid/kytyGpuBridge.cpp
 KYTY_PAD_STATE_COALESCE	kyty		src/libs/controller.cpp
 KYTY_PAD_STATE_COALESCE	nativeps5		titles/kyty-preset.env
 KYTY_PASS_SUBMIT_DEFER	kyty	0 = submit at every optional boundary again (default on: no optional submission boundary inside a rendering instance)	src/graphics/guest_gpu/graphicsRun.cpp
