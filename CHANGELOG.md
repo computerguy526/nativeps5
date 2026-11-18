@@ -64,6 +64,7 @@ fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1
   `VRCPSS` read a clobbered source. Takes effect after the title is translated again (a fresh `scripts/run-title.sh` translation).
 - `KYTY_BDA_PAGETABLE_MB=<n>` (off by default) sizes the dense BDA page table; 64 saves up to about 450 MiB of footprint on
   ASTRO BOT when the dense table is in use (its GPU addresses end at 67 GiB).
+- **Pinned builds.** `components.lock` pins each component by annotated tag (`v1.1` in all three repositories) and the commit that tag must point at; `scripts/fetch-components.sh` fetches the tag and refuses it if it points anywhere else, so a moved tag cannot change what you build.
 - Performance (MacBook Pro M4 Pro, MetalFX 720p default): Sky Garden (`underwater_aerial_garden`) about 17 fps (frame
   time about 59-60 ms; v1.0.3: 14.6 fps, p50 65.7 ms, one run). v1.0.3, one run each: world map 29.9 fps,
   `hoover_beach` 27.0 fps (p50 32.9 ms).
