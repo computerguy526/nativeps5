@@ -54,8 +54,8 @@ kyty() {
   git submodule update --init --recursive --depth 1
   $N cmake -S . -B build-arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DKYTY_BUILD_LAUNCHER=OFF \
      -DKYTY_GPU_SDL3_DYLIB="$NPS5_BREW_PREFIX/lib/libSDL3.0.dylib"
-  $N cmake --build build-arm64 -j "$J" --target kyty_gpu
-  echo "built: $NPS5_KYTY_DIR/build-arm64/kyty_gpu.dylib (set NPS5_KYTY_GPU_LIB to it)"
+  $N cmake --build build-arm64 -j "$J" --target kyty_gpu kyty_msl_dump
+  echo "built: $NPS5_KYTY_DIR/build-arm64/kyty_gpu.dylib (set NPS5_KYTY_GPU_LIB to it) and kyty_msl_dump (Metal shader generation)"
 }
 for step in "${@:-help}"; do
   case "$step" in
