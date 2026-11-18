@@ -14,6 +14,9 @@ from here.
 - **Tested:** version 01.007 on a MacBook Pro Mac16,8 (M4 Pro, 24 GB), macOS 26.6, at the component commits of
   [components.lock](../../components.lock) (first public release). Frame time at that release, paired runs, p50:
   world map 36.0 ms (about 28 fps), `hoover_beach` 41.1 ms (about 24 fps; p95 122 ms, bimodal between runs).
+  v1 (native 1080p, hitch fixes on) vs the release defaults, ABBA, 60-110 s window, machine load 11-17: world map p50 36.1 vs
+  37.0 ms (p95 37.4 vs 38.8; about 27.7 vs 27.0 fps); `hoover_beach` p50 44.1 vs 44.5 ms, p95 62 vs 210 ms (the release
+  stack stalls about 200 ms in a third of the frames in the A arms; with the hitch fixes none do).
   Settings: the preset plus the canonical rows below, the `dr` patch (the profile's default also lists `nt`, see
   Patches), shader caches prepared from the shipped pipeline list.
 - **Known issues:** about 9 % of world-map runs end in a guest bus error (SIGBUS; parked, not diagnosed); MetalFX 720p/900p upscaling shows
