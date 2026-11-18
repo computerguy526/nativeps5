@@ -1144,7 +1144,7 @@ KYTY_FALSE_SHARING_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache
 KYTY_FALSE_SHARING_WRITES_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAST_BACKING_TRANSFERS	nativeps5		titles/kyty-preset.env
 KYTY_FAST_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
-KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 1 since v1.0.3, 0 = v1 codegen; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 0 (v1 codegen); 1 = opt-in fast math, known 1-in-3-frame sky/rock/visor flicker at the crash site; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_STAGES	kyty	fs|cs|fscs stages KYTY_FAST_MATH covers (default fscs)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_VS	kyty	1 = vertex shaders fast too, position slice kept exact (= KYTY_FAST_MATH=3)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_PKRTZ	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp

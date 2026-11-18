@@ -5,12 +5,14 @@ pinned commits are in [components.lock](components.lock).
 
 ## v1.0.3 (2026-11-18)
 
-Needs a fresh shader-cache prepare (`nps5 cache prepare`): fast math changes the generated shaders.
+Needs a fresh shader-cache prepare (`nps5 cache prepare`) if you prepared with a v1.0.3 candidate that had fast math on.
 
-- Faster pixel and compute shaders: they no longer ask for IEEE signed-zero/Inf/NaN preservation and contraction
-  limits, so KosmicKrisp compiles them with Metal fast math (`KYTY_FAST_MATH=1`, default on; vertex shaders and the
-  position math stay exact). World map (60 s windows, ABBA, v1 / v1.0.3 / v1.0.3 / v1): frame time p50 39.0 -> 37.0 ms, 25.6 -> 27.2 fps;
-  `hoover_beach` p50 45.9 -> 45.0 ms, 20.1 -> 20.9 fps; no visual change found. `KYTY_FAST_MATH=0` restores the v1 shaders (with a cache prepared that way).
+- Fast math is **off** (`KYTY_FAST_MATH` default 0, the v1 shaders). It is opt-in with `KYTY_FAST_MATH=1`
+  (pixel and compute shaders drop the IEEE signed-zero/Inf/NaN preservation and contraction limits, so KosmicKrisp
+  compiles them with Metal fast math; vertex shaders and the position math stay exact; about 2 ms per frame on the
+  world map), but it gives a faint 1-frame-in-3 brightness flicker on the sky, far ridges, rocks and Astro's visor at
+  the crash site, so it is not the default. A shader cache prepared without it is the normal one; with `=1` the
+  shaders compile live. Making it safe per shader is planned for a later release.
 - Buffer collector, selective settle (`KYTY_GC_SETTLE_SELECTIVE=1`): under memory pressure it skips buffers that still
   have readbacks in flight instead of waiting for the GPU (Sky Garden with the budget forced low: 73-75 -> 62 ms per
   frame). **Off by default in v1.0.3:** with the video memory budget forced to 4096 MB it let a flicker through at the
