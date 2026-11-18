@@ -191,6 +191,7 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
     os.makedirs(parent, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix=".metal-new-", dir=parent)
     prog = Progress(len(rows), label, out)
+    reused = [0]
 
     def one(ir):
         i, r = ir
@@ -199,6 +200,16 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
             if idx is None:
                 return r, "not in programs.bin"
             dst = os.path.join(tmp, r["kk"] + ".metal")
+            old = os.path.join(out_dir, r["kk"] + ".metal")      # prepfast: text already generated for this key (sha256 = the verified one)
+            if os.path.isfile(old) and file_sha(old) == r["b"]:
+                try:
+                    os.link(old, dst)
+                except FileExistsError:                  # a second permutation of the same kernel
+                    pass
+                except OSError:
+                    shutil.copyfile(old, dst)
+                reused[0] += 1
+                return r, None
             part = "%s.%d.part" % (dst, i)
             try:
                 rc, err = dump(tool, programs, idx, part, env)
@@ -246,7 +257,7 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
     for _, why in bad:
         reasons[why] = reasons.get(why, 0) + 1
     nseen = None if seen is None else len({r["kk"] for r in rows} & set(seen))
-    return dict(listed=len({r["kk"] for r in rows}), written=len(ok), skipped=len(bad), seen=nseen, reasons=reasons, list_sha=list_sha)
+    return dict(listed=len({r["kk"] for r in rows}), written=len(ok), skipped=len(bad), seen=nseen, reasons=reasons, list_sha=list_sha, reused=reused[0])
 
 
 def summary(st):
@@ -255,6 +266,8 @@ def summary(st):
         s += "; skipped: " + ", ".join("%s %d" % (k, v) for k, v in sorted(st["reasons"].items()))
     if st.get("seen") is not None:
         s += "; KosmicKrisp built %d of the listed kernels in pass 1" % st["seen"]
+    if st.get("reused"):
+        s += "; %d unchanged from an earlier prepare" % st["reused"]
     return s
 
 
@@ -365,25 +378,30 @@ def find_kk_vertex(kk_msl_dir, wanted, lens=None):
         return {}
     b3sum = shutil.which("b3sum")
     found = {}
-    for key in wanted:
-        want = lens.get(key)
-        for fn, size in sorted(files):
-            if key in found or (want is not None and size != want):
-                continue
-            path = os.path.join(kk_msl_dir, fn)
-            try:
-                with open(path, "rb") as f:
-                    data = f.read()
-            except OSError:
-                continue
-            if want is None and b"struct VertexOut" not in data[:4096]:
-                continue
-            if b3sum:
-                h = subprocess.run([b3sum, "--no-names"], input=data, capture_output=True).stdout.decode()[:16]
-            else:
-                h = blake3_64(data)
-            if h == key:
-                found[key] = path
+    wanted = set(wanted)
+    # prepfast: ONE pass over the files, each text hashed at most once (was: every wanted key re-read and re-hashed every candidate,
+    # O(keys x files) full-file reads: 150 pairs x 1,583 files of up to 5 MB each; 5x the shader set = 25x the work)
+    sizes = {lens[k] for k in wanted if lens.get(k) is not None}
+    unsized = any(lens.get(k) is None for k in wanted)
+    for fn, size in sorted(files):
+        if len(found) == len(wanted):
+            break
+        path = os.path.join(kk_msl_dir, fn)
+        try:
+            with open(path, "rb") as f:
+                if size not in sizes:                  # a file of a logged length is always a candidate; else only vertex texts
+                    if not unsized or b"struct VertexOut" not in f.read(4096):
+                        continue
+                    f.seek(0)
+                data = f.read()
+        except OSError:
+            continue
+        if b3sum:
+            h = subprocess.run([b3sum, "--no-names"], input=data, capture_output=True).stdout.decode()[:16]
+        else:
+            h = blake3_64(data)
+        if h in wanted and h not in found:
+            found[h] = path
     return found
 
 

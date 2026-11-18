@@ -180,6 +180,55 @@ class T(unittest.TestCase):
         kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv"))
         self.assertEqual((kv["passes"], kv["metallibs"], kv["warm"]), ("2", "1", "2"))
 
+    def test_prepare_seeds_pass_1_from_the_metallib_store(self):
+        c = self.ctx(); os.makedirs(c.dir)
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        store = c.root + ".metallib-store"; os.makedirs(store); open(store + "/old1.metallib", "w").write("m1")
+        lcd = os.path.join(c.dir, "kk-libcache"); seen = {}; envs = []
+        def runner(cmd, env=None, capture=False):
+            if capture: return 0, ""
+            if cmd[0] == "bash":
+                envs.append(env.get("NPS5_METALLIB_STORE")); return 0
+            seen.setdefault("lib_at_run", os.path.isfile(lcd + "/lib/old1.metallib"))
+            os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write("src")
+            return 0
+        rc, out, err = self.run_main(["prepare", "PPSA00001", "--no-warm"], runner)
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(seen["lib_at_run"]); self.assertIn("1 metallibs from earlier prepares", out)
+        self.assertEqual(set(envs), {store})                                     # the builder is told where the store is
+        self.env["NPS5_METALLIB_STORE"] = ""                                      # opt-out: nothing is seeded
+        os.makedirs(c.dir, exist_ok=True); seen.clear()
+        rc, out, err = self.run_main(["prepare", "PPSA00001", "--no-warm"], runner)
+        self.assertFalse(seen["lib_at_run"]); self.assertNotIn("earlier prepares", out)
+
+    def test_prepare_keeps_pass_1_when_every_shader_was_loaded_from_metallibs(self):
+        c = self.ctx(); os.makedirs(c.dir)
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        store = c.root + ".metallib-store"; os.makedirs(store); open(store + "/k1.metallib", "w").write("m")
+        lcd = os.path.join(c.dir, "kk-libcache"); runs = []
+        def runner(cmd, env=None, capture=False):
+            if capture: return 0, ""
+            if cmd[0] == "bash": return 0
+            runs.append(cmd[cmd.index("--tag") + 1]); open(os.path.join(c.dir, "archive-%d" % len(runs)), "w").write("x"); return 0
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(runs, ["cache-prepare", "cache-warm-1", "cache-warm-2"])      # no pass 2: nothing was compiled from source
+        self.assertIn("pass 2 skipped", out); self.assertTrue(os.path.exists(os.path.join(c.dir, "archive-1")))
+        self.assertEqual(cache.read_kv(os.path.join(c.dir, "prepared.tsv"))["passes"], "1")
+        runs.clear()
+        self.env["NPS5_PREPARE_KEEP_PASS1"] = "0"                                       # opt-out: the old always-fresh pass 2
+        os.makedirs(c.dir, exist_ok=True)
+        self.run_main(["prepare", "PPSA00001", "--no-warm"], runner)
+        self.assertEqual(runs, ["cache-prepare", "cache-prepare"])
+        del self.env["NPS5_PREPARE_KEEP_PASS1"]
+        runs.clear()                                                                    # something new collected in pass 1: fresh pass 2
+        def runner2(cmd, env=None, capture=False):
+            if not capture and cmd[0] != "bash" and not runs:
+                os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/new.metal", "w").write("src")
+            return runner(cmd, env, capture)
+        self.run_main(["prepare", "PPSA00001", "--no-warm"], runner2)
+        self.assertEqual(runs, ["cache-prepare", "cache-prepare"])
+
     def test_prepare_warm_starts_are_normal_starts_and_optional(self):
         c = self.ctx(); os.makedirs(c.dir)
         self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)

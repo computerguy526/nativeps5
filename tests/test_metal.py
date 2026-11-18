@@ -113,6 +113,24 @@ class T(unittest.TestCase):
         self.assertIn("Metal shaders: 6/6 (100%)", out)
         self.assertEqual(metal.index_rows(d), (st["list_sha"], 2))
 
+    def test_regeneration_reuses_unchanged_text_without_running_the_tool(self):
+        rows = [row(DG[0], SP[0], "0" * 16, b_text(0)), row(DG[2], SP[2], "2" * 16, b_text(2))]
+        st, _ = self.gen(rows)
+        self.assertEqual((st["written"], st["reused"]), (2, 0))
+        calls = []
+        def dump(tool, programs, perm, out, env):
+            calls.append(perm); return metal.run_dump(tool, programs, perm, out, env)
+        st, out = self.gen(rows + [row(DG[5], SP[5], "5" * 16, b_text(5))], dump=dump)
+        self.assertEqual(len(calls), 1)                                          # only the new key was emitted
+        self.assertEqual((st["written"], st["reused"]), (3, 2))
+        self.assertIn("2 unchanged from an earlier prepare", metal.summary(st))
+        d = os.path.join(self.tmp, "c", "metal-shaders")
+        open(os.path.join(d, "0" * 16 + ".metal"), "ab").write(b"tampered")      # a changed file is never trusted: regenerated
+        calls.clear()
+        st, _ = self.gen(rows, dump=dump)
+        self.assertEqual((len(calls), st["reused"]), (1, 1))
+        self.assertEqual(open(os.path.join(d, "0" * 16 + ".metal"), "rb").read(), b_text(0))
+
     def test_two_permutations_of_one_kernel(self):
         st, _ = self.gen([row(DG[0], SP[0], "0" * 16, b_text(0)), row(DG[0], SP[0], "0" * 16, b_text(0)), row(DG[2], SP[2], "2" * 16, b_text(2))])
         self.assertEqual((st["listed"], st["written"]), (2, 2))
@@ -204,6 +222,16 @@ class Gfx(unittest.TestCase):
 
     def gen(self, rows, **kw):
         return metal.generate_gfx(self.lst(rows), self.prog, self.kkdir, self.out, self.env, out=io.StringIO(), **kw)
+
+    def test_find_kk_vertex_hashes_each_file_once_for_all_keys(self):
+        other = KKVS + "// second vertex\n"
+        k2 = metal.blake3_64(other.encode())
+        open(os.path.join(self.kkdir, "second.metal"), "w").write(other)
+        got = metal.find_kk_vertex(self.kkdir, {self.kk_vs, k2, "f" * 16})
+        self.assertEqual(sorted(got), sorted([self.kk_vs, k2]))
+        sized = metal.find_kk_vertex(self.kkdir, {self.kk_vs, k2}, {self.kk_vs: len(KKVS), k2: len(other)})
+        self.assertEqual(sorted(sized), sorted([self.kk_vs, k2]))
+        self.assertEqual(metal.find_kk_vertex(self.kkdir, {k2}, {k2: 5}), {})           # a wrong logged length excludes the file
 
     def test_blake3_matches_the_reference(self):
         self.assertEqual(metal.blake3_64(b""), "af1349b9f5f9a1a6")

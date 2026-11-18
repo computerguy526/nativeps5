@@ -727,16 +727,48 @@ def cmd_prepare(ctx, o, runner):
         if om and os.path.isdir(om):
             shutil.rmtree(om, ignore_errors=True)
 
+    def pending_libs():
+        """Collected MSL keys without a metallib yet = what the builder will compile."""
+        try:
+            have = {f[:-9] for f in os.listdir(os.path.join(lcdir, "lib")) if f.endswith(".metallib")}
+        except OSError:
+            have = set()
+        try:
+            return len([f for f in os.listdir(os.path.join(lcdir, "msl")) if f.endswith(".metal") and f[:-6] not in have])
+        except OSError:
+            return 0
+
     def build_libs():
         """KK's library cache: build the collected MSL into metallibs; returns the number of metallibs now present."""
         lc = libcache_builder(ctx)
         if lc and os.path.isdir(os.path.join(lcdir, "msl")):
-            if runner(["bash", lc, lcdir, str(compile_jobs(ctx.environ))], env=ctx.environ) != 0:
+            if runner(["bash", lc, lcdir, str(compile_jobs(ctx.environ))], env=benv) != 0:
                 print("prepare: warning: %s failed; the library cache is not (fully) built (pipelines are still prepared)" % lc)
         try:
             return len([f for f in os.listdir(os.path.join(lcdir, "lib")) if f.endswith(".metallib")])
         except OSError:
             return 0
+
+    # prepfast: a content-addressed metallib store next to the cache root (key = hash of MSL + KK build + macOS build + GPU, so a hit
+    # is always valid). Pass 1 starts with every stored metallib linked into kk-libcache/lib: shaders seen before are LOADED instead of
+    # compiled from source (a re-prepare after the list grew, or a second cache dir of the same stack, compiles only the new keys), and
+    # the builder clones what it builds back into the store. NPS5_METALLIB_STORE= (empty) turns it off, a path moves it.
+    store = ctx.environ["NPS5_METALLIB_STORE"] if "NPS5_METALLIB_STORE" in ctx.environ else ctx.root + ".metallib-store"
+    benv = dict(ctx.environ, NPS5_METALLIB_STORE=store)
+
+    def seed_libs():
+        n = 0
+        if store and os.path.isdir(store):
+            ldir = os.path.join(lcdir, "lib")
+            os.makedirs(ldir, exist_ok=True)
+            for fn in os.listdir(store):
+                if fn.endswith(".metallib") and not os.path.exists(os.path.join(ldir, fn)):
+                    try:
+                        os.link(os.path.join(store, fn), os.path.join(ldir, fn))
+                    except OSError:
+                        shutil.copyfile(os.path.join(store, fn), os.path.join(ldir, fn))
+                    n += 1
+        return n
 
     t0 = time.time()
     # Two passes. KK keys a compiled pipeline in its Metal archive on the library it was built from, and a library compiled from
@@ -755,15 +787,29 @@ def cmd_prepare(ctx, o, runner):
             tail.done()
 
     fresh_dir()
+    nseed = seed_libs()
+    if nseed:
+        print("prepare: %d metallibs from earlier prepares are reused (only new shaders are compiled)" % nseed, flush=True)
     rc = one_pass("pass 1 of 2" if not o.get("single") else "pass 1")
     if rc == 0:
         print("prepare: building Metal libraries from the collected shaders (no window; this takes a few minutes on a first prepare)", flush=True)
+    newlibs = pending_libs() if rc == 0 else 0           # MSL KK had to compile from source in pass 1 (no metallib for its key yet)
     nlib = build_libs() if rc == 0 else 0
     mst = metal_step(ctx, runner, rd) if rc == 0 and mlist else None
     passes = 1
-    if rc == 0 and nlib > 0 and not o.get("single"):
-        print("prepare: pass 1 done (%d metallibs); pass 2 re-prepares with them" % nlib)
-        fresh_dir(keep_libcache=True)
+    # prepfast: when every shader of pass 1 was LOADED from a metallib (seeded from the store: nothing new to build), pass 1's archive
+    # is already the one later runs hit, so a fresh pass 2 would redo ~1,600 identical pipeline compiles. Keep the directory then: with
+    # no generated kernels pass 2 is skipped, with them it only adds the kernel pipelines (everything else is an archive hit).
+    # NPS5_PREPARE_KEEP_PASS1=0 restores the always-fresh pass 2.
+    keep1 = rc == 0 and nlib > 0 and newlibs == 0 and not o.get("single") and ctx.environ.get("NPS5_PREPARE_KEEP_PASS1") != "0"
+    if keep1 and not (mst and mst.get("written")):
+        print("prepare: pass 1 loaded all %d shaders from metallibs (nothing new to compile): its cache is final, pass 2 skipped" % nlib)
+    elif rc == 0 and nlib > 0 and not o.get("single"):
+        if keep1:
+            print("prepare: pass 1 loaded all %d shaders from metallibs; pass 2 only adds the generated kernels to the same cache" % nlib)
+        else:
+            print("prepare: pass 1 done (%d metallibs); pass 2 re-prepares with them" % nlib)
+            fresh_dir(keep_libcache=True)
         cmd2 = cmd
         if mst and mst.get("written"):
             # pass 2 compiles every generated kernel once, synchronously, under the progress card; KK collects its MSL, so the
@@ -780,7 +826,7 @@ def cmd_prepare(ctx, o, runner):
                     mst["gfx_active"], mst["gfx_failed"] = metalmod.gfx_override_counts(run_logs(rd))
                     print("prepare: Metal graphics: %d pairs compiled, %d failed to compile (KosmicKrisp's own pair is kept for those)" % (mst["gfx_active"], mst["gfx_failed"]))
     warm = 0
-    if rc == 0 and passes == 2 and not o.get("nowarm"):
+    if rc == 0 and (passes == 2 or keep1) and not o.get("nowarm"):
         warm = warm_starts(ctx, app0, o, runner, build_libs)
     info = {}
     try:
