@@ -777,6 +777,8 @@ ASTROHYBRID_OPT_1	kyty		src/common/astroHybrid.h
 ASTROHYBRID_OPT_2	kyty		src/common/astroHybrid.h
 ASTROHYBRID_OVERLAY	kyty		src/graphics/presentation/performanceOverlay.cpp
 ASTROHYBRID_PAD_MOTION	kyty		src/hybrid/kytyGpuBridge.cpp
+ASTROHYBRID_PAD_MOTION_LOG	kyty	1 = log the pad motion relay (gyro/accelerometer)	src/hybrid/kytyGpuBridge.cpp
+ASTROHYBRID_PAD_MOTION_REC	kyty		src/hybrid/kytyGpuBridge.cpp
 ASTROHYBRID_PAD_PREFER	kyty		src/libs/controller.cpp
 ASTROHYBRID_PASS_TRACE	kyty		src/graphics/host_gpu/renderer/passTrace.h
 ASTROHYBRID_PASS_TRACE_CB	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1106,7 +1108,7 @@ KYTY_DRAW_RUN_WRITES	nativeps5		titles/kyty-preset.env
 KYTY_DRAW_SEQUENCE_FAST	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_DRAW_SEQUENCE_VERIFY	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_DRAW_WRITE_SINK	kyty		src/graphics/host_gpu/renderer/context.cpp
-KYTY_DUMP_DIR	kyty	folder for frame and target dumps; must be under NPS5_SCRATCH	src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_DIR	kyty	folder for frame and target dumps; must be under NPS5_SCRATCH	src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_DUMP_DIR	nativeps5		scripts/nps5lib/run.py
 KYTY_DUMP_FRAMES	kyty	number of presented frames to dump as pictures (with _EVERY and _FROM); the only allowed source of pictures; output is game data	src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_FRAMES	nativeps5		scripts/nps5lib/run.py
@@ -1119,10 +1121,13 @@ KYTY_DUMP_SCALE	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_STAT	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_STDOUT	kyty		src/graphics/shader/recompiler/ShaderRecompiler.cpp
 KYTY_DUMP_TARGETS	kyty	dumps cached colour targets at chosen flips (with _FROM, _EVERY, _DELAY, _MINW)	src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_TARGETS_BURST	kyty	target dumps on consecutive flips	src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_DELAY	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_EVERY	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_FROM	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_TARGETS_MAXW	kyty	largest target width the target dump writes	src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_MINW	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_TARGETS_ONLYW	kyty	target dump writes only targets of this width	src/graphics/presentation/window/swapchain.cpp
 KYTY_DYNAMIC_STATE_SHADOW	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_EOP_DROPPED_LABELS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_EOP_FLUSH_BATCH	kyty		src/graphics/guest_gpu/graphicsRun.cpp
@@ -1293,10 +1298,13 @@ KYTY_LOADCARD_HZ	kyty		src/graphics/loadCard.h
 KYTY_LOADCARD_LOG	kyty		src/graphics/loadCard.h
 KYTY_LOADCARD_MIDGAME	kyty		src/graphics/loadCard.h
 KYTY_LOADCARD_MS	kyty		src/graphics/loadCard.h
+KYTY_LOADCARD_PHASE	kyty	0 = the opening card does not wait for the launch compile phase	src/graphics/loadCard.h
 KYTY_LOADING_LOG	kyty		src/common/profiler.cpp
 KYTY_LOD_REPORT_COMPLETION_WRITE	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
 KYTY_LOD_REPORT_PUBLISH	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
 KYTY_LOD_STATS_COUNT	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
+KYTY_LOD_STATS_EARLY_LOG	kyty	1 = log the early/late split of instrumented draws	src/graphics/host_gpu/renderer/lodStats.cpp
+KYTY_LOD_STATS_EARLY_TESTS	kyty	early depth/stencil tests for instrumented GET_LOD_STATS pixel shaders (default 1; fixes the flower flicker)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LOD_STATS_GATE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LOD_STATS_MODE	kyty	what the game's texture streamer reads back as LOD statistics: `gpu` (preset, real statistics), `zero` (textures decay to low mips), `legacy` (everything at mip 0)	src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
 KYTY_LOD_STATS_MODE	nativeps5	what the game's texture streamer reads back as LOD statistics: `gpu` (preset, real statistics), `zero` (textures decay to low mips), `legacy` (everything at mip 0)	titles/kyty-preset.env
@@ -1308,10 +1316,22 @@ KYTY_MESH_OUTPUT_GUARD	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_MESH_RESTART	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_MESH_RESTART	nativeps5		titles/kyty-preset.env
 KYTY_METALFX	kyty	`1|temporal|spatial` MetalFX in place of the game's own temporal upscale pass; built, NOT validated (the pass matcher has not engaged)	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX	ps5recomp	MetalFX scaler for the game's upscale pass: off | spatial | temporal (set by the upscaling setting)	pkg/cli/settingsdialog_test.go
+KYTY_METALFX_COMPUTE_PASS	kyty	hash of the level compute upscale pass that gets MetalFX (hex; 0 = off)	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_CYCLE	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_CYCLE_FROM	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_DEPTH	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_DEPTH_NEAR	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_DEPTH_REVERSED	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_FIND	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_FIND_RESET_S	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_FIND_W	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_JITTER	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_JITTER_SIGN	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_JITTER_SIGN_Y	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_MAX_IN_W	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_MV_JITTER	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_MV_SIGN	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_PASS	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_META_CLEAR_MEMO	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_META_CLEAR_MEMO	nativeps5		titles/kyty-preset.env
@@ -1609,6 +1629,7 @@ KYTY_TARGET_DESC_MEMO	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_TEST_CLOSE_S	kyty		src/graphics/presentation/window/window.cpp
 KYTY_TEST_COMPARE_LINEAR_USES	kyty		tests/shaderCfgTests.cpp
 KYTY_TEST_COMPARE_LINEAR_USES_DUMP	kyty		tests/shaderCfgTests.cpp
+KYTY_TEST_NO_GUEST_MEMORY	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_RESIZE	kyty		src/graphics/presentation/window/window.cpp
 KYTY_TEST_SKIP_SPIRV_TEXT	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_VULKAN_VALIDATION	kyty		tests/ShaderRecompilerComputeTests.cpp
@@ -1735,15 +1756,18 @@ NPS5_ANYPS5_DIR	nativeps5		nps5.conf.example
 NPS5_ANYPS5_HLE_H	ps5recomp		pkg/thunkgen/gen/main.go
 NPS5_ANYPS5_OWN_CLOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_ANYPS5_TRACE	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_API_TOKEN	nativeps5		tests/test_bugreport.py
 NPS5_APP0_DIR	nativeps5	the title's dump folder (read-only), mounted as /app0	scripts/nps5lib/run.py
 NPS5_APP0_DIR	ps5recomp	the title's dump folder (read-only), mounted as /app0	pkg/cli/cli.go
 NPS5_ASM	ps5recomp		pkg/cli/asmpipe.go
 NPS5_ASTRO_FAST_LIGHTING	ps5recomp		pkg/cli/settingsdialog_test.go
 NPS5_ASTRO_REALTIME	nativeps5		tests/compare_env.sh
 NPS5_ASTRO_REALTIME	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_ASTRO_UPSCALING	ps5recomp	ASTRO BOT upscaling setting: off (default) | metalfx900 | metalfx720 (experimental)	pkg/cli/settingsdialog_test.go
 NPS5_AUDIO_CAPTURE	ps5recomp		pkg/runtime/modules/libSceAudioOut/nps5_audio_capture.c
-NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	tests/compare_env.sh
+NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	scripts/nps5lib/run.py
 NPS5_AUDIO_NULL	ps5recomp	`1` silent audio device; the default in run-title.sh	pkg/runtime/modules/libSceAudioOut/ps4_audioout.c
+NPS5_AVLOOP_COUNT	ps5recomp		tests/avloop/avloop_unit.cpp
 NPS5_AVPLAYER_DEC_THREADS	ps5recomp	video decode threads (default 4; 1 = one thread; 2..16)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_HOLD	ps5recomp	fetched video buffers kept away from the decoder (default 2, capped by the number of frame buffers)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_LOG	ps5recomp	`1` logs each video stream and its first three frames (sizes, pitch, crops, guest address)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
@@ -1763,11 +1787,13 @@ NPS5_DIAG_THREAD_ALTSTACK	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.
 NPS5_DIFF_CONTROL	anyps5		core/libs/prx/libSceAgcDriver/tests/execution/F32ExtendedFlushDifferential.cpp
 NPS5_DIFF_REPORT_ONLY	anyps5		core/libs/prx/libSceAgcDriver/tests/execution/F32ExtendedFlushDifferential.cpp
 NPS5_DUMPS_DIR	nativeps5	folder that holds your own game dumps, outside every checkout, read-only	nps5.conf.example
+NPS5_DUMP_DIR	nativeps5		tests/test_bugreport.py
 NPS5_DUMP_MAP	ps5recomp		pkg/runtime/core/recomp_runtime.c
 NPS5_DUMP_PCMAP	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_EH_TRACE	ps5recomp		pkg/runtime/core/nps5_eh.c
 NPS5_EXTRA_ENV	nativeps5		tests/compare_env.sh
 NPS5_FLUSH_STATS	anyps5		core/shader/recompiler/Translation/src/TranslationContext/OperandAccess.cpp
+NPS5_FOO	nativeps5		tests/test_bugreport.py
 NPS5_FORK_BASE	nativeps5		scripts/fetch-components.sh
 NPS5_FRAMERATE_BLOCK	nativeps5		games/game.py
 NPS5_FRAMERATE_BLOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
@@ -1794,6 +1820,8 @@ NPS5_GUARD_HOLD_SWAP_MB	nativeps5		host/machine_guard.sh
 NPS5_GUARD_RUN_CAP_MB	nativeps5		host/machine_guard.sh
 NPS5_GUARD_SWAP_MB	nativeps5		host/machine_guard.sh
 NPS5_GUEST_QOS	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
+NPS5_HAPTICS	ps5recomp	0 = controller haptics off	pkg/runtime/modules/libSceAudioOut/nps5_haptics.c
+NPS5_HAPTICS_LOG	ps5recomp	1 = [haptics] line once per second	pkg/runtime/modules/libSceAudioOut/nps5_haptics.c
 NPS5_HOME	ps5recomp		pkg/pack/library.go
 NPS5_HW	nativeps5		nps5.conf.example
 NPS5_HW_CACHE_KEY	nativeps5		scripts/nps5-env.sh
@@ -1831,6 +1859,7 @@ NPS5_LEAN_CHECK	ps5recomp		pkg/runtime/core/nps5_lean.c
 NPS5_LEAN_HOOKS	ps5recomp		pkg/runtime/core/nps5_lean.c
 NPS5_LIBKERNEL_HLE_H	ps5recomp		pkg/thunkgen/thunkgen_test.go
 NPS5_LOG	ps5recomp		pkg/diag/diag_test.go
+NPS5_LOG_RATE	ps5recomp	first,every: thin repeated periodic log lines (default off)	pkg/runtime/modules/libSceAnyPS5/nps5_log.h
 NPS5_LONG	nativeps5		tests/test_evidence_ab_report.py
 NPS5_LOWERING_ID	ps5recomp		pkg/emitter/lowering.go
 NPS5_MISS	ps5recomp		pkg/runtime/core/nps5_tier1.c
@@ -1846,11 +1875,13 @@ NPS5_NO_STALL_CREDIT	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_NO_TERM_HANDLER	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_OVERLAY_DIR	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_PAD_LOG	anyps5		core/libs/nps5/KytyHost.cpp
+NPS5_PAD_MOTION_TRACE	anyps5		core/libs/tests/GuestPadMotion.cpp
 NPS5_PAK_LOCALE_FALLBACK	ps5recomp		pkg/runtime/kernel/vfs/ps4_pak.c
 NPS5_PATCH_BOOT	nativeps5		tests/test_patch_real.py
 NPS5_PATCH_OTHER_NATIVE	nativeps5		tests/test_patch_real.py
 NPS5_PATCH_REAL	nativeps5		tests/test_patch_real.py
 NPS5_PATCH_SCRATCH	nativeps5		tests/test_patch_real.py
+NPS5_PATCH_UPSCALING	ps5recomp	same setting by its patch key (patch.upscaling)	pkg/emitter/patchchoice_test.go
 NPS5_PCMAP_STRICT	ps5recomp		pkg/cli/cli.go
 NPS5_PERF	nativeps5		tests/compare_env.sh
 NPS5_PERF	ps5recomp		pkg/runtime/core/nps5_perf.c
@@ -1868,6 +1899,7 @@ NPS5_REGRESS_SKIP	nativeps5		scripts/nps5lib/regress.py
 NPS5_REPO	ps5recomp		pkg/pack/build.go
 NPS5_ROOT	nativeps5		nps5.conf.example
 NPS5_ROOT	ps5recomp		pkg/diag/tools.go
+NPS5_RUNS_BY_TAG	nativeps5		scripts/nps5lib/bugreport.py
 NPS5_RUNS_DIR	anyps5		core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
 NPS5_RUNS_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_RUNS_DIR	ps5recomp		pkg/diag/bundle.go
@@ -1891,9 +1923,13 @@ NPS5_STACK_KK	nativeps5		scripts/nps5lib/cache.py
 NPS5_STACK_KYTY	nativeps5		scripts/nps5lib/cache.py
 NPS5_STACK_RECOMP	nativeps5		scripts/nps5lib/cache.py
 NPS5_SUPPORT_DIR	ps5recomp		pkg/pack/assets/launcher.c
+NPS5_TEST_B	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_FAST_LIGHTING	ps5recomp		pkg/emitter/patchpoints_test.go
 NPS5_TEST_HELLO_ELF	ps5recomp		pkg/disasm/hello_elf_ext_test.go
+NPS5_TEST_METALFX	ps5recomp		pkg/emitter/patchchoice_test.go
+NPS5_TEST_PPSA21564_EBOOT	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_PS4_LIBC	ps5recomp		pkg/emitter/shim_test.go
+NPS5_TEST_UPSCALING	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TIER1_CACHE	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_CACHE_MB	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_MAX_CONCURRENT	ps5recomp		pkg/runtime/core/nps5_tier1.c
@@ -1947,6 +1983,7 @@ NPS5_WINDOW_TITLE_NAME	anyps5		core/libs/prx/libSceVideoOut/include/DisplayWindo
 NPS5_WINDOW_TOP	anyps5		core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp
 NPS5_WINDOW_TOP	kyty		src/graphics/presentation/window/window.cpp
 NPS5_WORKDIR	nativeps5		tests/compare_env.sh
+NPS5_X	nativeps5		tests/test_logsummary.py
 NPS5_YIELD_BACKOFF_AFTER	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_YIELD_BACKOFF_MIN_US	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
 NPS5_YIELD_BACKOFF_US	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
