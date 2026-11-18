@@ -1640,6 +1640,7 @@ KYTY_SKIP_EMPTY_INDIRECT	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_SKIP_INACTIVE_PS	kyty		src/graphics/host_gpu/renderer/debug.cpp
 KYTY_SKIP_INVALID	kyty		src/common/skipInvalid.h
 KYTY_SMOKE_BAD_SCRIPT	anyps5		core/libs/nps5/tests/kyty_host_smoke.c
+KYTY_SNAPSHOT_CLEAN_READS	kyty	Small read-only buffer bindings the GPU has not written are copied at bind (visor flicker fix; default 1, 0 = v1.0.3 behaviour)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_SPEC_CHURN_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SPEC_UNMAPPED_NULL	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_SPIN_GATE	kyty		src/common/spinGate.cpp

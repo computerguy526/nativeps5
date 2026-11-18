@@ -18,6 +18,9 @@ Everything in v1.0.3, plus our own Metal compute kernels. Needs a fresh shader-c
   Opt out with `NPS5_METAL_SHADERS=0`. `nps5 cache status` shows how many are in use; `nps5 cache metal <id>`
   regenerates them. KosmicKrisp patches 0023-0025 (`KK_MSL_OVERRIDE_DIR`, `KK_MSL_OVERRIDE_ASYNC`, compile counts
   for the progress card); new tool `kyty_msl_dump` in the Kyty fork.
+- **ASTRO BOT: visor flicker fixed.** Astro's visor cracks no longer flicker now and then in the crash-landing close-up:
+  small read-only buffer bindings that the GPU has not written are copied at bind time, like those the CPU changed
+  (`KYTY_SNAPSHOT_CLEAN_READS`, default on; `=0` restores the v1.0.3 behaviour).
 
 ## v1.0.3 (2026-11-18)
 
