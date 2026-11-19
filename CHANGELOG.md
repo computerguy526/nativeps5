@@ -36,8 +36,14 @@ a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned b
 - **Lists tied to the generator:** the `emitter` line of both Metal lists names the Kyty commit and release tag the
   hashes were made with. When a prepare cannot reproduce the verified texts it says which Kyty it found and which one
   the list needs, and exits with code 3 (the cache still works; the skipped shaders stay KosmicKrisp's).
-- **Pins:** components.lock pins `v1.1.1` in all three component repositories (recomp and AnyPS5 unchanged from v1.1,
-  Kyty with the commits above); KosmicKrisp unchanged (same pin and patches). `kosmickrisp/EXPECTED_TREE` now holds the
+- **Recompiler (directory listings):** the v1.1 symlink-type cache scanned its entries linearly, so listing a very large
+  symlinked folder took seconds (46k entries: 3.0 s, under a lock that blocked other listings) and a dangling link stayed
+  hidden after its target appeared. It is now hash-indexed (53 ms for the same folder), failed lookups are not cached,
+  and folders changed within the file-time granularity are not cached. Real dumps were not affected.
+- **Fixes from review:** `scripts/fetch-components.sh` verifies a tag before the checkout exists (a refused clone
+  no longer stays behind to pass a second run); the 1800 s run ceiling applies only to the prepare passes.
+- **Pins:** components.lock pins `v1.1.1` in all three component repositories (AnyPS5 unchanged from v1.1, recomp with
+  the listing fix, Kyty with the commits above); KosmicKrisp unchanged (same pin and patches). `kosmickrisp/EXPECTED_TREE` now holds the
   tree that the BUILDING.md command prints (without the stamp file; the v1.1 value included the stamp that patch 0002
   creates, so the documented comparison could not match).
 - **Opt-in memory and GPU switches (Kyty, all off by default):** `KYTY_MEMTRIM_BIG_WIDTH=<n>` (dedicated Metal heaps
