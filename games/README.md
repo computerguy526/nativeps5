@@ -59,10 +59,14 @@ The folder holds:
   turns it off). `scripts/check.sh` accepts the file only as hashes, header lines and prose comments.
 - **`metal-gfx-pairs.tsv`** (optional, v1.1): the same for graphics, VERIFIED (vertex, fragment) PAIRS. Each row: program digests and
   specialization keys of both stages, KosmicKrisp's MSL key of both stages, sha256 of both of our texts, variant, and three short
-  number fields the emitter needs (descriptor offsets, vertex attributes, colour mask). No shader code: `nps5 cache prepare`
-  generates both stages on the player's Mac and keeps the pair only when BOTH texts hash to the listed sha256. A list with
-  only the header lines (ASTRO BOT in v1.1: no verified pairs yet) means no graphics step and KosmicKrisp's own pipelines.
-  `scripts/check.sh` accepts the file only in that form.
+  number fields the emitter needs (descriptor offsets, vertex attributes, colour mask), and since format 2 (v1.1.1) the
+  blend column (KosmicKrisp blends in the fragment shader: numbers per colour attachment) and the program record's push-data
+  cursor after a spec key (`<spec>:<cursor>`). No shader code: `nps5 cache prepare` generates both stages on the player's
+  Mac and keeps the pair only when BOTH texts hash to the listed sha256. A list with only the header lines means no graphics
+  step and KosmicKrisp's own pipelines. `scripts/check.sh` accepts the file only in that form, and a list with pair rows only
+  with its `metal-gfx-pairs.tsv.verified` record (sha256 of the list + result line, like `pipelines.kyplst.verified`).
+- **`emitter`** line of both Metal lists: the Kyty commit and release tag the hashes were made with (components.lock pins
+  the same commit). When texts do not reproduce, `nps5 cache prepare` names the Kyty it found and exits 3.
 
 ## Pipeline lists
 

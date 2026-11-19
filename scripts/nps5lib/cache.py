@@ -841,6 +841,12 @@ def cmd_prepare(ctx, o, runner):
             f.write("%s=%s\n" % (k, v))
     os.replace(pt + ".tmp", pt)            # whole or absent: status never reads a half-written record
     print("prepare: rc=%s, %s" % (rc, ctx.dir))
+    if rc == 0 and mst and mst.get("mismatch"):
+        # v1.1.1: the shipped lists are tied to the pinned Kyty (their `emitter` line); a mismatch is a component problem, not a
+        # broken cache (the skipped shaders simply stay KosmicKrisp's), but it must not pass silently
+        print("prepare: ERROR: component mismatch: %s" % mst["mismatch"])
+        print("prepare: the cache works (KosmicKrisp's own shaders replace the skipped ones); exit code 3 = components differ from the release")
+        return 3
     return 0 if rc == 0 else 1
 
 
@@ -892,6 +898,10 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
         if mlist:
             st = dict(st, **metalmod.generate(mlist, prog, odir, ctx.environ, jobs=compile_jobs(ctx.environ), seen=seen or None, label=label))
             print(label + metalmod.summary(st), flush=True)
+            why = metalmod.emitter_problem(st, ctx.commits.get("kyty"))
+            if why:
+                print("%sERROR: Metal shaders: %s" % (label, why), flush=True)
+                st["mismatch"] = why
             if st.get("seen") == 0 and st["written"]:
                 print("%swarning: KosmicKrisp built none of the listed kernels here (another KosmicKrisp / macOS MSL): nothing will be swapped" % label)
     except (metalmod.MetalError, OSError) as e:
@@ -904,6 +914,10 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
             st["gfx_listed"], st["gfx_written"] = g["listed"], g["written"]
             st["written"] += g["written"]
             print(label + metalmod.gfx_summary(g), flush=True)
+            why = metalmod.emitter_problem(g, ctx.commits.get("kyty"))
+            if why:
+                print("%sERROR: Metal graphics: %s" % (label, why), flush=True)
+                st["mismatch"] = (st.get("mismatch", "") + " / " + why).strip(" /")
     except (metalmod.MetalError, OSError) as e:
         print("%sMetal graphics: skipped (%s); KosmicKrisp's own shaders are used" % (label, e), flush=True)
         st["error"] = str(e)
@@ -916,7 +930,7 @@ def metal_fields(st):
     return [("metal_shaders", "%d/%d" % (st["written"] - st.get("gfx_written", 0), st["listed"])), ("metal_seen", "" if st.get("seen") is None else st["seen"]),
             ("metal_active", st.get("active", "")), ("metal_failed", st.get("failed", "")),
             ("metal_gfx", "%d/%d" % (st.get("gfx_written", 0), st.get("gfx_listed", 0))), ("metal_gfx_active", st.get("gfx_active", "")),
-            ("metal_gfx_failed", st.get("gfx_failed", ""))]
+            ("metal_gfx_failed", st.get("gfx_failed", "")), ("metal_mismatch", "1" if st.get("mismatch") else "")]
 
 
 def cmd_metal(ctx, o, runner):
@@ -926,7 +940,7 @@ def cmd_metal(ctx, o, runner):
         print("[dry-run] would generate %s from %s and %s/%s.programs.bin" % (os.path.join(ctx.dir, metalmod.OUT_NAME), metal_list(ctx), ctx.dir, ctx.tid))
         return 0
     st = metal_step(ctx, runner, None, label="")
-    return 0 if st and not st.get("error") else 1
+    return 0 if st and not st.get("error") and not st.get("mismatch") else 1
 
 
 def warm_starts(ctx, app0, o, runner, build_libs):

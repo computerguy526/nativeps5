@@ -27,8 +27,8 @@ def rec(kind, payload):
     return struct.pack("<IIQQ", metal.KPRC, kind, len(payload), 0) + payload   # 24-byte record header
 
 
-def perm_rec(digest, spec):
-    return rec(2, digest + b"\0" * 4 + struct.pack("<I", len(spec)) + spec + b"\0" * 8)
+def perm_rec(digest, spec, cursor=0):
+    return rec(2, digest + struct.pack("<I", cursor) + struct.pack("<I", len(spec)) + spec + b"\0" * 8)
 
 
 def programs(path, perms):
@@ -177,16 +177,16 @@ if [ -n "$lp" ]; then
   [ "$KYTY_MSL_KK_PS_READS" = "1:15" ] || { echo "no ps reads" >&2; exit 5; }
   printf "// kk-mslinject v1 stage vertex entry main0 math safe\\nvs %s outs=%s set0=%s va=%s cm=%s plain=%s\\n" "$p" "$KYTY_MSL_KK_VS_OUTS" "$KYTY_MSL_KK_SET0" "$KYTY_MSL_KK_VA" "$KYTY_MSL_KK_COLOR_MASK" "${KYTY_MSL_MIPSTATS_PLAIN:-0}" > $o
 else
-  printf "// kk-mslinject v1 stage fragment entry main0 math safe\\n// kk-bda ps_reads 1:15\\nps %s plain=%s\\n" "$p" "${KYTY_MSL_MIPSTATS_PLAIN:-0}" > $o
+  printf "// kk-mslinject v1 stage fragment entry main0 math safe\\n// kk-bda ps_reads 1:15\\nps %s plain=%s%s\\n" "$p" "${KYTY_MSL_MIPSTATS_PLAIN:-0}" "${KYTY_MSL_KK_BLEND:+ blend=$KYTY_MSL_KK_BLEND}" > $o
 fi
 echo "// complete=1 unsupported:" >&2
 """
 KKVS = "struct VertexOut {\n    float4 position [[position]];\n    float4 vary_00 [[user(vary_00)]];\n};\n"
 
 
-def gfx_text(vs, ps, outs="0:4", set0="0:0,58:16", va="0:0:109", cm="1", plain="1"):
+def gfx_text(vs, ps, outs="0:4", set0="0:0,58:16", va="0:0:109", cm="1", plain="1", blend=""):
     v = "// kk-mslinject v1 stage vertex entry main0 math safe\nvs %d outs=%s set0=%s va=%s cm=%s plain=%s\n" % (vs, outs, set0, va, cm, plain)
-    f = "// kk-mslinject v1 stage fragment entry main0 math safe\n// kk-bda ps_reads 1:15\nps %d plain=%s\n" % (ps, plain)
+    f = "// kk-mslinject v1 stage fragment entry main0 math safe\n// kk-bda ps_reads 1:15\nps %d plain=%s%s\n" % (ps, plain, " blend=" + blend if blend else "")
     return v.encode(), f.encode()
 
 
@@ -262,6 +262,16 @@ class Gfx(unittest.TestCase):
         self.assertEqual(sorted(st["reasons"]), ["KosmicKrisp vertex text not in the library cache", "text differs from the verified pair",
                                                  "vertex translation failed"])
         self.assertEqual([f for f in os.listdir(self.out) if f.endswith(".metal")], [])
+
+    def test_second_prepare_without_kk_texts_keeps_the_pairs(self):
+        t = gfx_text(1, 2)
+        rows = [gfx_row(1, 2, self.kk_vs, "f" * 16, t)]
+        self.assertEqual(self.gen(rows)["written"], 1)
+        shutil.rmtree(self.kkdir); os.makedirs(self.kkdir)    # a later prepare loads metallibs: KosmicKrisp writes no MSL text
+        st = self.gen(rows)
+        self.assertEqual((st["written"], st["skipped"]), (1, 0), st)
+        pair = "%s_%s" % (self.kk_vs, "f" * 16)
+        self.assertEqual(open(os.path.join(self.out, pair + ".vs.metal"), "rb").read(), t[0])
 
     def test_row_is_checked_with_the_list_numbers_and_the_variant(self):
         t = gfx_text(1, 2, outs="0:4", set0="0:0", va="1:0:103,2:0:109", cm="3", plain="0")
@@ -414,6 +424,60 @@ class GfxPrepare(Prepare):
     test_prepare_without_tool_still_prepares = None
     test_header_only_gfx_list_is_no_graphics_step = None
 
+
+
+def gfx2_row(vs_spec, ps, kk_vs, kk_fs, texts, blend, variant="twin", vs_dg=1):
+    v, f = texts
+    return "\t".join(["gfx", DG[vs_dg].hex(), vs_spec, DG[ps].hex(), metal.spec_key(SP[ps]), kk_vs, kk_fs, hashlib.sha256(v).hexdigest(),
+                      hashlib.sha256(f).hexdigest(), variant, "0:0,58:16", "0:0:109", "1", blend, "fuzz2+mutant+play2"])
+
+
+class Gfx2(unittest.TestCase):
+    """v1.1.1 list format 2: the blend column (KosmicKrisp's in-shader blend) and the record's push-data cursor in a spec field."""
+    setUp, tearDown, gen = Gfx.setUp, Gfx.tearDown, Gfx.gen
+
+    def lst(self, rows, emitter="abc"):
+        p = os.path.join(self.tmp, "metal-gfx-pairs.tsv")
+        open(p, "w").write("# test\nformat\tnps5-metal-gfx-pairs\t2\ntitle\tPPSA00001\t01.001.000\nemitter\t%s\tv1.1.1\n" % emitter + "\n".join(rows) + "\n")
+        return p
+
+    def test_blend_column_reaches_the_emitter(self):
+        bl = "1:1:6:0:1:0:0:7:f:4;0:0:0:0:0:0:0:15:u:2"
+        st = self.gen([gfx2_row(metal.spec_key(SP[1]), 2, self.kk_vs, "f" * 16, gfx_text(1, 2, blend=bl), bl)])
+        self.assertEqual(st["written"], 1, st)
+        st = self.gen([gfx2_row(metal.spec_key(SP[1]), 2, self.kk_vs, "f" * 16, gfx_text(1, 2, blend=bl), "")])   # blend lost: text differs
+        self.assertEqual((st["written"], list(st["reasons"])), (0, ["text differs from the verified pair"]), st)
+        for bad in ("1:1:6;", "1:1:6:0:1:0:0:7:F:4", "evil text"):
+            with self.assertRaises(metal.MetalError):
+                metal.parse_gfx_list(open(self.lst([gfx2_row(metal.spec_key(SP[1]), 2, self.kk_vs, "f" * 16, gfx_text(1, 2), bad)])).read())
+
+    def test_cursor_selects_the_exact_record(self):
+        # one program + specialization in three records that differ only in the push-data cursor (perms 6, 7, 8)
+        d = open(self.prog, "rb").read()
+        open(self.prog, "wb").write(d + perm_rec(DG[1], b"curspec", 5) + perm_rec(DG[1], b"curspec", 21) + perm_rec(DG[1], b"curspec", 18))
+        sk = metal.spec_key(b"curspec")
+        self.assertEqual(metal.read_perms(self.prog)[(DG[1].hex(), sk)], 6)                   # without a cursor: the first record
+        self.assertEqual(metal.read_perms(self.prog, cursors=True)[(DG[1].hex(), sk, 18)], 8)
+        self.assertEqual(metal.perm_key("aa", sk + ":18"), ("aa", sk, 18))
+        st = self.gen([gfx2_row(sk + ":18", 2, self.kk_vs, "f" * 16, gfx_text(8, 2), "")])
+        self.assertEqual(st["written"], 1, st)
+        st = self.gen([gfx2_row(sk + ":21", 2, self.kk_vs, "f" * 16, gfx_text(8, 2), "")])   # verified with record 8, listed as 7
+        self.assertEqual(st["written"], 0, st)
+
+    def test_format_1_lists_still_parse_and_unknown_formats_fail(self):
+        meta, rows = metal.parse_gfx_list(gfx_list([gfx_row(1, 2, self.kk_vs, "f" * 16, gfx_text(1, 2))]))
+        self.assertEqual((meta["format"], rows[0]["blend"]), (("nps5-metal-gfx-pairs", "1"), ""))
+        with self.assertRaises(metal.MetalError):
+            metal.parse_gfx_list(gfx_list([]).replace("pairs\t1", "pairs\t3"))
+
+    def test_emitter_mismatch_is_reported(self):
+        st = dict(reasons={"text differs from the verified pair": 2}, emitter=("a" * 40, "v1.1.1"))
+        self.assertIn("your kyty_msl_dump is from Kyty bbbbbbbbbbbb", metal.emitter_problem(st, "b" * 40))
+        self.assertIn("another compiler", metal.emitter_problem(st, "a" * 40))
+        self.assertIsNone(metal.emitter_problem(dict(st, reasons={"not in programs.bin": 1}), "b" * 40))
+        st = self.gen([gfx2_row(metal.spec_key(SP[1]), 2, self.kk_vs, "f" * 16, gfx_text(1, 2, cm="3"), "")])
+        self.assertEqual(st["emitter"], ("abc", "v1.1.1"))
+        self.assertIn("differ from the verified texts", metal.emitter_problem(st, "def"))
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

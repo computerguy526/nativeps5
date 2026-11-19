@@ -188,7 +188,7 @@ AnyPS5 4696b46 (the lock is now 585a803: documentation)); the repositories were 
 | 0: venv with mako, pyyaml, packaging | ok | 9 s |
 | 1: clone, `nps5.conf`, hook, `fetch-components.sh` | ok | 2 s |
 | 2: `scripts/build.sh recomp`, `go test ./pkg/diag/ ./pkg/elfloader/ ./pkg/disasm/`, `nps5 doctor` | ok | 28 s |
-| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 25 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 49 s (warm Mesa download) |
+| 3: `scripts/build.sh kosmickrisp`: Mesa at the pin, 26 patches, configure, compile, install | ok; source tree = `EXPECTED_TREE` | 49 s (warm Mesa download) |
 | 5: `scripts/build.sh anyps5`: seven submodules, configure, build of five targets | ok | 702 s |
 | 4: `scripts/build.sh kyty`: submodules, configure, compile, link | ok | 1436 s while other builds and runs shared the machine |
 | 4: Kyty CPU-only unit tests (`.nps5-check-tests` there, incl. load card, hitch switches, sequencer) | ok | seconds |

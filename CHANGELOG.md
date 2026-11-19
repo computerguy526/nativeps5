@@ -3,6 +3,52 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.1.1 (2026-11-19)
+
+Everything in v1.1, plus our own Metal translation for 31 graphics (vertex + fragment) shader pairs of ASTRO BOT. Needs
+a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned by release tag and commit.
+
+- **Our Metal shaders (graphics).** `games/PPSA21564/metal-gfx-pairs.tsv` now lists 31 verified vertex + fragment pairs
+  (35 rows: some pairs serve several pipelines). As with the compute kernels, nothing derived from the game is shipped:
+  the list holds hashes and small layout numbers, `nps5 cache prepare` generates both stages on your Mac from your dump
+  ("Metal graphics: N of 35" in the terminal), keeps a pair only when both texts are byte-identical to the verified ones,
+  and compiles them under the progress card in pass 2. KosmicKrisp swaps a pipeline by the keys of its own vertex and
+  fragment shader, so one pair runs on every pipeline that has those keys: a pair is listed only when it passed a GPU
+  differential test against KosmicKrisp's own pair on EVERY such pipeline (two input seeds, a deliberately broken variant
+  must be caught, determinism, a NaN/inf/denormal input profile, shrunk guest buffers for out-of-bounds reads, unforced
+  vertex positions). 22 more candidate pairs are left out: 2 differ on some of their pipelines, 2 were not testable, and
+  18 differ only on the NaN/inf input profile. 10 of the 31 have the exact texts of two full play sessions with no visual
+  issue (title, ship, world map, save cards, Sky Garden); the other 21 differ from those only by the out-of-bounds fix
+  below. KosmicKrisp keeps its own pipeline when a replacement fails to compile. Opt out with `NPS5_METAL_SHADERS=0`.
+  A later `nps5 cache prepare` keeps the pairs: KosmicKrisp's vertex texts they link to are kept in the cache
+  (`kk-vs-keep`), because a prepare that loads stored metallibs no longer writes them.
+- **Kyty MSL back end (graphics):** the emitter changes these texts depend on: raw-vertex pixel reads unpacked as on the
+  host path, KosmicKrisp's float model for pixel shaders, KosmicKrisp's in-shader blend and write mask, dword-aligned
+  buffer base offsets, graphics permutations at their stored push-data cursor, IMAGE_SAMPLE_D with the descriptor LOD bias,
+  and a single-lane vertex stage (KosmicKrisp has no vertex-stage subgroups; real cross-lane ops there could loop
+  forever). A raw 32-bit x2/x3/x4 buffer access whose whole vector is out of range now checks bounds per dword (the
+  in-range dwords load and store, as on the GPU and in KosmicKrisp) instead of returning zeros / dropping the store.
+  The 68 compute kernels are byte-identical to v1.1. New `msl_core_tests` target (65 checks), and
+  `kyty_msl_dump` now builds on its own (`--target kyty_msl_dump` on a fresh build directory failed in v1.1).
+- **Pairs list format 2:** a blend column and an optional push-data cursor after a spec key (`<spec>:<cursor>`; one
+  program and specialization can be stored several times with different cursors). Format 1 lists still load. A list
+  with pair rows needs its `metal-gfx-pairs.tsv.verified` record (`scripts/check.sh`).
+- **Lists tied to the generator:** the `emitter` line of both Metal lists names the Kyty commit and release tag the
+  hashes were made with. When a prepare cannot reproduce the verified texts it says which Kyty it found and which one
+  the list needs, and exits with code 3 (the cache still works; the skipped shaders stay KosmicKrisp's).
+- **Pins:** components.lock pins `v1.1.1` in all three component repositories (recomp and AnyPS5 unchanged from v1.1,
+  Kyty with the commits above); KosmicKrisp unchanged (same pin and patches). `kosmickrisp/EXPECTED_TREE` now holds the
+  tree that the BUILDING.md command prints (without the stamp file; the v1.1 value included the stamp that patch 0002
+  creates, so the documented comparison could not match).
+- **Opt-in memory and GPU switches (Kyty, all off by default):** `KYTY_MEMTRIM_BIG_WIDTH=<n>` (dedicated Metal heaps
+  for render targets at least n pixels wide, so retiring one returns its memory; use 2400 with
+  `KYTY_BDA_PAGETABLE_MB=64`), `KYTY_DEPTH_FEEDBACK_USAGE=0` (depth images without the feedback-loop usage, so
+  KosmicKrisp keeps lossless depth compression, about -2 ms per frame), and experimental `KYTY_MEMTRIM_STALE_FRAMES`,
+  `KYTY_MEMTRIM_ALIAS_FRAMES`, `KYTY_VMA_BLOCK_MB`. `KYTY_TEX_MIP_SKIP` (in Kyty since v1.0.3; the ASTRO BOT profile
+  uses 2 on 16 GB Macs) is now documented. README: "Memory and GPU options".
+- `docs/env_switches.tsv`: the new emitter switches (`KYTY_MSL_KK_BLEND`, `KYTY_MSL_GFX_MATH`, `KYTY_MSL_GFX_FTZ`,
+  `KYTY_MSL_VS_SINGLE_LANE`, `KYTY_MSL_PERM_CURSOR`) and the missing `KYTY_FLIGHTREC_DIR` row for `nps5 run`.
+
 ## v1.1 (2026-11-18)
 
 Everything in v1.0.3, plus our own Metal compute kernels and the selective buffer-collector settle on by default. Needs a

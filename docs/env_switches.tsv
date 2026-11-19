@@ -1040,6 +1040,7 @@ KYTY_DEFER_PROTECTS_WINDOW_AUDIT	kyty		src/graphics/host_gpu/pageManager.cpp
 KYTY_DEFER_UNPROTECT	kyty		src/graphics/host_gpu/pageManager.cpp
 KYTY_DEPTH_FEEDBACK_KEEP	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_FEEDBACK_LAZY	kyty		src/graphics/host_gpu/renderer/context.cpp
+KYTY_DEPTH_FEEDBACK_USAGE	kyty	`0` creates depth images without the attachment feedback-loop usage, so KosmicKrisp keeps Metal lossless depth compression (about -2 ms/frame in ASTRO BOT); default 1 = as before; opt-in	src/graphics/host_gpu/renderer/image/image.cpp
 KYTY_DEPTH_LAYOUT_STABLE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_RO_STORE_NONE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DESCRIPTOR_OFFSET_AUDIT	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1168,6 +1169,7 @@ KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
 KYTY_FLIGHTREC	kyty	flight recorder (v1.1; compiled in, OFF unless set): 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); unset or 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
 KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
 KYTY_FLIGHTREC_DIR	kyty	folder of flight-recorder dumps; nps5 run sets <run dir>/flightrec; default ./flightrec	src/common/flightRec.cpp
+KYTY_FLIGHTREC_DIR	nativeps5	set by nps5 run: the flight recorder writes its dumps into the run folder (only when KYTY_FLIGHTREC=1)	scripts/nps5lib/run.py
 KYTY_FLIGHTREC_EXIT	kyty	0 = no dump at process exit; default 1	src/common/flightRec.cpp
 KYTY_FLIGHTREC_HASH_KB	kyty	keyed draws: KiB of each bound guest range that are hashed; default 1024	src/graphics/host_gpu/renderer/flightRecDraw.cpp
 KYTY_FLIGHTREC_KEYS	kyty	comma list of shader hash prefixes whose draws record their full inputs (diagnostic)	src/graphics/host_gpu/renderer/flightRecDraw.cpp
@@ -1347,6 +1349,10 @@ KYTY_LOOP_GUARD	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LOOP_GUARD_SHADERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MAD_MODE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MEMLOG	kyty	1 = a 1 Hz [mem] line (footprint, resident, compressed, swap, guest direct memory) and [slowframe] lines on stderr	src/graphics/presentation/window/swapchain.cpp
+KYTY_MEMTRIM_ALIAS_FRAMES	kyty	`<n>`: free an image unused for n frames whose range a newer GPU-written image at the same address covers; default 0 = off; experimental	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_MEMTRIM_BIG_WIDTH	kyty	`<n>`: render/depth/storage images at least n pixels wide get their own Metal heap (dedicated allocation), so retiring one returns its memory; default 0 = off; 2400 covers the off-resolution targets; opt-in (with KYTY_BDA_PAGETABLE_MB=64)	src/graphics/host_gpu/vma.cpp
+KYTY_MEMTRIM_STALE_FRAMES	kyty	`<n>`: free a GPU-written image unused for n presented frames (a tiled one loses its contents: logged as [memtrim] resurrect); default 0 = off; experimental	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_MEMTRIM_STALE_MIN_WIDTH	kyty	smallest width an image needs for KYTY_MEMTRIM_STALE_FRAMES; experimental	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_MESH_OUTPUT_GUARD	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_MESH_RESTART	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_MESH_RESTART	nativeps5		titles/kyty-preset.env
@@ -1381,7 +1387,11 @@ KYTY_MSL_DEBUG	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_DUMP_NOFORK	kyty		tools/msl-dump/kytyMslDump.cpp
 KYTY_MSL_F16_RTZ_INT	kyty	1 = integer f32->f16 round-toward-zero helper in compute kernels too (default: graphics stages only; the verified compute text keeps the old helper)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_FORCE_DISPATCHER	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_GFX_FTZ	kyty	MSL back end, graphics: flush denormal inputs of transcendental ops as KosmicKrisp does (default on; 0 = old text)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_GFX_MATH	kyty	MSL back end, pixel shaders: KosmicKrisp's float model (default; =safe restores the strict v1.1 text)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_INVARIANT	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_BLEND	kyty	set by metal.py for kyty_msl_dump: KosmicKrisp in-shader blend + write mask per colour attachment (en:sc:dc:co:sa:da:ao:wm:class:components;...)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_BLEND	nativeps5	set by metal.py for kyty_msl_dump: the blend column of games/<id>/metal-gfx-pairs.tsv (format 2)	scripts/nps5lib/metal.py
 KYTY_MSL_KK_COLOR_MASK	kyty	set by metal.py for kyty_msl_dump: bit i = colour attachment i exists (graphics pair generation)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_KK_COLOR_MASK	nativeps5	set by metal.py for kyty_msl_dump: bit i = colour attachment i exists (graphics pair generation)	scripts/nps5lib/metal.py
 KYTY_MSL_KK_PS_ADCE	kyty	1 = drop fragment-shader instructions whose only reads are dead (opt-in, off; not used by the verified pairs)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
@@ -1398,7 +1408,9 @@ KYTY_MSL_LDS_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.c
 KYTY_MSL_LOOP_CAP	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_MIPSTATS_PLAIN	kyty	1 = emit the fragment shader without the LOD-feedback (MipStats) buffer (the "twin" variant in metal-gfx-pairs.tsv); set by metal.py	src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
 KYTY_MSL_MIPSTATS_PLAIN	nativeps5	1 = emit the fragment shader without the LOD-feedback (MipStats) buffer (the "twin" variant in metal-gfx-pairs.tsv); set by metal.py	scripts/nps5lib/metal.py
+KYTY_MSL_PERM_CURSOR	kyty	kyty_msl_dump: 0 = compile graphics permutations at push-data cursor 0 (old); default uses the cursor stored in programs.bin	tools/msl-dump/kytyMslDump.cpp
 KYTY_MSL_VOTE_MERGE	kyty	MSL back end: wave64 halves take one subgroup vote (default 1; 0 = the per-half votes)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_VS_SINGLE_LANE	kyty	MSL back end, vertex stage: single-lane subgroup semantics like Kyty SPIR-V on KosmicKrisp (default on; 0 = old)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAITCNT_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAVE64	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MUTEX_HANDOFF_US	kyty		src/kernel/pthread.cpp
@@ -1745,7 +1757,7 @@ KYTY_TEXTURE_SPARSE_RESIDENCY	kyty		src/graphics/presentation/window/vulkanWindo
 KYTY_TEXTURE_SPARSE_RESIDENCY	nativeps5		titles/kyty-preset.env
 KYTY_TEXTURE_STAGING_MB	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEXTURE_STAGING_REBAR	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
-KYTY_TEX_MIP_SKIP	kyty	`1|2|3` floors the first mip level of large sampled 2D textures; needs KYTY_TEXTURE_RESIDENT_TRIM=1; built, not measured in a title	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_TEX_MIP_SKIP	kyty	`1|2|3` floors the first mip level of large sampled 2D textures; needs KYTY_TEXTURE_RESIDENT_TRIM=1; ASTRO BOT Sky Garden with 2: texture memory 1889 -> 222 MiB (finer detail lost on large textures); opt-in	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TEX_MIP_SKIP	nativeps5		tests/test_hw.py
 KYTY_TEX_MIP_SKIP_MIN	kyty	smallest longest side (texels) a texture needs for KYTY_TEX_MIP_SKIP; default 1024	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_TILER_CLEAR_SCRATCH	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
@@ -1788,6 +1800,7 @@ KYTY_VCACHE_PLACEMENT	kyty		src/common/cpuPlacement.cpp
 KYTY_VCACHE_SETTLE_MS	kyty		src/common/cpuPlacement.cpp
 KYTY_VEH_FIRST	kyty		src/loader/runtimeLinker.cpp
 KYTY_VERTEX_FAILURE_DUMP	kyty		src/graphics/shader/shader.cpp
+KYTY_VMA_BLOCK_MB	kyty	`<n>` (8..1024): VMA block size for large heaps (each block is one Metal heap committed whole); default 0 = VMA 256 MiB; experimental	src/graphics/host_gpu/vma.cpp
 KYTY_VMA_BUDGET_CACHE_MS	kyty		src/graphics/host_gpu/vma.cpp
 KYTY_VOLATILE_LOADS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_VRAM_BUDGET_MB	kyty	GPU memory budget of the back end; canonical 6144 on a 24 GB Mac	src/graphics/host_gpu/vma.cpp

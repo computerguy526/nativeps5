@@ -17,7 +17,8 @@ KK keeps its own pipeline when a replacement fails to compile.
 Graphics: games/<id>/metal-gfx-pairs.tsv lists verified (vertex, fragment) PAIRS the same way (hashes of the programs, of
 KosmicKrisp's two MSL texts and of ours, plus the numeric layout words the emitter needs). For each pair this module generates the
 fragment text, then the vertex text linked to the fragment's reads and to KosmicKrisp's own vertex text (read from this cache's
-kk-libcache/msl, written by pass 1), and keeps BOTH files only when both sha256 equal the list's. They go to
+kk-libcache/msl, written by pass 1; a copy is kept in <cache dir>/kk-vs-keep because a later prepare loads metallibs and
+KosmicKrisp then writes no text), and keeps BOTH files only when both sha256 equal the list's. They go to
 <cache dir>/metal-shaders/<kk_vs>_<kk_fs>.vs.metal / .fs.metal; KosmicKrisp swaps a pipeline only when its two keys match a pair.
 
 Switches: NPS5_METAL_SHADERS=0 turns the feature off (no generation, no KK_MSL_OVERRIDE_DIR at launch).
@@ -31,9 +32,16 @@ LIST_NAME = "metal-shaders.tsv"
 OUT_NAME = "metal-shaders"
 GFX_LIST_NAME = "metal-gfx-pairs.tsv"
 GFX_INDEX = "index-gfx.tsv"
-GFX_FORMAT = ("nps5-metal-gfx-pairs", "1")
-GFX_ROW_RE = re.compile(r"^gfx\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64})\t([0-9a-f]{64})"
-                        r"\t(mipstats|twin)\t([0-9:,]*)\t([0-9:,]*)\t(\d+)\t([a-z0-9_+,.-]*)$")
+GFX_FORMAT = ("nps5-metal-gfx-pairs", "2")
+GFX_FORMATS = ("1", "2")   # 2 (v1.1.1) adds the blend column before the evidence: KosmicKrisp blends in the fragment shader
+GFX_COLS = ("vs", "vs_spec", "ps", "ps_spec", "kk_vs", "kk_fs", "b_vs", "b_fs", "variant", "set0", "va", "cmask")
+_GFX_HEAD = (r"^gfx\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64})\t([0-9a-f]{64})"
+             r"\t(mipstats|twin)\t([0-9:,]*)\t([0-9:,]*)\t(\d+)")
+# format 2: a spec field may carry the record's push-data cursor, <spec key>:<cursor> (see read_perms)
+_GFX_HEAD2 = _GFX_HEAD.replace(r"\t([0-9a-f]{16})\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})", r"\t([0-9a-f]{16}(?::\d{1,4})?)\t([0-9a-f]{32})\t([0-9a-f]{16}(?::\d{1,4})?)\t([0-9a-f]{16})", 1)
+GFX_ROW_RE = re.compile(_GFX_HEAD + r"\t([a-z0-9_+,.-]*)$")                        # format 1
+_BLEND_RT = r"(?:\d{1,3}:){8}[fusix]:\d"                                        # en:sc:dc:co:sa:da:ao:wm:class:components
+GFX_ROW2_RE = re.compile(_GFX_HEAD2 + r"\t((?:%s(?:;%s){0,7})?)\t([a-z0-9_+,.-]*)$" % (_BLEND_RT, _BLEND_RT))       # format 2: ... cmask blend evidence
 ROW_RE = re.compile(r"^([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64})\t(\d+x\d+x\d+)\t([a-z0-9_,]*)$")
 HEADER = "// kk-mslinject v1 local_size "
 KPRC = 0x4352504B
@@ -78,9 +86,11 @@ def spec_key(spec):
     return hashlib.sha256(spec).hexdigest()[:16]
 
 
-def read_perms(path):
+def read_perms(path, cursors=False):
     """Kyty's program cache (<id>.programs.bin): -> {(program digest hex, spec key): permutation index}. The index counts every
-    record that is not a source record (kind 1), as kyty_msl_dump --perm does. The first record of a key wins."""
+    record that is not a source record (kind 1), as kyty_msl_dump --perm does. The first record of a key wins.
+    cursors=True also keys (digest, spec key, push-data cursor): records of one program and specialization can differ only in the cursor (u32
+    at record offset 16, where the stage's user data starts in the push block), which changes a graphics stage's text."""
     with open(path, "rb") as f:
         d = f.read()
     out = {}
@@ -101,7 +111,10 @@ def read_perms(path):
             if size >= 24:
                 sl = struct.unpack_from("<I", d, p + 20)[0]
                 if p + 24 + sl <= p + size:
-                    out.setdefault((d[p:p + 16].hex(), spec_key(d[p + 24:p + 24 + sl])), idx)
+                    k = (d[p:p + 16].hex(), spec_key(d[p + 24:p + 24 + sl]))
+                    out.setdefault(k, idx)
+                    if cursors:
+                        out.setdefault(k + (struct.unpack_from("<I", d, p + 16)[0],), idx)
             idx += 1
         off = p + size
     return out
@@ -257,7 +270,8 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
     for _, why in bad:
         reasons[why] = reasons.get(why, 0) + 1
     nseen = None if seen is None else len({r["kk"] for r in rows} & set(seen))
-    return dict(listed=len({r["kk"] for r in rows}), written=len(ok), skipped=len(bad), seen=nseen, reasons=reasons, list_sha=list_sha, reused=reused[0])
+    return dict(listed=len({r["kk"] for r in rows}), written=len(ok), skipped=len(bad), seen=nseen, reasons=reasons, list_sha=list_sha, reused=reused[0],
+                emitter=meta.get("emitter", ()))
 
 
 def summary(st):
@@ -337,9 +351,13 @@ def blake3_64(data):
 
 # ---------------------------------------------------------------- graphics pairs (vertex + fragment)
 def parse_gfx_list(text):
-    """-> (meta dict, rows). Row: dict(vs, vs_spec, ps, ps_spec, kk_vs, kk_fs, b_vs, b_fs, variant, set0, va, cmask, evidence).
-    Raises MetalError on a malformed line or on one (kk_vs, kk_fs) pair listed with different texts."""
+    """-> (meta dict, rows). Row: dict(vs, vs_spec, ps, ps_spec, kk_vs, kk_fs, b_vs, b_fs, variant, set0, va, cmask, blend, evidence)
+    (blend is '' in a format-1 list). Raises MetalError on a malformed line or on one (kk_vs, kk_fs) pair listed with different texts."""
     meta, rows, seen = {}, [], {}
+    fmt = next((ln.split("\t") for ln in text.splitlines() if ln.startswith("format\t")), [])
+    if fmt[1:2] != [GFX_FORMAT[0]] or len(fmt) < 3 or fmt[2] not in GFX_FORMATS:
+        raise MetalError("%s: missing or unknown `format` line (want %s %s)" % (GFX_LIST_NAME, GFX_FORMAT[0], " or ".join(GFX_FORMATS)), 2)
+    v2 = fmt[2] == "2"
     for n, line in enumerate(text.splitlines(), 1):
         if not line.strip() or line.startswith("#"):
             continue
@@ -347,15 +365,14 @@ def parse_gfx_list(text):
         if f[0] in ("format", "title", "emitter"):
             meta[f[0]] = tuple(f[1:])
             continue
-        m = GFX_ROW_RE.match(line)
+        m = (GFX_ROW2_RE if v2 else GFX_ROW_RE).match(line)
         if not m:
             raise MetalError("%s line %d: not a pair row" % (GFX_LIST_NAME, n), 2)
-        r = dict(zip(("vs", "vs_spec", "ps", "ps_spec", "kk_vs", "kk_fs", "b_vs", "b_fs", "variant", "set0", "va", "cmask", "evidence"), m.groups()))
+        g = m.groups()
+        r = dict(zip(GFX_COLS, g[:12]), blend=g[12] if v2 else "", evidence=g[-1])
         if seen.setdefault((r["kk_vs"], r["kk_fs"]), (r["b_vs"], r["b_fs"])) != (r["b_vs"], r["b_fs"]):
             raise MetalError("%s line %d: pair %s_%s listed twice with different texts" % (GFX_LIST_NAME, n, r["kk_vs"], r["kk_fs"]), 2)
         rows.append(r)
-    if meta.get("format", ())[:2] != GFX_FORMAT:
-        raise MetalError("%s: missing or unknown `format` line (want %s)" % (GFX_LIST_NAME, " ".join(GFX_FORMAT)), 2)
     return meta, rows
 
 
@@ -465,12 +482,20 @@ def gfx_env(base, r, vs_outs):
     e["KYTY_MSL_KK_VS_OUTS"] = vs_outs
     if r["variant"] == "twin":
         e["KYTY_MSL_MIPSTATS_PLAIN"] = "1"
+    if r.get("blend"):                                 # KosmicKrisp's in-shader blend + write mask per colour attachment (format 2)
+        e["KYTY_MSL_KK_BLEND"] = r["blend"]
     return e
+
+
+def perm_key(digest, spec):
+    """A row's (digest, spec[:cursor]) -> the read_perms key."""
+    s, _, c = spec.partition(":")
+    return (digest, s, int(c)) if c else (digest, s)
 
 
 def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gfx):
     """-> (None, (vs_part, fs_part)) when both texts equal the verified ones, else (reason, None)."""
-    vi, pi = perms.get((r["vs"], r["vs_spec"])), perms.get((r["ps"], r["ps_spec"]))
+    vi, pi = perms.get(perm_key(r["vs"], r["vs_spec"])), perms.get(perm_key(r["ps"], r["ps_spec"]))
     if vi is None or pi is None:
         return "not in programs.bin", None
     try:
@@ -509,22 +534,38 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
     return None, (vs_out, ps_out)
 
 
+KK_VS_KEEP = "kk-vs-keep"
+
+
 def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None):
     """Add <kk_vs>_<kk_fs>.vs.metal/.fs.metal to out_dir (created if needed; call after generate(), which replaces the directory)
     plus index-gfx.tsv/skipped-gfx.tsv. -> dict(listed, written, skipped, reasons, list_sha)."""
     out = out or sys.stdout
     with open(list_path) as f:
         text = f.read()
-    _meta, rows = parse_gfx_list(text)
+    meta, rows = parse_gfx_list(text)
     list_sha = hashlib.sha256(text.encode()).hexdigest()
     tool = tool_path(environ)
     if not tool:
         raise MetalError("no kyty_msl_dump (build it with scripts/build.sh, or set NPS5_MSL_TOOL)")
     if not os.path.isfile(programs):
         raise MetalError("no %s (prepare the cache first)" % programs)
-    perms = read_perms(programs)
+    perms = read_perms(programs, cursors=True)
     env = clean_env(environ)
-    kkv = find_kk_vertex(kk_msl_dir, {r["kk_vs"] for r in rows}, lens)
+    # KosmicKrisp writes its vertex MSL to kk-libcache/msl only when it compiles a shader; a later prepare LOADS the metallibs, so
+    # the texts are gone and every pair would be dropped. Keep a copy of each needed vertex text next to the output dir
+    # (<cache dir>/kk-vs-keep/<kk key>.metal, local like the rest of the cache); the sha256 check of our texts still decides.
+    keep = os.path.join(os.path.dirname(os.path.abspath(out_dir)), KK_VS_KEEP)
+    wanted = {r["kk_vs"] for r in rows}
+    kkv = {k: os.path.join(keep, k + ".metal") for k in wanted if os.path.isfile(os.path.join(keep, k + ".metal"))}
+    found = find_kk_vertex(kk_msl_dir, wanted - set(kkv), lens) if wanted - set(kkv) else {}
+    if found:
+        os.makedirs(keep, exist_ok=True)
+        for k, src in found.items():
+            dst = os.path.join(keep, k + ".metal")
+            shutil.copyfile(src, dst + ".tmp")
+            os.replace(dst + ".tmp", dst)
+            kkv[k] = dst
     os.makedirs(out_dir, exist_ok=True)
     for fn in os.listdir(out_dir):                     # a pair set of another list is never left behind
         if fn.endswith((".vs.metal", ".fs.metal")) or fn in (GFX_INDEX, "skipped-gfx.tsv"):
@@ -564,7 +605,30 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
     reasons = {}
     for _, why in bad:
         reasons[why] = reasons.get(why, 0) + 1
-    return dict(listed=len(rows), written=len(ok), skipped=len(bad), reasons=reasons, list_sha=list_sha)
+    return dict(listed=len(rows), written=len(ok), skipped=len(bad), reasons=reasons, list_sha=list_sha, emitter=meta.get("emitter", ()))
+
+
+TEXT_DIFFERS = ("text differs from the verified kernel", "text differs from the verified pair")
+
+
+def emitter_problem(st, kyty_commit):
+    """-> a message when a list's texts were not reproduced (sha256 mismatch) and why, else None. The list's `emitter` line names
+    the Kyty commit (and release tag) its hashes were made with; components.lock pins the same commit. A different Kyty is the usual
+    cause: rebuild the pinned one."""
+    n = sum(v for k, v in (st or {}).get("reasons", {}).items() if k in TEXT_DIFFERS)
+    if not n:
+        return None
+    em = tuple(st.get("emitter") or ())
+    want = em[0] if em else ""
+    tag = " (%s)" % em[1] if len(em) > 1 else ""
+    have = kyty_commit if kyty_commit and kyty_commit != "unknown" else ""
+    if want and have and not (have.startswith(want) or want.startswith(have)):
+        return ("%d shader(s) differ from the verified texts: the list was made with Kyty %s%s, your kyty_msl_dump is from Kyty %s. "
+                "Use the pinned components (scripts/fetch-components.sh, then scripts/build.sh kyty)" % (n, want[:12], tag, have[:12]))
+    if want and have:
+        return ("%d shader(s) differ from the verified texts although Kyty is the listed %s%s (another compiler or macOS SDK?): "
+                "please report it with `nps5 bugreport`" % (n, want[:12], tag))
+    return "%d shader(s) differ from the verified texts (Kyty commit unknown: is NPS5_KYTY_DIR the pinned checkout?)" % n
 
 
 def gfx_summary(st):

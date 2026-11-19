@@ -148,8 +148,14 @@ fragment MSL), a second render pipeline is built from the same descriptor, and a
 present (compute stays `<b3>.metal`). The list is `games/<id>/metal-gfx-pairs.tsv` (hashes plus the layout numbers the
 emitter needs: descriptor offsets, vertex attributes, colour mask); `metal.generate_gfx` emits the fragment text, then the
 vertex text linked to the fragment's reads and to KosmicKrisp's vertex text (found in the cache's `kk-libcache/msl` by its
-BLAKE3 key), and keeps both only when their sha256 equal the list's. In v1.1 the ASTRO BOT list has no pair rows (none
-verified yet): a header-only list skips the graphics step.
+BLAKE3 key), and keeps both only when their sha256 equal the list's. v1.1 shipped a header-only ASTRO BOT list; v1.1.1
+lists 31 pairs (format 2: blend column for KosmicKrisp's in-shader blend, `<spec>:<cursor>` = the exact program record when
+records of one program and specialization differ only in the push-data cursor). The emitter changes these texts depend on
+(raw-vertex unpack, KosmicKrisp's pixel float model, in-shader blend + write mask, dword-aligned buffer bases, the stored
+push-data cursor, IMAGE_SAMPLE_D bias, single-lane vertex stage, per-dword bounds for a partly out-of-range raw
+vector access) are in the Kyty fork's v1.1.1; a pair is listed only when it passed the GPU differential test on every
+pipeline that has its two KosmicKrisp keys; the 68 compute kernels are
+byte-identical to v1.1.
 Ballots and votes use `simd_or` of lane bits (an `if`-converted `simd_ballot` sees all lanes on macOS 26), and LDS reads
 after LDS writes without a barrier get a simdgroup fence (Apple GPUs do not run 32 lanes in lockstep).
 

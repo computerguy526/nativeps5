@@ -13,7 +13,7 @@ It is not an emulator: there is no JIT and no interpreter. Nothing from any game
 - **Speed (v1.0.3, MetalFX 720p default, MacBook Pro M4 Pro):** world map about 30 fps (25.6 fps in v1.0 at native 1080p), about 38 fps at the crash site after the landing (median of the game's own frame-rate readings over a playtest). v1.0.3 also: `hoover_beach` 27.0 fps, Sky Garden 14.6 fps (one run each). **v1.1:** Sky Garden about 17 fps (our Metal compute kernels about +11 %, the selective buffer-collector settle about +1 fps more). v1.0 at native 1080p on the same Mac: `hoover_beach` about 20 fps, Sky Garden about 13-16 fps. The GPU back end is the limit and is being worked on. For native 1080p set `NPS5_ASTRO_UPSCALING=off` (or pick off in the settings dialog).
 - **MetalFX 720p upscaling is the default:** the 3D scene renders at 1280x720 and Apple MetalFX (spatial) scales it up; menus and text stay sharp, and v1.0.3 fixes the blocky squares on dust, glass and particles (the light-tile grid now follows the render size). Spatial MetalFX has no anti-aliasing of its own, so edges look more jagged than at native 1080p. For native 1080p set `NPS5_ASTRO_UPSCALING=off`; for 900p set `NPS5_ASTRO_UPSCALING=metalfx900` (or use the settings dialog).
 - **Shaders:** a cache prepare step builds the game's shaders before the first run; it can take several minutes and shows its progress in the terminal only. The first visit to a level that is not in the shipped shader list may still compile some shaders (short stutters).
-- **Our own Metal shaders (v1.1):** 68 of ASTRO BOT's compute kernels run as Metal code translated directly from the PS5 shaders instead of going through KosmicKrisp's SPIR-V path. The kernels are generated on your Mac from your own dump during `nps5 cache prepare` (the repository holds only a list of hashes of the verified kernels) and only when they match the verified ones byte for byte; anything else keeps KosmicKrisp's kernel. Opt out with `NPS5_METAL_SHADERS=0`. Graphics (vertex+fragment) shaders all stay KosmicKrisp's in v1.1 (the mechanism is there, the verified list is empty). Fast math stays off.
+- **Our own Metal shaders (v1.1):** 68 of ASTRO BOT's compute kernels run as Metal code translated directly from the PS5 shaders instead of going through KosmicKrisp's SPIR-V path. The kernels are generated on your Mac from your own dump during `nps5 cache prepare` (the repository holds only a list of hashes of the verified kernels) and only when they match the verified ones byte for byte; anything else keeps KosmicKrisp's kernel. Opt out with `NPS5_METAL_SHADERS=0`. Since v1.1.1 also 53 verified graphics (vertex+fragment) pairs, generated and checked the same way. Fast math stays off.
 - **Buffer collector (v1.1):** the selective settle (`KYTY_GC_SETTLE_SELECTIVE`) is on by default; `KYTY_GC_SETTLE_SELECTIVE=0` restores the v1.0.3 behaviour.
 - **Saves:** fixed in v1.0.1: a save could crash the game on load (the save-data transfer mount opened the game's own save). Saves are still early-preview data: keep a backup of your save folder.
 - **Crashes:** the world-map bus error (SIGBUS) that ended about 9 % of world-map runs during development (3 of about 35) is fixed: a file read into guest memory failed with EFAULT, and the read retry that fixes it has been in every release since v1.0.0 (0 of 50 title-to-world-map runs since; v1.0.2 extends it to `readv` and `fread`). Closing the window exits at once; since v1.0.3 it first writes the Vulkan driver pipeline cache (up to about 3 s).
@@ -116,6 +116,18 @@ something goes wrong (GPU watchdog, a frame or present stall over 2 s, the memor
 ids, sizes, hashes and timings, no game bytes and no paths. `nps5 run` puts it in `<run dir>/flightrec` as `<tag>.<n>.<why>.flightrec`
 (otherwise `./flightrec`); the run logs are in the same run folder (`run.err`, `run.summary.txt`). Attach the `.flightrec` file and
 the `nps5 bug-report` zip to your issue, or send them to us; we decode them ourselves. `KYTY_MEMLOG=1` adds a once-a-second memory line.
+
+### Memory and GPU options (off by default, v1.1.1)
+
+Opt-in Kyty switches for Macs short on memory; pass them with `nps5 run --env NAME=VALUE` or the `ENV=` line of
+`titles/<id>.env`. Each is off unless you set it.
+- `KYTY_BDA_PAGETABLE_MB=64` with `KYTY_MEMTRIM_BIG_WIDTH=2400`: a smaller GPU address table, and the large off-resolution
+  render targets get their own Metal heap so their memory goes back to the system when they are retired.
+- `KYTY_TEX_MIP_SKIP=1` or `2` (needs `KYTY_TEXTURE_RESIDENT_TRIM=1`, which the ASTRO BOT profile sets): drops the
+  finest mip level(s) of large textures; in Sky Garden texture memory fell from about 1.9 GB to 0.2 GB with `2`, at the
+  cost of texture detail. The ASTRO BOT profile already uses `2` on Macs with 16 GB or less.
+- `KYTY_DEPTH_FEEDBACK_USAGE=0`: lets KosmicKrisp keep Metal's lossless depth compression (about 2 ms per frame faster in
+  ASTRO BOT).
 
 ## For developers
 

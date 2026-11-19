@@ -78,15 +78,35 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
-                 "metal-shaders.tsv", "metal-gfx-pairs.tsv"}
+                 "metal-shaders.tsv", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,]{0,32}$")
 # games/<title id>/metal-gfx-pairs.tsv: the same for (vertex, fragment) pairs. Hashes plus three short number fields (descriptor
 # offsets binding:offset, vertex attributes loc:binding:format, colour mask) that the emitter needs; no shader text.
-METAL_GFX_ROW_RE = re.compile(rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t[0-9a-f]{64}"
-                              rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}\t[a-z0-9_+,.-]{0,48}$")
-METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-(?:keys|gfx-pairs)\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40})$")
+# Format 2 (v1.1.1): a spec key may carry the record's push-data cursor (:n), and a blend column (per colour attachment
+# en:sc:dc:co:sa:da:ao:wm:class:components, ';'-joined: numbers and one class letter) comes before the evidence.
+METAL_GFX_ROW_RE = re.compile(rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t[0-9a-f]{64}"
+                              rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}(?:\t(?:\d{1,3}:){8}[fusix]:\d(?:;(?:\d{1,3}:){8}[fusix]:\d){0,7}|\t)?\t[a-z0-9_+,.-]{0,48}$")
+METAL_GFX_OK_LINE = b"result=verify: hashes and layout numbers only, no shader text"
+
+
+def check_gfx_record(data, record):
+    """A metal-gfx-pairs.tsv with pair rows needs its .verified record (proof record, as pipelines.kyplst.verified): the list's
+    sha256 and the result line. -> reasons."""
+    if not any(line.startswith(b"gfx\t") for line in data.split(b"\n")):
+        return []
+    if not record:
+        return ["a graphics pairs list with rows needs its metal-gfx-pairs.tsv.verified record"]
+    lines = record.split(b"\n")
+    if ("sha256=" + hashlib.sha256(data).hexdigest()).encode() not in lines:
+        return ["metal-gfx-pairs.tsv.verified is for another version of the list (sha256 differs)"]
+    if METAL_GFX_OK_LINE not in lines:
+        return ["metal-gfx-pairs.tsv.verified lacks the result line"]
+    return []
+
+
+METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-(?:keys|gfx-pairs)\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40}(?:\tv\d+\.\d+(?:\.\d+)?)?)$")
 
 
 def check_metal_keys(data, gfx=False):
@@ -440,6 +460,13 @@ class Check:
         if profile and profile.group(2) in ("metal-shaders.tsv", "metal-gfx-pairs.tsv"):
             for why in check_metal_keys(data, profile.group(2) == "metal-gfx-pairs.tsv"):
                 F(f": {why}")
+            if profile.group(2) == "metal-gfx-pairs.tsv":
+                for why in check_gfx_record(data, sibling(path + ".verified")):
+                    F(f": {why}")
+            return
+        if profile and profile.group(2) == "metal-gfx-pairs.tsv.verified":
+            if not data.startswith(b"#") or b"\0" in data or len(data) > 4096:
+                F(": a .verified record is a short text file")
             return
         if ext == "kyplst":
             for why in check_kyplst(path, data, sibling(path + ".verified")):
@@ -532,6 +559,15 @@ def selftest():
              b"0" * 32 + b"\t" + b"1" * 16 + b"\t" + b"2" * 16 + b"\t" + b"3" * 64 + b"\t64x1x1\texact\n",
              "games/PPSA00000/metal-gfx-pairs.tsv": b"# pairs\nformat\tnps5-metal-gfx-pairs\t1\ntitle\tPPSA00000\t01.000.000\n" + b"gfx\t" + b"0" * 32 + b"\t" + b"1" * 16 + b"\t" +
              b"2" * 32 + b"\t" + b"3" * 16 + b"\t" + b"4" * 16 + b"\t" + b"5" * 16 + b"\t" + b"6" * 64 + b"\t" + b"7" * 64 + b"\ttwin\t0:0,58:16\t0:0:109\t1\texact\n"}
+    gfx2 = (b"# pairs v2\nformat\tnps5-metal-gfx-pairs\t2\ntitle\tPPSA00000\t01.000.000\nemitter\t" + b"a" * 40 + b"\tv1.1.1\ngfx\t" + b"0" * 32 + b"\t" +
+            b"1" * 16 + b":5\t" + b"2" * 32 + b"\t" + b"3" * 16 + b":0\t" + b"4" * 16 + b"\t" + b"5" * 16 + b"\t" + b"6" * 64 + b"\t" + b"7" * 64 +
+            b"\tmipstats\t0:0,58:16\t\t1\t1:1:6:0:1:0:0:7:f:4\tfuzz2+mutant+play2\n")
+    clean["games/PPSA00002/metal-gfx-pairs.tsv"] = gfx2                     # format 2 (cursor, blend) with its proof record
+    clean["games/PPSA00002/metal-gfx-pairs.tsv.verified"] = (b"# proof\nsha256=" + hashlib.sha256(gfx2).hexdigest().encode() + b"\n" +
+                                                             METAL_GFX_OK_LINE + b"\n")
+    g1 = clean["games/PPSA00000/metal-gfx-pairs.tsv"]
+    clean["games/PPSA00000/metal-gfx-pairs.tsv.verified"] = b"# proof\nsha256=" + hashlib.sha256(g1).hexdigest().encode() + b"\n" + METAL_GFX_OK_LINE + b"\n"
+    planted["games/PPSA00003/metal-gfx-pairs.tsv"] = gfx2                   # pair rows without the proof record
     with tempfile.TemporaryDirectory() as d:
         git("init", "-q", cwd=d)
         for k, v in {**planted, **clean}.items():
