@@ -14,7 +14,8 @@ their `emitter` line names the v1.1.2 Kyty.
   ray-tracing kernel ran a burst over a BVH that was not built yet at level entry (Sky Garden: up to 784k lanes running to
   the 8192-test node budget, a 0.6-1.2 s GPU stall and, by correlation, the GPU watchdog stops seen at level entry). The
   hold skips those dispatches for 5 s after a level opens (the runtime's level phase, so also on a direct level boot) and
-  while the game reads files at >= 48 MB/s (+1.5 s), at most 30 s at a time (`KYTY_RT_LOAD_HOLD_PHASE=0`: file reads
+  while the game reads files at >= 48 MB/s (+1.5 s), at most 60 s counted from the last level open (a 30 s budget
+  that started with the hub load ran out during the next level's load in play and the GPU watchdog ended the session) (`KYTY_RT_LOAD_HOLD_PHASE=0`: file reads
   only); the guard skips them for 0.5-8 s after a dispatch exhausted at least 1024 lanes. In play (file-read trigger):
   0 budget exhaustions, 0 guard trips, level-entry command-buffer time shifts 99-246 ms instead of 632 ms; the lighting the kernel feeds catches up a moment later. Unit test `rt_budget_guard_tests`.
 - **Quiet cache saves during level loads** (Kyty `KYTY_SAVE_LOAD_QUIET_S=20`; KosmicKrisp `KK_PIPELINE_ARCHIVE_FLUSH_N=4096`
@@ -25,7 +26,8 @@ their `emitter` line names the v1.1.2 Kyty.
   timing.
 - **Display-aware frame cap** (Kyty `KYTY_FPS_LIMIT_MILLI=auto`, new fractional `KYTY_FPS_LIMIT_MILLI=<fps>`): on a fixed
   refresh display of R Hz the cap is R/n (n >= 2, from the frame rate the game holds: steps down after 2 s, probes up
-  after 5 s with back-off), none on adaptive (ProMotion) displays; presents stay immediate. Logged as `[autocap] ...`.
+  after 5 s with back-off, headroom judged from the frames' GPU work time), never below 30 fps (`KYTY_FPS_AUTOCAP_MIN`;
+  below it the game runs uncapped: a 75 Hz monitor had stepped down to 15 fps), none on adaptive (ProMotion) displays; presents stay immediate. Logged as `[autocap] ...`.
   Unit test `tests/AutoCapTests.cpp`.
 - **Learned fault classes** (Kyty `KYTY_FAULT_CLASS=1`, `KYTY_CLEAN_PAGE=1`): a guest page the CPU read-faults in 3 guest
   frames becomes read-open (no fault, no burst wait; bytes up to ~3 frames old, as served loads already returned); a page

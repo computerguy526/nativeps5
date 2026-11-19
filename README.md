@@ -133,8 +133,8 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   Kyty's caches are still saved). Off: `KYTY_SAVE_LOAD_QUIET_S=0`, and `KK_PIPELINE_ARCHIVE_FLUSH_N=32
   KK_PIPELINE_ARCHIVE_FLUSH_S=10` for the old archive timing. `nps5 cache prepare` always uses the old timing.
 - **Display-aware frame cap** (`KYTY_FPS_LIMIT_MILLI=auto`): on a fixed-refresh display of R Hz the game is capped at R/n
-  (n >= 2, picked from the frame rate it holds, e.g. 37.5 fps on a 75 Hz monitor); on an adaptive display (ProMotion) there is
-  no cap. Frames are still presented as soon as they are ready (no vsync queue). The choice is logged as
+  (n >= 2, picked from the frame rate it holds, e.g. 37.5 fps on a 75 Hz monitor), never below 30 fps: a game that cannot
+  hold R/n >= 30 runs uncapped (`KYTY_FPS_AUTOCAP_MIN` sets that floor). On an adaptive display (ProMotion) there is no cap. Frames are still presented as soon as they are ready (no vsync queue). The choice is logged as
   `[autocap] screen <name> <R> Hz fixed|adaptive -> cap <x> fps`. A number (`KYTY_FPS_LIMIT_MILLI=30`) sets a fixed cap;
   `KYTY_FPS_LIMIT_MILLI=0` turns the cap off.
 - **Learned fault classes** (`KYTY_FAULT_CLASS=1`, `KYTY_CLEAN_PAGE=1`): guest pages that the CPU reads every frame from

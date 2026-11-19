@@ -1196,6 +1196,7 @@ KYTY_FLIGHTREC_WINDOW_S	kyty	seconds of history a dump holds per ring; default 1
 KYTY_FLIP_LOG	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_FLIP_WAIT_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_FOLD_LANE_MASKS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FPS_AUTOCAP_MIN	kyty	autocap floor in fps (default 30): below it the game runs uncapped	src/graphics/presentation/videoOut.cpp
 KYTY_FPS_LIMIT	kyty		src/graphics/presentation/videoOut.cpp
 KYTY_FPS_LIMIT_MILLI	kyty	present-side frame cap in fps (fractional, e.g. 37.5) or auto = from the window's display (v1.1.2 profile default auto)	src/graphics/presentation/videoOut.cpp
 KYTY_FRAME_FENCE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
