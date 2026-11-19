@@ -188,6 +188,53 @@ class Follow(unittest.TestCase):
         self.assertIsNone(v); self.assertFalse(pr.terminated); self.assertEqual(rc, 0)
 
 
+class FrameDumpProgress(unittest.TestCase):
+    """2026-11-19: healthy Kyty runs (frame dumps only, no [pstat]) were killed as EARLY_STALL at ~50 s with scene:X+N."""
+    class DumpSrc(Src):
+        def __init__(self, clock, events, every=4):
+            Src.__init__(self, clock, events); self.every, self.n = every, 0
+        def picture(self):
+            n = int(self.clock[0] // self.every)
+            if n != self.n and self.clock[0] >= 5: self.n = n; return (80.0, 0.2)
+            return None
+
+    def run_j(self, j, events, horizon=400):
+        clock = [0.0]
+        def sleep(s): clock[0] += s
+        pr = Child(clock, 10 ** 9)
+        r = W.follow(pr, j, self.DumpSrc(clock, events), now=lambda: clock[0], sleep=sleep)
+        return r[0], clock[0]
+
+    def test_dumps_keep_a_scene_run_alive(self):
+        ev = [(6, "[scene-open] hub t=6.0")] + [(300, "[scene-open] other")]
+        v, t = self.run_j(Judge(90, "scene:hub+100", max_s=200), ev)
+        self.assertNotEqual(v, W.STALL, (v, t))
+
+    def test_pending_marker_default_is_longer(self):
+        j = Judge(400, "scene:never+5")
+        self.assertEqual(j.stall_fail, 45.0)
+        age, v = play(Judge(400, "scene:never+5"), [(1, "x")])
+        self.assertEqual(v, W.STALL); self.assertTrue(age < 60, age)   # no frames at all: still the normal limit
+        j = Judge(400, "scene:never+5"); j.feed_present(1, 1); j.feed_picture(1, 80, .2)   # dump-only: no counter
+        age, v = play(j, [])
+        self.assertEqual(v, W.STALL); self.assertTrue(150 <= age <= 153, age)
+        age, v = play(Judge(400, "scene:never+5"), [(1, pstat(10, 80, .2, 30))])   # counter froze: normal limit
+        self.assertEqual(v, W.STALL); self.assertTrue(45 <= age <= 50, age)
+
+    def test_explicit_stall_not_raised(self):
+        age, v = play(Judge(400, "scene:never+5,stall:20"), [(1, pstat(10, 80, .2, 30))])
+        self.assertEqual(v, W.STALL); self.assertTrue(20 <= age <= 23, age)
+
+    def test_plain_pic_target_keeps_45s(self):
+        age, v = play(Judge(400, "pic+5"), [(1, pstat(10, 80, .2, 30))])
+        self.assertEqual(v, W.DONE)
+
+    def test_judge_for_profile_stall_is_explicit(self):
+        P = type("P", (), {"one": lambda s, k: {"stall_fail_s": "30"}.get(k), "get": lambda s, k: []})()
+        plan = type("Pl", (), dict(p=P, env={}, secs=90, until="scene:x+5"))()
+        self.assertEqual(W.judge_for(plan).stall_fail, 30.0); self.assertTrue(W.judge_for(plan).stall_explicit)
+
+
 class Files(unittest.TestCase):
     def bmp(self, path, v, w=8, h=8):
         row = bytes([v, v, v]) * w

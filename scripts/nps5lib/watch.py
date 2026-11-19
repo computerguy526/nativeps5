@@ -17,7 +17,11 @@ Signals (cheap; no screenshots needed):
   perf_frames.csv rows (frames.parse_perf_csv), dumped *.bmp frames (bmp.luma), log growth, process CPU time
 Verdicts: DONE_UNTIL | EARLY_BLACK | EARLY_STALL | TIMEOUT (target not reached) | DONE_FIXED (no target: ran the full secs)
 Without a picture signal (no [pstat], no frame dumps) a target that needs a picture is never reached: it ends TIMEOUT.
-Thresholds (s): black_fail (profile blank_fail_s, default 40), stall_fail (stall_fail_s, 45), ceiling max_s (the run's secs)."""
+Thresholds (s): black_fail (profile blank_fail_s, default 40), stall_fail (stall_fail_s, 45), ceiling max_s (the run's secs).
+Progress-aware stall: a new dumped frame counts as progress (the Kyty back end prints no [pstat], so frame dumps are its only present
+signal), and while a log/open/scene/marker target is still pending and no present counter exists (dump-only runs, whose frame cadence is coarse)
+the default stall limit is raised to PENDING_STALL (150 s); a run with a counter that freezes still stalls at the normal limit. An explicit
+`,stall:N` or a profile stall_fail_s is always honoured as written."""
 from __future__ import annotations
 
 import os
@@ -35,6 +39,7 @@ PSTAT = re.compile(r"\[pstat\] wall=%s presents=(\d+) luma=%s black=%s sd=%s dif
 SCENE_OPEN = re.compile(r"\[(?:scene|level)-open\] (\S+)(?: t=%s)?" % NUM)
 PREB = re.compile(r"\[prebuild\] Compiling shaders\s+(\d+) / (\d+)")
 PREB_DONE = re.compile(r"\[prebuild\] (\d+) / (\d+) pipelines in")
+PENDING_STALL = 150.0            # default stall limit while a marker target (scene/log/open/marker) is not reached yet
 DONE, BLACK, STALL, TIMEOUT, FIXED = "DONE_UNTIL", "EARLY_BLACK", "EARLY_STALL", "TIMEOUT", "DONE_FIXED"
 
 
@@ -96,13 +101,14 @@ def parse_until(spec, markers=None, scene_key="levels/"):
 
 class Judge:
     def __init__(self, secs, until=None, blank_fail=40.0, stall_fail=45.0, max_s=None, extend_quiet=10.0,
-                 luma_min=10.0, black_max=0.75, markers=None, scene_key="levels/"):
+                 luma_min=10.0, black_max=0.75, markers=None, scene_key="levels/", stall_explicit=False):
         self.secs = float(secs)
         self.max_s = float(max_s if max_s is not None else secs)
         self.until = parse_until(until, markers, scene_key) if isinstance(until, str) or until is None else until
         u = self.until or {}
         self.blank_fail = float(u.get("black") or blank_fail)
         self.stall_fail = float(u.get("stall") or stall_fail)
+        self.stall_explicit = bool(u.get("stall")) or stall_explicit    # an explicit limit is never raised
         self.extend_quiet = extend_quiet
         self.luma_min, self.black_max = luma_min, black_max
         self.scene_key = scene_key
@@ -111,6 +117,7 @@ class Judge:
         self.t_pic = None                # age of the first real picture
         self.black_since = None          # start of the current black run, None while a picture shows
         self.last_presents = 0
+        self.counted = False             # a real present counter (pstat / perf csv) has been seen
         self.t_present_progress = None
         self.t_prebuild = None
         self.prebuild_cnt = None
@@ -128,12 +135,19 @@ class Judge:
         if presents > 0 and self.t_first_present is None:
             self.t_first_present = age
             self.prebuild_active = False             # the first frame ends the pre-build phase
+        if presents > 1:
+            self.counted = True
         if presents > self.last_presents:
             self.t_present_progress = age
             self.last_presents = presents
         u = self.until
         if u and u["kind"] in ("present", "frames") and self.t_frames is None and presents >= u["arg"]:
             self.t_frames = age
+
+    def feed_progress(self, age):
+        """A sign of life that is not a present counter: a new dumped frame. Counts for the stall rule."""
+        if self.t_present_progress is None or age > self.t_present_progress:
+            self.t_present_progress = age
 
     def feed_picture(self, age, luma, black):
         """One measurement of the screen. The dither hatch (luma 5.7, black 0.90) counts as black; a picture has luma >= 10 or black <= 0.75."""
@@ -228,11 +242,14 @@ class Judge:
             ref = self.black_since
         if ref is not None and age - ref >= self.blank_fail:
             return (BLACK, "black/no picture for %.0fs (since %.0fs; first present %s)" % (age - ref, ref, self.t_first_present))
-        # stall: no progress
+        # stall: no progress (a pending marker target gets a longer default limit; explicit limits stay as written)
+        stall_fail = self.stall_fail
+        if not self.stall_explicit and u and u["kind"] in ("scene", "log", "open") and self.t_marker is None and self.t_first_present is not None and not self.counted:
+            stall_fail = max(stall_fail, PENDING_STALL)
         prog = [self.t_present_progress, self.t_prebuild, self.t_log if self.t_first_present is None else None,
                 self.t_cpu if self.t_first_present is None else None]
         newest = max([p for p in prog if p is not None] + [0.0])
-        if age - newest >= self.stall_fail:
+        if age - newest >= stall_fail:
             return (STALL, "no progress for %.0fs (last present %s, prebuild %s, log %.0fs)" % (age - newest, self.t_present_progress, self.t_prebuild, self.t_log))
         if age >= self.secs:
             if age < self.max_s and self.progressing(age):
@@ -271,7 +288,7 @@ def judge_for(plan, environ=None, max_s=None):
     num = lambda k, d: float(p.one(k) or d) if p and re.fullmatch(r"\d+", str(p.one(k) or "")) else d  # noqa: E731
     key = (plan.env.get("NPS5_SCENE_OPEN_KEY") or (p.one("scene_open_key") if p else None) or "levels/")
     return Judge(plan.secs, plan.until, num("blank_fail_s", 40.0), num("stall_fail_s", 45.0), max_s or plan.secs,
-                 markers=profile_markers(p), scene_key=key)
+                 markers=profile_markers(p), scene_key=key, stall_explicit=bool(p and re.fullmatch(r"\d+", str(p.one("stall_fail_s") or ""))))
 
 
 class Sources:
@@ -354,6 +371,7 @@ def follow(pr, judge, src, now=time.time, sleep=time.sleep, poll=1.0, lsof=None,
         if pic:
             judge.feed_picture(age, pic[0], pic[1])
             judge.feed_present(age, max(judge.last_presents, 1))     # a dumped frame proves a present
+            judge.feed_progress(age)                                 # ... and a new one is progress for the stall rule
         cpu = getattr(pr, "cpu_seconds", lambda: None)()
         if cpu is not None and cpu_prev is not None and age > age_prev:
             judge.feed_cpu(age, (cpu - cpu_prev) / (age - age_prev))

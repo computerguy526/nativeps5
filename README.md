@@ -93,7 +93,7 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    scripts/nps5 cache status PPSA21564    # says whether the caches match the current build
    ```
 
-7. **Run.** Keep `ENV="NPS5_PERF=2"` in `titles/PPSA21564.env`. A binary you translated yourself needs `--patch dr`. A run without `--scene` starts the game normally. `nps5 run` is a test runner: a run is silent, capped at 90 seconds (180 with `NPS5_RUN_REASON=<why>`) and stopped early on a black or stalled picture. To play, add `--play`: sound on, no early stop, up to two hours:
+7. **Run.** Keep `ENV="NPS5_PERF=2"` in `titles/PPSA21564.env`. A binary you translated yourself needs `--patch dr`. A run without `--scene` starts the game normally. `nps5 run` is a test runner: a run is silent, capped at 90 seconds (180 with `NPS5_RUN_REASON=<why>`) and stopped early on a black or stalled picture (a stall limit is 45 s, 150 s while an `--until scene:` target is pending; `--until ...,stall:N,black:N` overrides). To play, add `--play`: sound on, no early stop, up to two hours:
 
    ```sh
    scripts/nps5 run PPSA21564 --patch dr --play

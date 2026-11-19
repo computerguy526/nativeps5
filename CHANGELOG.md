@@ -202,6 +202,7 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`) if you prepared with a
 
 ## Unreleased
 
+- `nps5 run --until scene:<name>+N` (and `log:`/`open:`/`marker:`) no longer kills a healthy run as EARLY_STALL at about 50 s. The watcher counted only present counters as progress, and the Kyty back end has none (only frame dumps), so a run with a pending scene marker stalled 45 s after its first frame. A new frame dump is now progress, and while a marker target is pending and no present counter exists the default stall limit is 150 s. An explicit `--until ...,stall:N,black:N` (or a profile `stall_fail_s`) is still used as written; a frozen present counter still stalls at 45 s.
 ## v1.0.2 (2026-11-18)
 
 - Runtime: `readv` and `fread` into guest memory are repeated after an EFAULT from a page the back end protected again
