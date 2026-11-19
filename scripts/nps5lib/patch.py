@@ -80,6 +80,10 @@ class MachO:
                 return fo + (vm - va)
         raise PatchError("address 0x%x is not backed by a segment of %s" % (vm, os.path.basename(self.path)))
 
+    def has_bytes(self, needle):
+        """True when the file contains `needle` (a marker string the recompiler embeds, e.g. a patch point's env name)."""
+        return bool(needle) and self.m.find(needle) != -1
+
     def word(self, vm):
         try:
             return struct.unpack_from("<I", self.m, self.fileoff(vm))[0]
@@ -143,7 +147,9 @@ def load_patches(path):
         if need not in d:
             raise PatchError("%s: %s missing" % (path, need))
     d.setdefault("PARAM_CUTS", {}); d.setdefault("REQUIRES", {}); d.setdefault("LINEAGES", {}); d.setdefault("FALLBACK_FUNCS", {})
-    for name, kind in (("BUILDS", dict), ("CUTS", dict), ("PARAM_CUTS", dict), ("REQUIRES", dict), ("LINEAGES", dict), ("FALLBACK_FUNCS", dict), ("BINDING", (list, tuple))):
+    d.setdefault("SETTINGS", {})
+    for name, kind in (("BUILDS", dict), ("CUTS", dict), ("PARAM_CUTS", dict), ("REQUIRES", dict), ("LINEAGES", dict), ("FALLBACK_FUNCS", dict),
+                       ("SETTINGS", dict), ("BINDING", (list, tuple))):
         if not isinstance(d[name], kind):
             raise PatchError("%s: %s has the wrong shape" % (path, name))
     for ver, prefix in d["BUILDS"].items():
@@ -308,13 +314,28 @@ def inferred_params(mo, sites):
     return vals or None
 
 
-def judge(mo, res, pd):
-    """per patch: dict(name, state, detail). state: applied | applicable | partial | MISMATCH."""
+def setting_for(pd, build, name):
+    """-> (key, marker) when the recompiler builds patch `name` into the binary as a runtime patch point (SETTINGS), else None."""
+    builds = [build] if build else list(pd.get("SETTINGS", {}))
+    for b in builds:
+        v = pd.get("SETTINGS", {}).get(b, {}).get(name)
+        if v:
+            return v[0], v[1]
+    return None
+
+
+def judge(mo, res, pd, build=None):
+    """per patch: dict(name, state, detail). state: applied | applicable | partial | setting | MISMATCH.
+    setting = the sites differ because the recompiler translated them as a runtime patch point (the binary carries the
+    point's marker string, SETTINGS in patches.py): the patch is provided by that setting, nothing to write."""
     rep = []
     for name, params, sites in res:
         st = [site_state(mo, s) for s in sites]
         kinds = [k for k, _ in st]
-        if "other" in kinds:
+        sp = setting_for(pd, build, name)
+        if "other" in kinds and sp and mo.has_bytes(sp[1].encode()):
+            rep.append(dict(name=name, state="setting", detail="built in by the recompiler as patch point %s (runtime setting, %s)" % sp))
+        elif "other" in kinds:
             bad = [(s, c) for s, (k, c) in zip(sites, st) if k == "other"]
             d = "; ".join("fn 0x%x+0x%x at 0x%x holds %08x, expected %08x%s" % (
                 s.fn, s.off, s.vm, c, s.old, "" if s.new is None else " or %08x" % s.new) for s, c in bad)
@@ -377,8 +398,8 @@ def dependency_ok(pd, mo, build, requests, lineage, anchor):
             if need in names:
                 continue
             res = resolve(pd, mo, build, [(need, None)], lineage, anchor)
-            st = judge(mo, res, pd)[0]["state"]
-            if st != "applied":
+            st = judge(mo, res, pd, build)[0]["state"]
+            if st not in ("applied", "setting"):
                 raise PatchError("%s requires %s, which is neither requested nor already applied (%s)" % (n, need, st))
 
 
@@ -391,7 +412,7 @@ def cmd_check(pd, path, names, lineage=None, anchor=None, build=None, out=sys.st
         else:
             reqs = [(n, None) for n in list(pd["CUTS"].get(ver, {})) + list(pd["PARAM_CUTS"].get(ver, {}))]
         res = resolve(pd, mo, ver, reqs, lineage, anchor)
-        rep = judge(mo, res, pd)
+        rep = judge(mo, res, pd, ver)
         print("%s: build %s (%s) anchor %s" % (os.path.basename(path), ver, (sha or "?")[:16],
               res[0][2][0].anchor if res and res[0][2] else "-"), file=out)
         bad = 0
@@ -423,11 +444,13 @@ def apply(pd, src, reqs, out_path=None, lineage=None, anchor=None, build=None, f
         for name, params, _ in res:
             if name in {n for n, c in pd["PARAM_CUTS"].get(ver, {}).items()} and params is None:
                 raise PatchError("%s needs its argument (%s=%s)" % (name, name, pd["PARAM_CUTS"][ver][name]["param"]))
-        rep = judge(mo, res, pd)
+        rep = judge(mo, res, pd, ver)
         bad = [r for r in rep if r["state"] == "MISMATCH"]
         if bad:
             raise PatchError("refusing, nothing patched: " + " | ".join("%s: %s" % (r["name"], r["detail"]) for r in bad))
         dependency_ok(pd, mo, ver, reqs, lineage, anchor)
+        provided = {r["name"]: r["detail"] for r in rep if r["state"] == "setting"}   # recompiler patch points: nothing to write
+        res = [(n, p, [] if n in provided else lst) for n, p, lst in res]
         todo = [s for _, _, lst in res for s in lst]
         offs = [(mo.fileoff(s.vm), s) for s in todo]
         out_path = out_path or default_out(src, reqs)
@@ -475,6 +498,7 @@ def apply(pd, src, reqs, out_path=None, lineage=None, anchor=None, build=None, f
                     source=os.path.basename(src), output=os.path.basename(out_path),
                     anchor_mode=res[0][2][0].anchor.split(":")[0] if res and res[0][2] else None,
                     patches=[dict(name=n, param=(None if p is None else "x".join(str(v) for v in p.values())),
+                                  **({"provided": provided[n]} if n in provided else {}),
                                   sites=[dict(function="0x%x" % s.fn, offset="0x%x" % s.off, anchor=s.anchor,
                                               address="0x%x" % s.vm, original="%08x" % s.old, new="%08x" % s.new,
                                               was="%08x" % before[s.vm], note=s.note) for s in l]) for n, p, l in res])

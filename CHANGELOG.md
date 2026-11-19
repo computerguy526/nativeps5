@@ -45,6 +45,11 @@ a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned b
   prelude no longer aborts; the MSL binding model is built per emission; in-shader blending reads the destination only for
   render targets the shader declares (none of these changes a listed shader text); the per-dword bounds fallback
   computes each dword's offset in 64 bits (it could wrap near 4 GiB; 21 of the 31 pairs' texts change, all re-verified).
+- **`nps5 run` / `nps5 cache prepare` no longer refuse a binary from recompiler v1.1 (rc 78).** The ASTRO BOT profile asks
+  for the `dr nt` patches, but recompiler v1.1 builds `nt` (and `lowres`) in as runtime patch points (`fast_lighting`,
+  `upscaling`), so the old site check saw an unknown word and refused. `games/<id>/patches.py` now names those points
+  (`SETTINGS`); a binary that carries one reports the cut as `setting` (provided at runtime, nothing written) in
+  `nps5 patch --check`, `nps5 patch` and `nps5 run`. Binaries without the patch points are checked as before.
 - **Fixes from review:** `scripts/fetch-components.sh` verifies a tag before the checkout exists (a refused clone
   no longer stays behind to pass a second run); the 1800 s run ceiling applies only to the prepare passes.
 - **Pins:** components.lock pins `v1.1.1` in all three component repositories (AnyPS5 unchanged from v1.1, recomp with

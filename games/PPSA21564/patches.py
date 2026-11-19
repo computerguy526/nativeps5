@@ -41,6 +41,15 @@ PARAM_CUTS = {'01.007': {
     ]},
 }}
 
+# Cuts the recompiler (since v1.1) translates as runtime PATCH POINTS (its profiles/patches/<id>.json): in such a binary the
+# site holds the patch point's code instead of the original word, and the binary carries the point's env name as a marker.
+# `nps5 patch` / `nps5 run` then report the cut as 'setting' (provided at runtime, nothing to write) instead of refusing.
+# cut: (patch point key, marker string in the binary)
+SETTINGS = {'01.007': {
+    'nt': ('fast_lighting', 'NPS5_ASTRO_FAST_LIGHTING'),
+    'lowres': ('upscaling', 'NPS5_ASTRO_UPSCALING'),
+}}
+
 # A patch that needs another one: lowres rewrites the level-0 case, which only exists once dr locks level 0.
 REQUIRES = {'lowres': ['dr']}
 
@@ -70,7 +79,7 @@ BINDING = [
      'why': 'changes the lighting path, so the picture is the user\'s decision; becomes a user setting through a recompiler patch point',
      'review': 'reviewed',
      'checked': 'world map 45.1 -> 37.4 ms on dr+nt (canonical Kyty binary since 2026-11-17); neon outlines slightly dimmer',
-     'setting': {'name': 'nt', 'state': 'pending'}},
+     'setting': {'name': 'fast_lighting', 'state': 'recompiler patch point (NPS5_ASTRO_FAST_LIGHTING, default on)'}},
     {'what': 'gi', 'purpose': 'store 0 for the GI probe flag', 'now': 'build', 'goal': 'build',
      'guest': 'fn 0x751d090 (GI probe flag copy), byte load at 0x751d0b3',
      'why': 'game-bound',

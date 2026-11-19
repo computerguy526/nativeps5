@@ -19,6 +19,7 @@ PARAM_CUTS = {'1.0': {'sz': {'param': 'WxH', 'sites': [
 REQUIRES = {'sz': ['x']}
 LINEAGES = {'base': 0x0, 'l2': 0x100}
 FALLBACK_FUNCS = {0x1000: 0x100001000, 0x2000: 0x100002000}
+SETTINGS = {'1.0': {'x': ('xs', 'NPS5_TEST_XS')}}
 BINDING = [{'what': 'x', 'purpose': 'p', 'now': 'build', 'goal': 'host', 'why': 'w', 'review': 'reviewed', 'checked': 'c',
             'setting': {'name': 'xs', 'state': 'pending'}},
            {'what': 'y', 'purpose': 'p', 'now': 'build', 'goal': 'build', 'why': 'w', 'review': 'unreviewed', 'checked': 'c'},
@@ -26,7 +27,7 @@ BINDING = [{'what': 'x', 'purpose': 'p', 'now': 'build', 'goal': 'host', 'why': 
 """
 
 
-def macho(path, syms=True, sha=SHA, shift=0, words=None):
+def macho(path, syms=True, sha=SHA, shift=0, words=None, marker=b""):
     """one __TEXT segment (vm 0x100000000, file 0), text at file 0x1000.., symtab + strtab + sha string at 0x8000."""
     text = bytearray(0x4000)
     words = words or {}
@@ -47,7 +48,7 @@ def macho(path, syms=True, sha=SHA, shift=0, words=None):
     st = struct.pack("<IIIIII", 2, 24, symoff, len(names), stroff, len(strtab))
     hdr = struct.pack("<IiiIIIII", 0xfeedfacf, 0x0100000c, 0, 2, 2, len(seg) + len(st), 0, 0)
     blob = bytearray(hdr + seg + st); blob += bytes(0x1000 - len(blob))
-    blob = bytes(blob) + bytes(text[0x1000:]) + ents + strtab
+    blob = bytes(blob) + bytes(text[0x1000:]) + ents + strtab + marker
     open(path, "wb").write(blob)
 
 
@@ -101,6 +102,19 @@ class T(unittest.TestCase):
     def test_mismatch_reports(self):
         other = os.path.join(self.d, "o"); macho(other, words={FN_A + 0x10: 0xdeadbeef})
         rc, out = self.check(other); self.assertEqual(rc, 1); self.assertIn("MISMATCH", out)
+
+    def test_recompiler_patch_point_is_a_setting_not_a_mismatch(self):
+        pp = os.path.join(self.d, "pp"); macho(pp, words={FN_A + 0x10: 0xdeadbeef}, marker=b"\0NPS5_TEST_XS\0")
+        rc, out = self.check(pp); self.assertEqual(rc, 0, out); self.assertIn("setting", out); self.assertIn("patch point xs", out)
+        copy = os.path.join(self.d, "ppcopy")
+        info = P.apply(self.pd, pp, [("x", None), ("y", None)], copy)
+        mo = P.MachO(copy)
+        self.assertEqual(mo.word(BASE + FN_A + 0x10), 0xdeadbeef)           # the patch point is left alone
+        self.assertEqual(mo.word(BASE + FN_B + 8), 0x44444444); mo.close()
+        x = [p for p in info["patches"] if p["name"] == "x"][0]
+        self.assertEqual(x["sites"], []); self.assertIn("xs", x["provided"])
+        other = os.path.join(self.d, "o2"); macho(other, words={FN_B + 8: 0xdeadbeef}, marker=b"NPS5_TEST_XS")
+        rc, out = self.check(other); self.assertEqual(rc, 1); self.assertIn("MISMATCH", out)   # only the cut with a patch point
 
     def test_apply_copy_and_sidecar(self):
         src_bytes = open(self.bin, "rb").read()

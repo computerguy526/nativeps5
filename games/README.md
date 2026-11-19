@@ -24,7 +24,9 @@ The folder holds:
   guest function entry, byte offset in the translated function, the original word **asserted**, the new word, a
   note; anchored by the `_fn_0x<entry>` symbol, so no per-link address), `REQUIRES`, `BINDING` (per patch: purpose,
   binding now/goal, `guest`, `why`, `review`, `checked`, optional `setting` for a patch that becomes a runtime
-  setting) and a lineage-shift table used only for binaries linked without symbols. `scripts/nps5lib/patch.py`
+  setting), `SETTINGS` (cuts the recompiler translates as a runtime patch point: cut -> (point key, marker string);
+  a binary carrying the marker reports the cut as `setting` instead of a mismatch) and a lineage-shift table used only
+  for binaries linked without symbols. `scripts/nps5lib/patch.py`
   (`--list`, `--check`, apply to a copy, `--docs`) checks the embedded build ID, refuses on any mismatch, re-signs
   the copy and writes a `.patches.json` sidecar. The asserted words are the only bytes of a translated program in
   this repository; nothing else of a binary is ever added.

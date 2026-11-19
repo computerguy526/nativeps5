@@ -292,14 +292,17 @@ def verify_binary(g, p, sel, environ, patchmod=None):
             mo2, ver, _ = pm.open_binary(pd, path)
             try:
                 res = pm.resolve(pd, mo2, ver, want)
-                rep = pm.judge(mo2, res, pd)
+                rep = pm.judge(mo2, res, pd, ver)
             finally:
                 mo2.close()
             bad = [r for r in rep if r["state"] == "MISMATCH"]
             if bad:
                 raise Refuse("%s: %s" % (path, "; ".join("%s: %s" % (r["name"], r["detail"]) for r in bad)))
-            info["patches_applied"] = [r["name"] for r in rep if r["state"] == "applied"]
-            notapplied = [r["name"] for r in rep if r["state"] != "applied"]
+            info["patches_applied"] = [r["name"] for r in rep if r["state"] in ("applied", "setting")]
+            for r in rep:
+                if r["state"] == "setting":
+                    notes.append("patch %s: %s" % (r["name"], r["detail"]))
+            notapplied = [r["name"] for r in rep if r["state"] not in ("applied", "setting")]
             if notapplied:
                 notes.append("patches not applied in this binary: %s" % ",".join(notapplied))
         except pm.PatchError as e:
