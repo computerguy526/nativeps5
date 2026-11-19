@@ -31,3 +31,4 @@ __pycache__/
 !titles/README.md
 # local data of the offline shader tools (tools/xray, tools/agxdis): dumps and outputs, never committed
 /work/
+!/games/*/fast-math-deny.txt
