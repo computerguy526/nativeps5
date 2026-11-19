@@ -1653,7 +1653,8 @@ KYTY_RT_DUMP_DIR	kyty		src/graphics/shader/recompiler/ShaderRecompiler.cpp
 KYTY_RT_FUNCTION	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_RT_LOAD_HOLD	kyty	software RT dispatches held while a level streams in (default on, 0 off)	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_LOAD_HOLD_MAX_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
-KYTY_RT_LOAD_HOLD_PHASE	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_LOAD_HOLD_PHASE	kyty	0: the load hold triggers on fast file reads only (default 1: also for KYTY_RT_LOAD_HOLD_PHASE_MS after a level opens)	src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_LOAD_HOLD_PHASE_MS	kyty	load hold after a level opens, ms (default 5000)	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_LOAD_HOLD_QUIET_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_LOAD_HOLD_VFS_MBS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_NODE_BUDGET	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp

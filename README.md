@@ -122,9 +122,10 @@ the `nps5 bug-report` zip to your issue, or send them to us; we decode them ours
 The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with
 `nps5 run --env NAME=VALUE` or put it on the `ENV=` line of `titles/<id>.env` (both win over the profile).
 - **Ray-tracing load hold and budget guard** (`KYTY_RT_LOAD_HOLD=1`, `KYTY_RT_BUDGET_GUARD=1`): Kyty's software ray tracing
-  waits while a level streams in, and skips its dispatches for a moment when they run out of their BVH node budget
-  (a BVH that is not valid yet). This removes the long GPU stalls (and the GPU watchdog stops they could cause) at level entry.
-  The lighting it feeds catches up a moment later. Off: `KYTY_RT_LOAD_HOLD=0`, `KYTY_RT_BUDGET_GUARD=0`.
+  waits while a level streams in (5 s after a level opens, and while the game reads files fast), and skips its dispatches
+  for a moment when they run out of their BVH node budget (a BVH that is not valid yet). This removes the long GPU stalls (and the GPU watchdog stops they could cause) at level entry.
+  The lighting it feeds catches up a moment later. Off: `KYTY_RT_LOAD_HOLD=0`, `KYTY_RT_BUDGET_GUARD=0`
+  (`KYTY_RT_LOAD_HOLD_PHASE=0` keeps only the file-read trigger).
 - **Quiet cache saves during level loads** (`KYTY_SAVE_LOAD_QUIET_S=20`): the periodic pipeline/program cache saves wait
   until 20 s after a level load. KosmicKrisp's own pipeline archive is written at exit instead of a few seconds into a
   level (`KK_PIPELINE_ARCHIVE_FLUSH_N=4096`, `KK_PIPELINE_ARCHIVE_FLUSH_S=1800`). **Caveat:** if the game crashes, the

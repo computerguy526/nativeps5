@@ -13,9 +13,10 @@ their `emitter` line names the v1.1.2 Kyty.
 - **Ray-tracing load hold + budget guard** (Kyty, `KYTY_RT_LOAD_HOLD`, `KYTY_RT_BUDGET_GUARD`, default on): Kyty's software
   ray-tracing kernel ran a burst over a BVH that was not built yet at level entry (Sky Garden: up to 784k lanes running to
   the 8192-test node budget, a 0.6-1.2 s GPU stall and, by correlation, the GPU watchdog stops seen at level entry). The
-  hold skips those dispatches while a level streams in; the guard skips them for 0.5-8 s after a dispatch exhausted at
-  least 1024 lanes. In play: 0 budget exhaustions, 0 guard trips, level-entry command-buffer time shifts 99-246 ms instead
-  of 632 ms; the lighting the kernel feeds catches up a moment later. Unit test `rt_budget_guard_tests`.
+  hold skips those dispatches for 5 s after a level opens (the runtime's level phase, so also on a direct level boot) and
+  while the game reads files at >= 48 MB/s (+1.5 s), at most 30 s at a time (`KYTY_RT_LOAD_HOLD_PHASE=0`: file reads
+  only); the guard skips them for 0.5-8 s after a dispatch exhausted at least 1024 lanes. In play (file-read trigger):
+  0 budget exhaustions, 0 guard trips, level-entry command-buffer time shifts 99-246 ms instead of 632 ms; the lighting the kernel feeds catches up a moment later. Unit test `rt_budget_guard_tests`.
 - **Quiet cache saves during level loads** (Kyty `KYTY_SAVE_LOAD_QUIET_S=20`; KosmicKrisp `KK_PIPELINE_ARCHIVE_FLUSH_N=4096`
   `_S=1800`): periodic pipeline/program cache saves (54-360 ms each, plus a ~285 MB transient) no longer land in a level
   transition, and KosmicKrisp's pipeline archive is written at exit instead of a few seconds into a level (a 454 ms archive
