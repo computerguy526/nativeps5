@@ -7,8 +7,14 @@ pinned commits are in [components.lock](components.lock).
 
 Everything in v1.1.1, with five Kyty features on by default in the ASTRO BOT profile (each has an off switch, README
 "Options on by default"). Needs a fresh shader-cache prepare (`nps5 cache prepare`): the GPU accuracy tier changes the
-shader cache keys. The Metal shader lists are unchanged (the same 68 compute kernels and 31 graphics pairs, same texts);
-their `emitter` line names the v1.1.2 Kyty.
+shader cache keys. The 68 compute kernels and the 31 graphics pairs of v1.1.1 keep their texts; their `emitter` line names the v1.1.2 Kyty.
+
+- **One more Metal graphics pair: 32 (36 rows).** The cloud pair (KosmicKrisp keys 1548c37d / 604b473f, about 20 ms of
+  GPU time per second where it draws) passed the same GPU differential test on both of its pipelines with the v1.1.2
+  texts, on the game's own captured inputs (core seeds, mutant caught, out-of-bounds profile MATCH, NaN profile matched
+  within the loop cap; its real-vertex draw was not testable, as for most pairs). `nps5 cache prepare` prints
+  "Metal graphics: N of 36"; the cloud pair needs KosmicKrisp's vertex text of that pipeline in the library cache, so it
+  can appear only after a session that reached the scene.
 
 - **Ray-tracing load hold + budget guard** (Kyty, `KYTY_RT_LOAD_HOLD`, `KYTY_RT_BUDGET_GUARD`, default on): Kyty's software
   ray-tracing kernel ran a burst over a BVH that was not built yet at level entry (Sky Garden: up to 784k lanes running to

@@ -4,6 +4,7 @@
 # blend = per colour attachment en:sc:dc:co:sa:da:ao:writemask:class:components. KosmicKrisp swaps a pair only when BOTH kk keys match.
 # v1.1.1: 31 pairs (35 rows: some pairs serve several pipelines), each verified by a GPU differential test against KosmicKrisp's
 # pair on every pipeline that uses its keys (seeds, mutant caught, determinism, NaN and out-of-bounds profiles, real vertex positions).
+# v1.1.2: + 1 pair (cloud, 1 row): 32 pairs, 36 rows.
 # evidence play2 = the same texts were played through twice with no visual issue. Fast-math OFF keys.
 # emitter = the Kyty commit (release tag) the hashes were made with, another Kyty is reported at prepare (exit code 3).
 format	nps5-metal-gfx-pairs	2
@@ -44,3 +45,4 @@ gfx	17e36bcdf8008fe54f492c993a0e57ae	93c3d2a3538796e5:18	da39815148dad2683e1332e
 gfx	17e36bcdf8008fe54f492c993a0e57ae	93c3d2a3538796e5:18	da39815148dad2683e1332ec139883c5	27c1d0c2ca06b0c7:0	f871056dde97b279	bc296944f77d33c7	e766bdff6bc57dc2e5c7316cefd8781f8acfd58c1792acfdf5f6c98b8bc06cda	e5d1e520fee492cb827a5d3b6c9e0a9454e1ad0356cc4c181b5131a0564c5d44	mipstats	0:0,53:48,54:64,58:80,61:128,107:192,113:256	0:0:92,1:0:103	0		autoval
 gfx	6ad8d53278adce47418182f578282249	eb710b1faa2016ad:18	da39815148dad2683e1332ec139883c5	27c1d0c2ca06b0c7:0	fa9486c50998d1a2	95750ccadb30989a	96b08fb5729fe20214bbafed89ff76e1563fa71a24e9178263a67460b6b59115	70f955fa994681608cc19514819582ccd464d1452be26b8d6fd05bbe8f50d724	mipstats	0:0,53:64,54:80,58:96,61:128,107:192,113:256	0:0:92,1:0:77,2:0:97,3:0:95	0		autoval
 gfx	6ad8d53278adce47418182f578282249	eb710b1faa2016ad:18	da39815148dad2683e1332ec139883c5	27c1d0c2ca06b0c7:0	fa9486c50998d1a2	95750ccadb30989a	96b08fb5729fe20214bbafed89ff76e1563fa71a24e9178263a67460b6b59115	70f955fa994681608cc19514819582ccd464d1452be26b8d6fd05bbe8f50d724	mipstats	0:0,53:64,54:80,58:96,61:128,107:192,113:256	0:0:92,1:0:77,2:0:97,3:0:95	0		autoval
+gfx	ce7dc9765aa90351a0bd173363a0ec1c	db2a830826d11a33:0	cf95bc19285084b328c83625e8477ba9	c343c77f4e6ae2f6:0	1548c37d733c9df1	604b473fc6408471	85e5190df70475c561cd7f6a6f382a516f2bb742da5d40c2d133885263969e87	5aecfe45f813e318705610e974d2cdcca7b8110a2e789e01a7f0a82eb9681f95	twin	0:0,7:128,49:192,53:256,58:272,61:384,62:640,65:768,107:960,111:1216,112:1232,113:1248	0:0:106,1:0:64,2:0:77	1	0:0:0:0:0:0:0:7:f:4	autoval
