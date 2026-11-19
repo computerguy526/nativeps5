@@ -117,6 +117,38 @@ ids, sizes, hashes and timings, no game bytes and no paths. `nps5 run` puts it i
 (otherwise `./flightrec`); the run logs are in the same run folder (`run.err`, `run.summary.txt`). Attach the `.flightrec` file and
 the `nps5 bug-report` zip to your issue, or send them to us; we decode them ourselves. `KYTY_MEMLOG=1` adds a once-a-second memory line.
 
+### Options on by default (v1.1.2)
+
+The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with
+`nps5 run --env NAME=VALUE` or put it on the `ENV=` line of `titles/<id>.env` (both win over the profile).
+- **Ray-tracing load hold and budget guard** (`KYTY_RT_LOAD_HOLD=1`, `KYTY_RT_BUDGET_GUARD=1`): Kyty's software ray tracing
+  waits while a level streams in, and skips its dispatches for a moment when they run out of their BVH node budget
+  (a BVH that is not valid yet). This removes the long GPU stalls (and the GPU watchdog stops they could cause) at level entry.
+  The lighting it feeds catches up a moment later. Off: `KYTY_RT_LOAD_HOLD=0`, `KYTY_RT_BUDGET_GUARD=0`.
+- **Quiet cache saves during level loads** (`KYTY_SAVE_LOAD_QUIET_S=20`): the periodic pipeline/program cache saves wait
+  until 20 s after a level load. KosmicKrisp's own pipeline archive is written at exit instead of a few seconds into a
+  level (`KK_PIPELINE_ARCHIVE_FLUSH_N=4096`, `KK_PIPELINE_ARCHIVE_FLUSH_S=1800`). **Caveat:** if the game crashes, the
+  pipelines it compiled in that session are not in the archive and compile again next time (the Metal library cache and
+  Kyty's caches are still saved). Off: `KYTY_SAVE_LOAD_QUIET_S=0`, and `KK_PIPELINE_ARCHIVE_FLUSH_N=32
+  KK_PIPELINE_ARCHIVE_FLUSH_S=10` for the old archive timing. `nps5 cache prepare` always uses the old timing.
+- **Display-aware frame cap** (`KYTY_FPS_LIMIT_MILLI=auto`): on a fixed-refresh display of R Hz the game is capped at R/n
+  (n >= 2, picked from the frame rate it holds, e.g. 37.5 fps on a 75 Hz monitor); on an adaptive display (ProMotion) there is
+  no cap. Frames are still presented as soon as they are ready (no vsync queue). The choice is logged as
+  `[autocap] screen <name> <R> Hz fixed|adaptive -> cap <x> fps`. A number (`KYTY_FPS_LIMIT_MILLI=30`) sets a fixed cap;
+  `KYTY_FPS_LIMIT_MILLI=0` turns the cap off.
+- **Learned fault classes** (`KYTY_FAULT_CLASS=1`, `KYTY_CLEAN_PAGE=1`): guest pages that the CPU reads every frame from
+  GPU output stay readable (the read sees bytes up to a few frames old, as served reads already did), and a store to a
+  page whose GPU bytes are already published no longer waits for the GPU. In Sky Garden the fault handler time fell from
+  about 57 to 21 ms per frame. Off: `KYTY_FAULT_CLASS=0 KYTY_CLEAN_PAGE=0`.
+- **GPU accuracy low** (`KYTY_GPU_ACCURACY=low`): fast math for pixel and compute shaders, except the ones listed in
+  `games/PPSA21564/fast-math-deny.txt` (guest shader hashes only): those are the shaders our own Metal translations replace,
+  so they keep exact math and their verified texts. About 1 ms per frame faster; a very slight flicker on a few rocks up
+  close was seen in play. `nps5 cache prepare` builds this tier, so the first start is warm. Exact math everywhere:
+  `KYTY_GPU_ACCURACY=high`; put it on the `ENV=` line of `titles/<id>.env` and run `nps5 cache prepare` again, which then
+  prepares that tier (with `--env` alone its pipelines compile on first use). `normal` is an in-between tier (fast math outside an Inf/NaN-sensitive set).
+
+The flight recorder (below) and memory trim stay off by default.
+
 ### Memory and GPU options (off by default, v1.1.1)
 
 Opt-in Kyty switches for Macs short on memory; pass them with `nps5 run --env NAME=VALUE` or the `ENV=` line of

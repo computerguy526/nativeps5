@@ -71,6 +71,17 @@ class T(unittest.TestCase):
         self.assertNotIn("A_PERF", p.env); self.assertIn("A_PERF", self.plan(["--class", "perf"]).env)
         self.assertEqual(p.env["NPS5_RUN_CLASS"], "func")
 
+    def test_fast_math_deny_list_from_profile(self):
+        # v1.1.2: games/<id>/fast-math-deny.txt becomes KYTY_FAST_MATH_DENY on the kyty back end; a later layer overrides it
+        self.assertNotIn("KYTY_FAST_MATH_DENY", self.plan([]).env)
+        deny = os.path.join(self.d, "games", "PPSA00001", "fast-math-deny.txt"); open(deny, "w").write("# hashes\n0123456789abcdef\n")
+        p = self.plan([])
+        if p.env.get("NPS5_GPU") == "kyty":
+            self.assertEqual(p.env["KYTY_FAST_MATH_DENY"], deny); self.assertEqual(p.layers["KYTY_FAST_MATH_DENY"], "profile")
+            self.assertEqual(self.plan(["--env", "KYTY_FAST_MATH_DENY="]).env["KYTY_FAST_MATH_DENY"], "")
+        else:
+            self.assertNotIn("KYTY_FAST_MATH_DENY", p.env)
+
     def test_titles_file_is_not_executed(self):
         self.titles('BIN=$(touch %s/pwned)\n' % self.d)
         self.refused([], 2); self.assertFalse(os.path.exists(os.path.join(self.d, "pwned")))

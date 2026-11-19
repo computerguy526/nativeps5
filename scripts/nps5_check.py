@@ -78,7 +78,7 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
-                 "metal-shaders.tsv", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified"}
+                 "metal-shaders.tsv", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,]{0,32}$")
@@ -127,6 +127,24 @@ def check_metal_keys(data, gfx=False):
             if len(bad) >= 3:
                 break
     return bad
+# games/<title id>/fast-math-deny.txt (KYTY_FAST_MATH_DENY, v1.1.2): comment lines and 64-bit guest shader hashes, one per line.
+DENY_ROW_RE = re.compile(rb"^[0-9a-f]{16}$")
+
+
+def check_deny_list(data):
+    """-> reasons a games/<id>/fast-math-deny.txt is refused: anything but short prose comments and 16-hex-digit hash lines."""
+    if b"\0" in data or len(data) > (64 << 10):
+        return ["a fast-math deny list is a short text file"]
+    bad = []
+    for n, line in enumerate(data.split(b"\n"), 1):
+        if not line or DENY_ROW_RE.match(line) or (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
+            continue
+        bad.append("line %d is not a guest shader hash (16 hex digits) or a comment" % n)
+        if len(bad) >= 3:
+            break
+    return bad
+
+
 # shared shader lists (nps5 cache share): games/<title id>/contrib/<date>-<8 hex>.kyplst with its .verified record
 CONTRIB_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/contrib/\d{4}-\d{2}-\d{2}-[0-9a-f]{8}\.kyplst(\.verified)?$")
 # pad scripts (input timings only): games/<title id>/pad/<name>.vpad
@@ -464,6 +482,10 @@ class Check:
                 for why in check_gfx_record(data, sibling(path + ".verified")):
                     F(f": {why}")
             return
+        if profile and profile.group(2) == "fast-math-deny.txt":
+            for why in check_deny_list(data):
+                F(f": {why}")
+            return
         if profile and profile.group(2) == "metal-gfx-pairs.tsv.verified":
             if not data.startswith(b"#") or b"\0" in data or len(data) > 4096:
                 F(": a .verified record is a short text file")
@@ -568,6 +590,8 @@ def selftest():
     g1 = clean["games/PPSA00000/metal-gfx-pairs.tsv"]
     clean["games/PPSA00000/metal-gfx-pairs.tsv.verified"] = b"# proof\nsha256=" + hashlib.sha256(g1).hexdigest().encode() + b"\n" + METAL_GFX_OK_LINE + b"\n"
     planted["games/PPSA00003/metal-gfx-pairs.tsv"] = gfx2                   # pair rows without the proof record
+    clean["games/PPSA00000/fast-math-deny.txt"] = b"# guest hashes\n" + b"0123456789abcdef\n" * 3             # v1.1.2 deny list: hashes only
+    planted["games/PPSA00004/fast-math-deny.txt"] = b"0123456789abcdef\nfloat4 main0(float4 v) { return v; }\n"   # code in a deny list
     with tempfile.TemporaryDirectory() as d:
         git("init", "-q", cwd=d)
         for k, v in {**planted, **clean}.items():

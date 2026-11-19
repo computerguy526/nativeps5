@@ -94,6 +94,16 @@ env	KK_METAL_CACHE_ID=com.nativeps5.kyty.PPSA21564	gpu=kyty	Metal cache id (the 
 env	KK_METAL_CACHE_ID=com.nativeps5.kyty.PPSA21564.{gpufam}.{osbuild}	gpu=kyty,hw!=m4pro-24g	every other machine: GPU family and OS build in the id
 env	KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1	gpu=kyty	save on terminate
 env	KK_COMPILE_STATS=10	gpu=kyty	diagnostics
+# v1.1.2 defaults (README "Options"; each one has its off switch there, e.g. `nps5 run PPSA21564 --env KYTY_FAULT_CLASS=0`)
+env	KYTY_RT_LOAD_HOLD=1	gpu=kyty	software ray tracing waits while a level streams in (level-entry GPU stalls / watchdog)
+env	KYTY_RT_BUDGET_GUARD=1	gpu=kyty	RT dispatches skipped while lanes exhaust the BVH node budget (invalid BVH)
+env	KYTY_SAVE_LOAD_QUIET_S=20	gpu=kyty	no periodic cache save during or within 20 s after a level load
+env	KK_PIPELINE_ARCHIVE_FLUSH_N=4096	gpu=kyty	KosmicKrisp archive written at exit, not mid level start (a crash loses that session's new entries)
+env	KK_PIPELINE_ARCHIVE_FLUSH_S=1800	gpu=kyty	(same; `nps5 cache prepare` passes the old 32 / 10 s)
+env	KYTY_FPS_LIMIT_MILLI=auto	gpu=kyty	frame cap from the window's display: fixed R Hz -> R/n, adaptive (ProMotion) -> none; presents stay immediate
+env	KYTY_FAULT_CLASS=1	gpu=kyty	learned read class per guest page: pages the CPU polls every frame stay readable (fewer fault waits)
+env	KYTY_CLEAN_PAGE=1	gpu=kyty	a store to a page whose GPU bytes are already published skips the drain
+env	KYTY_GPU_ACCURACY=low	gpu=kyty	fast math for pixel/compute shaders outside fast-math-deny.txt (our Metal translations stay exact)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
 env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
 env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling

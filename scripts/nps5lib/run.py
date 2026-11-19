@@ -27,6 +27,7 @@ SCHEMA = 1
 RESERVED = ("bin", "patch", "gpu", "libs", "lib", "kk", "kyty", "workdir", "cache", "save")
 CLASSES = ("func", "perf")
 RUN_CAP_S, RUN_NO_REASON_S, GPU_PROFILE_MAX_S = 180, 90, 40
+DENY_LIST_NAME = "fast-math-deny.txt"       # games/<id>/: guest shader hashes kept at exact math (KYTY_FAST_MATH_DENY)
 CACHE_RUN_CAP_S = 1800                            # `nps5 cache prepare` passes (is_prepare_run): the list ends them, secs is only their ceiling
 PLAY_CAP_S = 7200                                 # --play: an interactive session
 NAME_RE = r"[A-Za-z0-9_][A-Za-z0-9_.+:-]*"       # a tag, a save name, a relative work dir: one path component, never .. or a path
@@ -426,6 +427,12 @@ def compose(tid, opts, environ=None, g=None):
             plan.put(k, v, layer)
     except g.Err as e:
         raise Refuse(str(e), getattr(e, "code", 78))
+    # 2b. games/<id>/fast-math-deny.txt (guest shader hashes, no code): the shaders our own Metal translations replace keep exact
+    #     math at every KYTY_GPU_ACCURACY, so their KosmicKrisp keys (and our verified texts) stay those of the high tier. A later
+    #     layer may override the path (an empty value turns the list off).
+    deny = os.path.join(p.dir, DENY_LIST_NAME)
+    if gpu == "kyty" and os.path.isfile(deny) and "KYTY_FAST_MATH_DENY" not in plan.env:
+        plan.put("KYTY_FAST_MATH_DENY", deny, "profile")
     # 3. titles/<id>.env ENV
     for w in shlex.split(titles.get("ENV", "")):
         k, eq, v = w.partition("=")

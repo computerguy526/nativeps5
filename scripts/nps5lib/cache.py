@@ -158,7 +158,10 @@ def prepare_words(ctx, app0):
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_PREPARE", "1"),
             ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")), ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")),
             ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", o.get("limit_mb", "448")), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
-            ("KYTY_HELPER_PREWARM", "1")]   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
+            ("KYTY_HELPER_PREWARM", "1"),   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
+            # v1.1.2: the profile defers KosmicKrisp's archive flush to exit for play; a prepare waits one flush period before it ends
+            # (Kyty, pipelineCache.cpp), so it keeps KosmicKrisp's own 32 pipelines / 10 s.
+            ("KK_PIPELINE_ARCHIVE_FLUSH_N", "32"), ("KK_PIPELINE_ARCHIVE_FLUSH_S", "10")]
 
 
 def launch_words(ctx, app0):

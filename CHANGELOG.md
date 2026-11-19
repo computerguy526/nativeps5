@@ -3,6 +3,51 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.1.2 (draft, not released)
+
+Everything in v1.1.1, with five Kyty features on by default in the ASTRO BOT profile (each has an off switch, README
+"Options on by default"). Needs a fresh shader-cache prepare (`nps5 cache prepare`): the GPU accuracy tier changes the
+shader cache keys. The Metal shader lists are unchanged (the same 68 compute kernels and 31 graphics pairs, same texts);
+their `emitter` line names the v1.1.2 Kyty.
+
+- **Ray-tracing load hold + budget guard** (Kyty, `KYTY_RT_LOAD_HOLD`, `KYTY_RT_BUDGET_GUARD`, default on): Kyty's software
+  ray-tracing kernel ran a burst over a BVH that was not built yet at level entry (Sky Garden: up to 784k lanes running to
+  the 8192-test node budget, a 0.6-1.2 s GPU stall and, by correlation, the GPU watchdog stops seen at level entry). The
+  hold skips those dispatches while a level streams in; the guard skips them for 0.5-8 s after a dispatch exhausted at
+  least 1024 lanes. In play: 0 budget exhaustions, 0 guard trips, level-entry command-buffer time shifts 99-246 ms instead
+  of 632 ms; the lighting the kernel feeds catches up a moment later. Unit test `rt_budget_guard_tests`.
+- **Quiet cache saves during level loads** (Kyty `KYTY_SAVE_LOAD_QUIET_S=20`; KosmicKrisp `KK_PIPELINE_ARCHIVE_FLUSH_N=4096`
+  `_S=1800`): periodic pipeline/program cache saves (54-360 ms each, plus a ~285 MB transient) no longer land in a level
+  transition, and KosmicKrisp's pipeline archive is written at exit instead of a few seconds into a level (a 454 ms archive
+  serialize had coincided with a 426 ms frame). Caveat: a crash loses that session's new archive entries (they compile
+  again next time; Kyty's caches and the Metal library cache are still saved). `nps5 cache prepare` keeps the old archive
+  timing.
+- **Display-aware frame cap** (Kyty `KYTY_FPS_LIMIT_MILLI=auto`, new fractional `KYTY_FPS_LIMIT_MILLI=<fps>`): on a fixed
+  refresh display of R Hz the cap is R/n (n >= 2, from the frame rate the game holds: steps down after 2 s, probes up
+  after 5 s with back-off), none on adaptive (ProMotion) displays; presents stay immediate. Logged as `[autocap] ...`.
+  Unit test `tests/AutoCapTests.cpp`.
+- **Learned fault classes** (Kyty `KYTY_FAULT_CLASS=1`, `KYTY_CLEAN_PAGE=1`): a guest page the CPU read-faults in 3 guest
+  frames becomes read-open (no fault, no burst wait; bytes up to ~3 frames old, as served loads already returned); a page
+  whose stores keep waiting for GPU bytes is closed again for 600+ frames. A store to a page whose GPU bytes are already
+  published skips the drain. Sky Garden: fault handler 57 -> 21 ms per frame, burst waits 566 -> 2 per 10 s (fps change
+  inside run noise). Brings the read-open page mechanism, the faster fault path (shared protect lock, lock-free dirty
+  queries) and the 15-bit write-watcher count with it (all other switches of those stay off). Unit tests
+  `tests/FaultClassTests.cpp`, `page_manager_tests --many-watchers`.
+- **GPU accuracy low** (Kyty `KYTY_GPU_ACCURACY=high|normal|low`, `KYTY_FAST_MATH_DENY`, `KYTY_FAST_MATH_ALLOW`): `low` gives
+  pixel and compute shaders fast math except the guest shaders in `games/PPSA21564/fast-math-deny.txt` (new profile file,
+  64-bit guest shader hashes only; `scripts/check.sh` accepts nothing else in it): the 66 compute and 20 fragment shaders
+  our Metal translations replace keep exact math, so KosmicKrisp's keys for them and our verified texts are those of the
+  high tier. `normal` is selective precision (fast outside an Inf/NaN-sensitive set). About -0.9 ms per frame (n=1);
+  a very slight flicker on a few close rocks was seen in play. `nps5 run` passes the deny list on the kyty back end.
+  `nps5 cache prepare` prepares the tier the profile sets.
+- `nps5 run --until scene:<name>+N` (and `log:`/`open:`/`marker:`) no longer kills a healthy run as EARLY_STALL at about
+  50 s. The watcher counted only present counters as progress, and the Kyty back end has none (only frame dumps), so a run
+  with a pending scene marker stalled 45 s after its first frame. A new frame dump is now progress, and while a marker
+  target is pending and no present counter exists the default stall limit is 150 s. An explicit `--until
+  ...,stall:N,black:N` (or a profile `stall_fail_s`) is still used as written; a frozen present counter still stalls at 45 s.
+- Kyty: flight recorder monitor gap no longer wraps when a heartbeat stamp is newer than the monitor's clock read (false
+  `mainhang` dumps); the recorder stays off by default. Memory trim stays off by default.
+
 ## v1.1.1 (2026-11-19)
 
 Everything in v1.1, plus our own Metal translation for 31 graphics (vertex + fragment) shader pairs of ASTRO BOT. Needs
@@ -202,7 +247,6 @@ Needs a fresh shader-cache prepare (`nps5 cache prepare`) if you prepared with a
 
 ## Unreleased
 
-- `nps5 run --until scene:<name>+N` (and `log:`/`open:`/`marker:`) no longer kills a healthy run as EARLY_STALL at about 50 s. The watcher counted only present counters as progress, and the Kyty back end has none (only frame dumps), so a run with a pending scene marker stalled 45 s after its first frame. A new frame dump is now progress, and while a marker target is pending and no present counter exists the default stall limit is 150 s. An explicit `--until ...,stall:N,black:N` (or a profile `stall_fail_s`) is still used as written; a frozen present counter still stalls at 45 s.
 ## v1.0.2 (2026-11-18)
 
 - Runtime: `readv` and `fread` into guest memory are repeated after an EFAULT from a page the back end protected again

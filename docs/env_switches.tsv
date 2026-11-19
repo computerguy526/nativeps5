@@ -940,6 +940,7 @@ KYTY_CFG_TESTS_CONTINUE	kyty		tests/shaderCfgTests.cpp
 KYTY_CJK_FONT	kyty		src/common/systemFonts.cpp
 KYTY_CLAMP_RANGE_MEMO	kyty		src/kernel/memory.cpp
 KYTY_CLAMP_RANGE_MEMO_VERIFY	kyty		src/kernel/memory.cpp
+KYTY_CLEAN_PAGE	kyty	1: a store to a page whose GPU bytes are already published skips the drain (v1.1.2 profile default on)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_CLEAN_UNTOUCHED	kyty		src/graphics/host_gpu/renderer/drawPrep/drawPrep.cpp
 KYTY_CLEAN_UNTOUCHED	nativeps5		titles/kyty-preset.env
 KYTY_CLEAN_VERDICT_CACHE	kyty		src/graphics/host_gpu/cleanVerdictCache.h
@@ -1153,18 +1154,31 @@ KYTY_EQUEUE_COALESCE	kyty		src/kernel/eventQueue.cpp
 KYTY_EXEC_SELECTS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FALSE_SHARING_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FALSE_SHARING_WRITES_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAST_BACKING_TRANSFERS	kyty		src/kernel/memoryAddressSpace.inc
 KYTY_FAST_BACKING_TRANSFERS	nativeps5		titles/kyty-preset.env
 KYTY_FAST_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 0 (v1 codegen); 1 = opt-in fast math, known 1-in-3-frame sky/rock/visor flicker at the crash site; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH_ALLOW	kyty	file of guest shader hashes: only these get fast math	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH_DENY	kyty	file of guest shader hashes kept at exact math under KYTY_FAST_MATH / KYTY_GPU_ACCURACY (games/<id>/fast-math-deny.txt)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH_LOG	kyty	1: one stderr line per guest shader with its fast-math decision	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_STAGES	kyty	fs|cs|fscs stages KYTY_FAST_MATH covers (default fscs)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_VS	kyty	1 = vertex shaders fast too, position slice kept exact (= KYTY_FAST_MATH=3)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_PKRTZ	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FATAL_EXIT_PROCESS	kyty		src/common/assert.cpp
 KYTY_FAULT_AHEAD_ADAPT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_AHEAD_KB	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS	kyty	1: learned read class per guest page (late pages stay readable, store conflicts demote; v1.1.2 profile default on)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_CONFLICTS	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_EXACT_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_PROFILE	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_PROFILE_OUT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_SEEDS	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_CLASS_WINDOW	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_COST_LOG	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP_SECONDS	kyty		src/graphics/host_gpu/faultCost.cpp
+KYTY_FAULT_PAGE_LIFT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
 KYTY_FLIGHTREC	kyty	flight recorder (v1.1; compiled in, OFF unless set): 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); unset or 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
 KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
@@ -1183,6 +1197,7 @@ KYTY_FLIP_LOG	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_FLIP_WAIT_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_FOLD_LANE_MASKS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FPS_LIMIT	kyty		src/graphics/presentation/videoOut.cpp
+KYTY_FPS_LIMIT_MILLI	kyty	present-side frame cap in fps (fractional, e.g. 37.5) or auto = from the window's display (v1.1.2 profile default auto)	src/graphics/presentation/videoOut.cpp
 KYTY_FRAME_FENCE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_FRAME_START_LIMIT	kyty		src/graphics/presentation/videoOut.cpp
 KYTY_FRAME_START_SLACK_MS	kyty	frame cap that holds the game at its frame start instead of queueing finished frames; prototype, off	src/graphics/presentation/videoOut.cpp
@@ -1197,6 +1212,8 @@ KYTY_GC_SIDE_SETTLE_LAZY_CRITICAL	kyty	passes the collector may defer side-readb
 KYTY_GDS_EOP_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_GDS_TRACE	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_GFX_SLICE_DRAWS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_GPU_ACCURACY	kyty	high (exact) | normal (selective precision) | low (fast math outside the deny list; v1.1.2 profile default)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_GPU_ACCURACY_EXTRA	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_GPU_BINDING_BRIDGE	kyty		tools/hybrid/gen_kyty_gpu_exports.py
 KYTY_GPU_BINDING_KYTY	kyty		tools/hybrid/gen_kyty_gpu_exports.py
 KYTY_GPU_BINDING_KYTY_VERIFIED	kyty		tools/hybrid/gen_kyty_gpu_exports.py
@@ -1348,6 +1365,7 @@ KYTY_LOD_STATS_PLAIN_VARIANT	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
 KYTY_LOOP_GUARD	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LOOP_GUARD_SHADERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MAD_MODE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_MAP_REGION_EPOCH	kyty		src/kernel/memoryAddressSpace.inc
 KYTY_MEMLOG	kyty	1 = a 1 Hz [mem] line (footprint, resident, compressed, swap, guest direct memory) and [slowframe] lines on stderr	src/graphics/presentation/window/swapchain.cpp
 KYTY_MEMTRIM_ALIAS_FRAMES	kyty	`<n>`: free an image unused for n frames whose range a newer GPU-written image at the same address covers; default 0 = off; experimental	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_MEMTRIM_BIG_WIDTH	kyty	`<n>`: render/depth/storage images at least n pixels wide get their own Metal heap (dedicated allocation), so retiring one returns its memory; default 0 = off; 2400 covers the off-resolution targets; opt-in (with KYTY_BDA_PAGETABLE_MB=64)	src/graphics/host_gpu/vma.cpp
@@ -1528,6 +1546,7 @@ KYTY_PIPELINE_STATS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.
 KYTY_PIPELINE_STATS	nativeps5		scripts/nps5lib/cache.py
 KYTY_PRECISE_COND_WAITS	kyty		src/kernel/pthread.cpp
 KYTY_PRECISE_WRITE_RANGES	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
+KYTY_PRECISION_DUMP_DIR	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PREDICATION_NO_DRAIN	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_PRESENT_ABS_VBLANK	kyty	`1` (default) presents a frame when it is ready instead of at the present thread's 60 Hz tick: frame-time stdev 6.4-9.7 -> 1.1-3.6 ms	src/graphics/presentation/videoOut.cpp
 KYTY_PRESENT_BOX_DOWNSCALE	kyty		src/graphics/presentation/window/swapchain.cpp
@@ -1562,6 +1581,7 @@ KYTY_PROGRESS_OVERLAY_LOG	kyty		src/graphics/progressOverlay.h
 KYTY_PROGRESS_TITLE	kyty		src/graphics/compileProgress.h
 KYTY_PROGRESS_TITLE_LOG	kyty		src/graphics/compileProgress.h
 KYTY_PROGRESS_TITLE_LOG	nativeps5		scripts/nps5lib/cache.py
+KYTY_PROTECT_LOCK_SHARED	kyty		src/kernel/memory.cpp
 KYTY_PS_APPEND_LIVE_ELECTION	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_PS_HELPER_ATOMICS_SKIP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_PS_LIVE_EXEC	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1578,6 +1598,7 @@ KYTY_READBACK_EAGER_FLUSHES	kyty		src/graphics/host_gpu/renderer/cache/bufferCac
 KYTY_READBACK_EAGER_FRAME_BUDGET	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READBACK_EAGER_IDLE_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READBACK_EAGER_PAGES	kyty	size of the eager-readback hot set in pages; 64 -> 256 ended a fault storm in a level (1250-1700 -> 8-77 ms/s in the fault handler)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_READBACK_EAGER_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READBACK_FLUSH_SIDE	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_READBACK_FLUSH_SIDE	nativeps5		titles/kyty-preset.env
 KYTY_READBACK_MERGE_GAP_KB	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1625,8 +1646,16 @@ KYTY_RES_AUDIT_INTERNAL	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_RES_AUDIT_MAX	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_RES_AUDIT_SHADERS	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_ROBUST_BUFFER_LOADS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_RT_BUDGET_GUARD	kyty	software RT dispatches skipped while lanes exhaust the BVH node budget (default on, 0 off)	src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_BUDGET_GUARD_HOLD_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_BUDGET_GUARD_LANES	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_DUMP_DIR	kyty		src/graphics/shader/recompiler/ShaderRecompiler.cpp
 KYTY_RT_FUNCTION	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_RT_LOAD_HOLD	kyty	software RT dispatches held while a level streams in (default on, 0 off)	src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_LOAD_HOLD_MAX_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_LOAD_HOLD_PHASE	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_LOAD_HOLD_QUIET_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_RT_LOAD_HOLD_VFS_MBS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_NODE_BUDGET	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_RT_NODE_STATS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_RT_PIPELINE_ASYNC	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1640,6 +1669,9 @@ KYTY_SAMPLER_MEMO	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_SAMPLER_REDUCTION	kyty		src/graphics/host_gpu/renderer/cache/samplerCache.cpp
 KYTY_SAMPLE_LOD_CLAMP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_SAMPLE_OFFSETS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_SAVE_LOAD_MAX_DEFER_S	kyty		src/common/nps5Frame.h
+KYTY_SAVE_LOAD_QUIET_S	kyty	periodic cache saves held during and N s after a level load (v1.1.2 profile default 20)	src/common/nps5Frame.h
+KYTY_SAVE_LOAD_VFS_MBS	kyty		src/common/nps5Frame.h
 KYTY_SERVICE_PRIORITY	kyty		src/common/threads.cpp
 KYTY_SET_REUSE_FRESH	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_SHADER_COUNT_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1768,6 +1800,7 @@ KYTY_TILER_SCRATCH_POOL	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
 KYTY_TILER_SCRATCH_POOL_IDLE_MS	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
 KYTY_TILER_SCRATCH_POOL_IDLE_MS	nativeps5		titles/kyty-preset.env
 KYTY_TILER_SCRATCH_POOL_MB	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
+KYTY_TRACKER_LOCKFREE_DIRTY	kyty		src/graphics/host_gpu/memoryTracker.cpp
 KYTY_TRACKER_LOCK_PARK	kyty		src/graphics/host_gpu/parkingLock.h
 KYTY_TRACKER_LOCK_SPIN_US	kyty		src/graphics/host_gpu/parkingLock.h
 KYTY_TRACKER_RELAXED_QUERIES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1836,6 +1869,9 @@ KYTY_WRITTEN_SYNC_SKIP_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferC
 KYTY_XFRAME_REUSE	kyty		src/graphics/host_gpu/renderer/drawPrep/xframeReuse.cpp
 KYTY_XFRAME_REUSE_SLOTS	kyty		src/graphics/host_gpu/renderer/drawPrep/xframeReuse.cpp
 KYTY_XFRAME_REUSE_STATS	kyty		src/graphics/host_gpu/renderer/drawPrep/xframeReuse.cpp
+KYTY_ZC_UPLOAD_CLASSIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_ZEROCOPY_READ_OPEN	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_ZEROCOPY_READ_OPEN_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 MESA_KK_DEBUG	kosmickrisp		vulkan/kk_debug.c
 MESA_KK_DISABLE_WORKAROUNDS	kosmickrisp		vulkan/kk_physical_device.c
 MESA_KK_EXPERIMENTAL	kosmickrisp		vulkan/kk_debug.c
