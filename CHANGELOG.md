@@ -3,9 +3,9 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.1.2 (draft, not released)
+## v1.1.2 (2026-11-19)
 
-Everything in v1.1.1, with five Kyty features on by default in the ASTRO BOT profile (each has an off switch, README
+Everything in v1.1.1, with new Kyty features and memory settings on by default in the ASTRO BOT profile (each has an off switch, README
 "Options on by default"). Needs a fresh shader-cache prepare (`nps5 cache prepare`): the GPU accuracy tier changes the
 shader cache keys. The 68 compute kernels and the 31 graphics pairs of v1.1.1 keep their texts; their `emitter` line names the v1.1.2 Kyty.
 
@@ -60,7 +60,10 @@ shader cache keys. The 68 compute kernels and the 31 graphics pairs of v1.1.1 ke
   target is pending and no present counter exists the default stall limit is 150 s. An explicit `--until
   ...,stall:N,black:N` (or a profile `stall_fail_s`) is still used as written; a frozen present counter still stalls at 45 s.
 - Kyty: flight recorder monitor gap no longer wraps when a heartbeat stamp is newer than the monitor's clock read (false
-  `mainhang` dumps); the recorder stays off by default. Memory trim stays off by default.
+  `mainhang` dumps); the recorder stays off by default. KYTY_MEMTRIM_BIG_WIDTH stays opt-in.
+- Known issues: an occasional hitch at Sky Garden level entry, where the software ray tracing briefly runs before its
+  BVH is valid; the RT budget guard stops it within 0.5-1 s (no GPU watchdog in testing). A rare crash of the game's
+  asset loader shortly after entering Sky Garden (2 of 13 test runs) is under investigation.
 
 ## v1.1.1 (2026-11-19)
 
