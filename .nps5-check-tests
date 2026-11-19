@@ -19,6 +19,7 @@ python3 -I tests/test_bugreport.py
 python3 -I tests/test_logsummary.py
 python3 -I tests/test_watch.py
 python3 -I tests/test_cache.py
+python3 -I tests/test_fetch.py
 python3 -I tests/test_metal.py
 python3 -I tests/test_bench.py
 python3 -I tests/test_regress.py

@@ -27,7 +27,7 @@ SCHEMA = 1
 RESERVED = ("bin", "patch", "gpu", "libs", "lib", "kk", "kyty", "workdir", "cache", "save")
 CLASSES = ("func", "perf")
 RUN_CAP_S, RUN_NO_REASON_S, GPU_PROFILE_MAX_S = 180, 90, 40
-CACHE_RUN_CAP_S = 1800                            # `nps5 cache prepare|record|check` runs (tag cache-*): the list ends them, secs is only their ceiling
+CACHE_RUN_CAP_S = 1800                            # `nps5 cache prepare` passes (is_prepare_run): the list ends them, secs is only their ceiling
 PLAY_CAP_S = 7200                                 # --play: an interactive session
 NAME_RE = r"[A-Za-z0-9_][A-Za-z0-9_.+:-]*"       # a tag, a save name, a relative work dir: one path component, never .. or a path
 RUN_JSON_KEYS = ("schema", "title", "tag", "class", "gpu", "scene", "until", "secs", "arm", "build", "lineage", "patches",
@@ -156,6 +156,14 @@ def _int(s, what):
         raise Refuse("%s must be a number, got %r" % (what, s), 2)
 
 
+def is_prepare_run(plan):
+    """A `nps5 cache prepare` pass: class func, tag cache-prepare and KYTY_PIPELINE_LIST_PREPARE=1, which builds the list and
+    exits before the game runs. Only such a run may ask for the CACHE_RUN_CAP_S ceiling (v1.1 let any func run tagged cache-*,
+    e.g. `nps5 cache record --secs 1800` or a hand-made --tag cache-x, play for 30 minutes)."""
+    return (plan.env.get("NPS5_RUN_CLASS") == "func" and plan.env.get("NPS5_RUN_TAG") == "cache-prepare"
+            and plan.env.get("KYTY_PIPELINE_LIST_PREPARE") == "1")
+
+
 def check_final(g, p, plan, secs, environ, gpu):
     """The safety rules on the FINAL environment, whatever layer a word came from. Raises Refuse(78)."""
     forb = [c[0] for c in p.get("env_forbidden") if c]
@@ -187,7 +195,7 @@ def check_final(g, p, plan, secs, environ, gpu):
     if getattr(plan, "play", False):
         if secs > PLAY_CAP_S:
             raise Refuse("%d s is over the %d s cap of --play" % (secs, PLAY_CAP_S))
-    elif secs > RUN_CAP_S and not (plan.env.get("NPS5_RUN_CLASS") == "func" and str(plan.env.get("NPS5_RUN_TAG") or "").startswith("cache-") and secs <= CACHE_RUN_CAP_S):
+    elif secs > RUN_CAP_S and not (secs <= CACHE_RUN_CAP_S and is_prepare_run(plan)):
         raise Refuse("%d s is over the %d s cap (a person playing: --play)" % (secs, RUN_CAP_S))
     elif secs > RUN_NO_REASON_S and not environ.get("NPS5_RUN_REASON"):
         raise Refuse("runs over %d s need NPS5_RUN_REASON=<why>" % RUN_NO_REASON_S)
