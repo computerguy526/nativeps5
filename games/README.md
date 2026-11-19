@@ -67,6 +67,9 @@ The folder holds:
   Mac and keeps the pair only when BOTH texts hash to the listed sha256. A list with only the header lines means no graphics
   step and KosmicKrisp's own pipelines. `scripts/check.sh` accepts the file only in that form, and a list with pair rows only
   with its `metal-gfx-pairs.tsv.verified` record (sha256 of the list + result line, like `pipelines.kyplst.verified`).
+- **`fast-math-deny.txt`** (optional, v1.1.2): 64-bit guest shader hashes, one per line, plus comments; nothing else
+  (`scripts/check.sh`). `nps5 run` passes it as `KYTY_FAST_MATH_DENY` on the Kyty back end: these shaders keep exact math
+  at every `KYTY_GPU_ACCURACY`, which keeps KosmicKrisp's keys (and the verified texts) of the shaders the Metal lists replace.
 - **`emitter`** line of both Metal lists: the Kyty commit and release tag the hashes were made with (components.lock pins
   the same commit). When texts do not reproduce, `nps5 cache prepare` names the Kyty it found and exits 3.
 
