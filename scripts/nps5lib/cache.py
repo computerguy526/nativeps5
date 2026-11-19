@@ -910,7 +910,8 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
     try:
         if glist:
             g = metalmod.generate_gfx(glist, prog, os.path.join(ctx.dir, "kk-libcache", "msl"), odir, ctx.environ, jobs=compile_jobs(ctx.environ), label=label,
-                                      lens=metalmod.seen_vertex_lens(run_logs(rd)) if rd else None)
+                                      lens=metalmod.seen_vertex_lens(run_logs(rd)) if rd else None,
+                                      keep_dir=ctx.root + "." + metalmod.KK_VS_KEEP)   # outlives the cache dir (a new prepare starts empty)
             st["gfx_listed"], st["gfx_written"] = g["listed"], g["written"]
             st["written"] += g["written"]
             print(label + metalmod.gfx_summary(g), flush=True)

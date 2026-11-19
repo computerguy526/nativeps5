@@ -419,6 +419,17 @@ class GfxPrepare(Prepare):
         self.assertEqual((kv["metal_gfx"], kv["metal_shaders"]), ("1/1", "0/0"))
         self.assertIn("Metal graphics: 1 of 1 verified vertex+fragment pairs generated", out)
 
+    def test_second_prepare_keeps_pairs_without_kk_texts(self):
+        rc, c, runs, out = self.prepare()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.isfile(os.path.join(c.root + "." + metal.KK_VS_KEEP, self.kk_vs + ".metal")))
+        shutil.rmtree(c.dir)
+        self.kktext = "// metallibs loaded: KosmicKrisp wrote no vertex text\n"
+        rc, c, runs, out = self.prepare()
+        self.assertEqual(rc, 0, out)
+        kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv"))
+        self.assertEqual(kv["metal_gfx"], "1/1", out)
+
     test_prepare_generates_between_passes = None
     test_prepare_opt_out_is_v10 = None
     test_prepare_without_tool_still_prepares = None

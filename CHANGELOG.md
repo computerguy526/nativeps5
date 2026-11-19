@@ -20,8 +20,8 @@ a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned b
   18 differ only on the NaN/inf input profile. 10 of the 31 have the exact texts of two full play sessions with no visual
   issue (title, ship, world map, save cards, Sky Garden); the other 21 differ from those only by the out-of-bounds fix
   below. KosmicKrisp keeps its own pipeline when a replacement fails to compile. Opt out with `NPS5_METAL_SHADERS=0`.
-  A later `nps5 cache prepare` keeps the pairs: KosmicKrisp's vertex texts they link to are kept in the cache
-  (`kk-vs-keep`), because a prepare that loads stored metallibs no longer writes them.
+  A later `nps5 cache prepare` keeps the pairs: KosmicKrisp's vertex texts they link to are kept next to the metallib
+  store (`<cache>.kk-vs-keep`), because a prepare that loads stored metallibs no longer writes them.
 - **Kyty MSL back end (graphics):** the emitter changes these texts depend on: raw-vertex pixel reads unpacked as on the
   host path, KosmicKrisp's float model for pixel shaders, KosmicKrisp's in-shader blend and write mask, dword-aligned
   buffer base offsets, graphics permutations at their stored push-data cursor, IMAGE_SAMPLE_D with the descriptor LOD bias,

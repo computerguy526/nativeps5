@@ -17,7 +17,7 @@ KK keeps its own pipeline when a replacement fails to compile.
 Graphics: games/<id>/metal-gfx-pairs.tsv lists verified (vertex, fragment) PAIRS the same way (hashes of the programs, of
 KosmicKrisp's two MSL texts and of ours, plus the numeric layout words the emitter needs). For each pair this module generates the
 fragment text, then the vertex text linked to the fragment's reads and to KosmicKrisp's own vertex text (read from this cache's
-kk-libcache/msl, written by pass 1; a copy is kept in <cache dir>/kk-vs-keep because a later prepare loads metallibs and
+kk-libcache/msl, written by pass 1; a copy is kept in <cache root>.kk-vs-keep because a later prepare loads metallibs and
 KosmicKrisp then writes no text), and keeps BOTH files only when both sha256 equal the list's. They go to
 <cache dir>/metal-shaders/<kk_vs>_<kk_fs>.vs.metal / .fs.metal; KosmicKrisp swaps a pipeline only when its two keys match a pair.
 
@@ -537,7 +537,7 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
 KK_VS_KEEP = "kk-vs-keep"
 
 
-def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None):
+def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None, keep_dir=None):
     """Add <kk_vs>_<kk_fs>.vs.metal/.fs.metal to out_dir (created if needed; call after generate(), which replaces the directory)
     plus index-gfx.tsv/skipped-gfx.tsv. -> dict(listed, written, skipped, reasons, list_sha)."""
     out = out or sys.stdout
@@ -553,9 +553,10 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
     perms = read_perms(programs, cursors=True)
     env = clean_env(environ)
     # KosmicKrisp writes its vertex MSL to kk-libcache/msl only when it compiles a shader; a later prepare LOADS the metallibs, so
-    # the texts are gone and every pair would be dropped. Keep a copy of each needed vertex text next to the output dir
-    # (<cache dir>/kk-vs-keep/<kk key>.metal, local like the rest of the cache); the sha256 check of our texts still decides.
-    keep = os.path.join(os.path.dirname(os.path.abspath(out_dir)), KK_VS_KEEP)
+    # the texts are gone and every pair would be dropped. Keep a copy of each needed vertex text in keep_dir (prepare: next to the
+    # metallib store, it outlives the cache dir; default <out_dir>/../kk-vs-keep) as <kk key>.metal. The key is KosmicKrisp's
+    # BLAKE3 of the text, so the store is content-addressed; the sha256 check of our texts still decides.
+    keep = keep_dir or os.path.join(os.path.dirname(os.path.abspath(out_dir)), KK_VS_KEEP)
     wanted = {r["kk_vs"] for r in rows}
     kkv = {k: os.path.join(keep, k + ".metal") for k in wanted if os.path.isfile(os.path.join(keep, k + ".metal"))}
     found = find_kk_vertex(kk_msl_dir, wanted - set(kkv), lens) if wanted - set(kkv) else {}
