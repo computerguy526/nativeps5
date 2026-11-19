@@ -322,14 +322,14 @@ class RepoTables(unittest.TestCase):
         p = game.Profile(d); env = lambda spec, gpu: {k: v for k, v, _ in game.compose_env(p, gpu=gpu, hw=hw.parse_spec(spec) if spec else None)}
         ref, none = env("chip=m4pro ram=24 os=26.6.2 osbuild=25G83", "kyty"), env(None, "kyty")
         self.assertEqual(list(ref.items()), list(none.items()))                 # the reference machine = the profile without hardware
-        self.assertEqual(ref["KYTY_VRAM_BUDGET_MB"], "6144"); self.assertNotIn("KYTY_TEX_MIP_SKIP", ref)
+        self.assertEqual(ref["KYTY_VRAM_BUDGET_MB"], "6144"); self.assertEqual(ref["KYTY_TEX_MIP_SKIP"], "2")   # v1.1.2: every Mac
         self.assertEqual(ref["KK_METAL_CACHE_ID"], "com.nativeps5.kyty.PPSA21564")
         small = env("chip=m4 ram=16 os=26.6.2 osbuild=25G83", "kyty")
         self.assertEqual((small["KYTY_VRAM_BUDGET_MB"], small["KYTY_TEX_MIP_SKIP"], small["KYTY_TEXTURE_RESIDENT_TRIM"]), ("4096", "2", "1"))
         self.assertEqual(small["KK_METAL_CACHE_ID"], "com.nativeps5.kyty.PPSA21564.g16.25G83")
         self.assertEqual((small["KYTY_PIPELINE_JOURNAL_THREADS"], small["KYTY_PIPELINE_SKIP_THREADS"]), ("2", "1"))
         big = env("chip=m4max ram=64 os=26.6.2 osbuild=25G83", "kyty")
-        self.assertEqual(big["KYTY_VRAM_BUDGET_MB"], "6144"); self.assertNotIn("KYTY_TEX_MIP_SKIP", big)
+        self.assertEqual(big["KYTY_VRAM_BUDGET_MB"], "6144"); self.assertEqual(big["KYTY_TEX_MIP_SKIP"], "2")
         self.assertEqual({k: v for k, v in big.items() if k != "KK_METAL_CACHE_ID"}, {k: v for k, v in ref.items() if k != "KK_METAL_CACHE_ID"})
         a_ref, a_small = env("m4pro-24g", "anyps5"), env("m1-16g", "anyps5")
         self.assertNotIn("APS5_TEX_MIP_SKIP_LEVELS", a_ref); self.assertEqual(a_small["APS5_TEX_MIP_SKIP_LEVELS"], "2")

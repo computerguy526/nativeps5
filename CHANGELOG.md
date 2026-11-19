@@ -41,6 +41,11 @@ their `emitter` line names the v1.1.2 Kyty.
   high tier. `normal` is selective precision (fast outside an Inf/NaN-sensitive set). About -0.9 ms per frame (n=1);
   a very slight flicker on a few close rocks was seen in play. `nps5 run` passes the deny list on the kyty back end.
   `nps5 cache prepare` prepares the tier the profile sets.
+- **Less memory on every Mac** (profile): `KYTY_TEX_MIP_SKIP=2` (was 16 GB Macs only) and `KYTY_BDA_PAGETABLE_MB=64` (was
+  opt-in). On a 24 GB Mac Sky Garden peaked at 17.9-19.1 GB with v1.1.1 and with the v1.1.2 defaults alike (footprint,
+  mostly compressed memory and swap), at the 18.9 GB self memory limit `nps5 run` sets; runs ended with exit code 86.
+  Mip skip saves about 0.8-1.3 GB there, the smaller GPU address table about 0.45 GB. Off: `KYTY_TEX_MIP_SKIP=0`,
+  `KYTY_BDA_PAGETABLE_MB=0`.
 - `nps5 run --until scene:<name>+N` (and `log:`/`open:`/`marker:`) no longer kills a healthy run as EARLY_STALL at about
   50 s. The watcher counted only present counters as progress, and the Kyty back end has none (only frame dumps), so a run
   with a pending scene marker stalled 45 s after its first frame. A new frame dump is now progress, and while a marker

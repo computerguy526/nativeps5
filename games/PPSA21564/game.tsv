@@ -67,7 +67,8 @@ env	NPS5_KYTY_ALIAS_TRIM_MS=1000	gpu=kyty	alias views no longer count twice in t
 env	KYTY_TEXTURE_RESIDENT_TRIM=1	gpu=kyty	memory
 env	KYTY_VRAM_BUDGET_MB=6144	gpu=kyty	24 GB Mac (measured; 7168 reaches the memory limit)
 env	KYTY_VRAM_BUDGET_MB=4096	gpu=kyty,ram<=16	untested: 16 GB Mac, a quarter of RAM
-env	KYTY_TEX_MIP_SKIP=2	gpu=kyty,ram<=16	untested: 16 GB Mac, large sampled textures start two levels down (needs the resident trim above)
+env	KYTY_TEX_MIP_SKIP=2	gpu=kyty	v1.1.2: every Mac; large sampled textures start two levels down (needs the resident trim above); Sky Garden peak about -0.8..-1.3 GB
+env	KYTY_BDA_PAGETABLE_MB=64	gpu=kyty	v1.1.2: GPU address table 512 -> 64 MB (covers the guest addresses ASTRO BOT uses)
 env	NPS5_KYTY_TRACE=0	gpu=kyty	no trace
 env	KYTY_READ_FAULT_PUBLISHED_FRAME_BURST=48	gpu=kyty	hoover_beach read-fault stalls (~340 ms) 3-33/min -> 0-1.3/min (11 runs, 2026-11-17)
 env	KYTY_OCCLUSION_QUERY_DRAW_SKIP=1	gpu=kyty	skip query-only draws while occlusion results are synthetic

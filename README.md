@@ -148,17 +148,22 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   `KYTY_GPU_ACCURACY=high`; put it on the `ENV=` line of `titles/<id>.env` and run `nps5 cache prepare` again, which then
   prepares that tier (with `--env` alone its pipelines compile on first use). `normal` is an in-between tier (fast math outside an Inf/NaN-sensitive set).
 
-The flight recorder (below) and memory trim stay off by default.
+- **Less memory** (v1.1.2, every Mac): `KYTY_TEX_MIP_SKIP=2` (large textures start two mip levels down; it needs
+  `KYTY_TEXTURE_RESIDENT_TRIM=1`, which the profile sets) and `KYTY_BDA_PAGETABLE_MB=64` (a smaller GPU address table).
+  Without them Sky Garden peaked at 17.9-19.1 GB on a 24 GB Mac, at the 18.9 GB memory limit `nps5 run` sets. Off:
+  `KYTY_TEX_MIP_SKIP=0` (full texture detail), `KYTY_BDA_PAGETABLE_MB=0` (the whole table).
+
+The flight recorder (below) and the rest of memory trim (`KYTY_MEMTRIM_BIG_WIDTH`) stay off by default.
 
 ### Memory and GPU options (off by default, v1.1.1)
 
 Opt-in Kyty switches for Macs short on memory; pass them with `nps5 run --env NAME=VALUE` or the `ENV=` line of
 `titles/<id>.env`. Each is off unless you set it.
-- `KYTY_BDA_PAGETABLE_MB=64` with `KYTY_MEMTRIM_BIG_WIDTH=2400`: a smaller GPU address table, and the large off-resolution
+- `KYTY_MEMTRIM_BIG_WIDTH=2400` (v1.1.2: `KYTY_BDA_PAGETABLE_MB=64` is now a default): the large off-resolution
   render targets get their own Metal heap so their memory goes back to the system when they are retired.
 - `KYTY_TEX_MIP_SKIP=1` or `2` (needs `KYTY_TEXTURE_RESIDENT_TRIM=1`, which the ASTRO BOT profile sets): drops the
   finest mip level(s) of large textures; in Sky Garden texture memory fell from about 1.9 GB to 0.2 GB with `2`, at the
-  cost of texture detail. The ASTRO BOT profile already uses `2` on Macs with 16 GB or less.
+  cost of texture detail. The ASTRO BOT profile uses `2` on every Mac since v1.1.2.
 - `KYTY_DEPTH_FEEDBACK_USAGE=0`: lets KosmicKrisp keep Metal's lossless depth compression (about 2 ms per frame faster in
   ASTRO BOT).
 
