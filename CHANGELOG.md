@@ -90,7 +90,8 @@ fresh shader-cache prepare (`nps5 cache prepare`). Fast math stays off, as in v1
   integer f32 to f16 round-toward-zero).
 - **Faster `nps5 cache prepare`.** Compiled Metal libraries are kept in a content-addressed store (`NPS5_METALLIB_STORE`),
   so the first pass only compiles shaders that are new; the library builder no longer shells out per file (biggest-first,
-  `NPS5_BUILD_QOS` to pick the QoS); MSL generation and the vertex-text lookup are incremental; the second pass is skipped
+  `NPS5_BUILD_QOS` to pick the QoS); `nps5 cache metal` reuses unchanged MSL texts and the vertex-text lookup hashes
+  each file once; the second pass is skipped
   when the first pass loaded everything from libraries and there is nothing new to generate (`NPS5_PREPARE_KEEP_PASS1=0`
   restores it). A second prepare on an unchanged cache is much shorter. `nps5 cache prepare` also works again for the
   1800 s ceiling (it was refused by the 180 s run cap, rc 78, in v1.0.3).
