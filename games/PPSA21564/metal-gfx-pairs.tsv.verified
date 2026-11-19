@@ -2,10 +2,10 @@
 # The list holds hashes (program digests, specialization keys, KosmicKrisp keys, sha256 of our texts) and small layout numbers
 # only, every row passed the row form check, and the public generator (kyty_msl_dump of the emitter commit below, run by
 # scripts/nps5lib/metal.py) reproduced every listed text sha256-exact from a program cache, so no text has to be shipped.
-sha256=08122e099264d43c6cd96cc11112aa77f226409780e1e38d419cbc387cb2cb8c
+sha256=1d4fdd7ce7007e5e61bb331e860f990f7d41d3725c962d59d8392c3b659a8f27
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
 counts=pairs 31, rows 35, reproduced 35 of 35 (texts sha256-exact)
-emitter=8793ceadb47b88b559feb208ec166076251f981b v1.1.1 (nativeps5-kyty)
+emitter=df6dffe6a2435bff0ab1ea75359712e21bb312d1 v1.1.1 (nativeps5-kyty)
 evidence=autoval GPU differential test vs KosmicKrisp's pair on every pipeline of the key (VERIFIED class only)
 date=2026-11-19

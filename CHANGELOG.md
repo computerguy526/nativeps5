@@ -40,6 +40,10 @@ a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned b
   symlinked folder took seconds (46k entries: 3.0 s, under a lock that blocked other listings) and a dangling link stayed
   hidden after its target appeared. It is now hash-indexed (53 ms for the same folder), failed lookups are not cached,
   and folders changed within the file-time granularity are not cached. Real dumps were not affected.
+- **Kyty fixes from review:** the pipeline-cache saves at window close and SIGTERM run at normal priority, and a
+  periodic save skipped as unchanged still writes the known-pipeline list; `KYTY_MAD_MODE=fused` with the relaxed pixel
+  prelude no longer aborts; the MSL binding model is built per emission; in-shader blending reads the destination only for
+  render targets the shader declares. None of them changes a listed shader text.
 - **Fixes from review:** `scripts/fetch-components.sh` verifies a tag before the checkout exists (a refused clone
   no longer stays behind to pass a second run); the 1800 s run ceiling applies only to the prepare passes.
 - **Pins:** components.lock pins `v1.1.1` in all three component repositories (AnyPS5 unchanged from v1.1, recomp with
