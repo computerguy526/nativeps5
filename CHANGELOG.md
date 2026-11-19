@@ -40,6 +40,10 @@ a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned b
   symlinked folder took seconds (46k entries: 3.0 s, under a lock that blocked other listings) and a dangling link stayed
   hidden after its target appeared. It is now hash-indexed (53 ms for the same folder), failed lookups are not cached,
   and folders changed within the file-time granularity are not cached. Real dumps were not affected.
+- **Fixed a rare freeze (spinning wheel, controller dead) when a gamepad connects at startup or reconnects.** Kyty's
+  pad relay thread held SDL's joystick lock while waiting for the controller lock, and the main thread did the reverse
+  when a pad was added. The relay now reads the controller first, and setting up a newly connected pad no longer holds
+  the controller lock across SDL calls (with a deadlock test).
 - **Kyty fixes from review:** the pipeline-cache saves at window close and SIGTERM run at normal priority, and a
   periodic save skipped as unchanged still writes the known-pipeline list; `KYTY_MAD_MODE=fused` with the relaxed pixel
   prelude no longer aborts; the MSL binding model is built per emission; in-shader blending reads the destination only for
