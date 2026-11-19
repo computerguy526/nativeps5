@@ -43,7 +43,8 @@ a fresh shader-cache prepare (`nps5 cache prepare`). Every component is pinned b
 - **Kyty fixes from review:** the pipeline-cache saves at window close and SIGTERM run at normal priority, and a
   periodic save skipped as unchanged still writes the known-pipeline list; `KYTY_MAD_MODE=fused` with the relaxed pixel
   prelude no longer aborts; the MSL binding model is built per emission; in-shader blending reads the destination only for
-  render targets the shader declares. None of them changes a listed shader text.
+  render targets the shader declares (none of these changes a listed shader text); the per-dword bounds fallback
+  computes each dword's offset in 64 bits (it could wrap near 4 GiB; 21 of the 31 pairs' texts change, all re-verified).
 - **Fixes from review:** `scripts/fetch-components.sh` verifies a tag before the checkout exists (a refused clone
   no longer stays behind to pass a second run); the 1800 s run ceiling applies only to the prepare passes.
 - **Pins:** components.lock pins `v1.1.1` in all three component repositories (AnyPS5 unchanged from v1.1, recomp with
