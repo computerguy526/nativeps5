@@ -623,6 +623,13 @@ class Classes(unittest.TestCase):
         self.assertEqual((res["rows"], res["reproduced"]), (6, 5))                   # perm 3 is an incomplete translation
         self.assertEqual(res["failed"], [("cs", "3" * 16, "g18", "incomplete translation")])
 
+    def test_reproduce_a_v12_list(self):                                       # no class columns: every row is `*`
+        p = os.path.join(self.tmp, "metal-shaders.tsv")
+        open(p, "w").write(keys_list([row(DG[0], SP[0], "0" * 16, b_text(0)), row(DG[1], SP[1], "1" * 16, b_text(1))]))
+        work = os.path.join(self.tmp, "w"); os.makedirs(work)
+        res = metal.reproduce(p, None, self.prog, None, self.env, work, out=io.StringIO())
+        self.assertEqual((res["rows"], res["reproduced"], res["per_class"]), (2, 2, {("cs", "*"): [2, 2]}))
+
 
 def gfx3_row(vs, ps, kk_vs, kk_fs, texts, mode="base", cls="*", verdict="faster", ba="0.900"):
     r = gfx2_row(metal.spec_key(SP[vs]), ps, kk_vs, kk_fs, texts if texts else (b"", b""), "", vs_dg=vs).split("\t")

@@ -846,8 +846,11 @@ def gfx_index_rows(out_dir):
 
 
 # ---------------------------------------------------------------- reproducibility of a per-class list (every row, every class)
-def _class_sublist(text, cls, gfx):
-    """The list with only the rows of one class spec, rewritten to class `*` (so they generate on any Mac). Header lines kept."""
+def _class_sublist(text, cls, gfx, classes=True):
+    """The list with only the rows of one class spec, rewritten to class `*` (so they generate on any Mac). Header lines kept.
+    A list without class columns (keys 1, pairs 1/2) is all `*`: returned as it is."""
+    if not classes:
+        return text if text.endswith("\n") else text + "\n"
     out = []
     for line in text.splitlines():
         f = line.split("\t")
@@ -870,13 +873,14 @@ def reproduce(list_path, gfx_path, programs, kk_msl_dir, environ, work, jobs=4, 
             continue
         with open(path) as f:
             text = f.read()
-        _meta, rows = (parse_gfx_list if gfx else parse_list)(text)
+        meta, rows = (parse_gfx_list if gfx else parse_list)(text)
+        classes = meta.get("format", ("", ""))[1:2] == (("3",) if gfx else ("2",))
         for cls in sorted({r["cls"] for r in rows if r["mode"] != "kk"}):
             sub = [r for r in rows if r["cls"] == cls and r["mode"] != "kk"]
             tag = "%s-%s" % ("gfx" if gfx else "cs", re.sub(r"[^a-z0-9]", "_", cls))
             lp = os.path.join(work, tag + ".tsv")
             with open(lp, "w") as f:
-                f.write(_class_sublist(text, cls, gfx))
+                f.write(_class_sublist(text, cls, gfx, classes))
             od = os.path.join(work, tag)
             if gfx:
                 st = generate_gfx(lp, programs, kk_msl_dir, od, environ, jobs=jobs, out=out, keep_dir=keep_dir, dev=None)
