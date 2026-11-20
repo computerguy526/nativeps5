@@ -142,7 +142,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 | Levels with about 5,000 draws per frame at 12-13 fps | `underwater_aerial_garden`, `shuriken_ninja_castle` | CPU-bound in the back end: per-draw commit cost and a buffer collector that waits for the GPU after every submission ([frame-rate](../../docs/reference/frame-rate.md), "CPU-bound levels") | Read path fixed (104 -> 84 ms together with the completion clock). Open: commit cost per run start (11-14.5 us), one 480x270 effect pass at 211-218 us per draw, the lazy collector settle |
 | First level pays 10.8 ms for one commit | `hoover_beach` | nine serial compute dispatches (five small, four megakernels at the 96-register cap with 3.3-4.4 k spills each) and two passes, serialised by barriers | Open. Knock-out to separate shader cost from barrier cost not done |
 | 66 s of black before some levels | `booster_magic_lamp`, `rocket_space_station` | loading; not a rendering fault | Pad scripts must wait for it |
-| Cold start of a new level compiles for 2-15 s | every first visit without prepared caches | 14-99 pipeline compiles | `scripts/prepare-pipelines.sh PPSA21564` builds the shipped list (1,596 pipelines, 893 shader permutations; about 70 s for the pipelines once the shader libraries are built). A level that is not in the list still compiles on its first visit (short stutters). The prepare shows its progress in the terminal only |
+| Cold start of a new level compiles for 2-15 s | every first visit without prepared caches | 14-99 pipeline compiles | `scripts/prepare-pipelines.sh PPSA21564` builds the shipped list (1,608 pipelines, 949 shader permutations; about 70 s for the pipelines once the shader libraries are built). A level that is not in the list still compiles on its first visit (short stutters). The prepare shows its progress in the terminal only |
 | `volcano_mountain` is very dark | | unknown; may be right | Compare with a console capture |
 | Title frame time is bimodal with record-time clocks | title | the dynamic-resolution feedback loop | Gone with `cbtime`; do not use 36-40 fps figures from old notes as a baseline |
 | One run of the title crashed (guest bus error) in the integration comparison | title | not investigated, not rerun | Open |
@@ -163,7 +163,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 - Arguments: none (title), `-skipIntro` (world map), `-skipIntro -lvl <name>` (a level). Level names are the folder
   names under the title's level data. [bench.tsv](bench.tsv) has the measured routes with their pad scripts and
   windows.
-- First: `scripts/prepare-pipelines.sh PPSA21564` builds the compiled caches for 1,596 pipelines from
+- First: `scripts/prepare-pipelines.sh PPSA21564` builds the compiled caches for 1,608 pipelines from
   [pipelines.kyplst](pipelines.kyplst) and your own dump, so first visits do not stutter on compiles
   ([games/README.md](../README.md), "Pipeline lists").
 - Pictures: `KYTY_DUMP_FRAMES=<n>` with `_EVERY` and `_FROM`; for a level start at present 1,300 or later and dump

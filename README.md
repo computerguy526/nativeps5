@@ -86,7 +86,7 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    cp titles/example.env titles/PPSA21564.env      # set BIN (the `native` program nps5 build printed), APP0 (your dump), GPU=kyty
    ```
 
-6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's listed pipelines once (1,596 in the list; 1,259 of 1,260 built in about 90 seconds on an M4 Pro for the earlier, smaller list), so the first visit to a scene does not stutter:
+6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's listed pipelines once (1,608 in the list; 1,259 of 1,260 built in about 90 seconds on an M4 Pro for the earlier, smaller list), so the first visit to a scene does not stutter:
 
    ```sh
    scripts/nps5 cache prepare PPSA21564
