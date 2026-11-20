@@ -117,7 +117,7 @@ ids, sizes, hashes and timings, no game bytes and no paths. `nps5 run` puts it i
 (otherwise `./flightrec`); the run logs are in the same run folder (`run.err`, `run.summary.txt`). Attach the `.flightrec` file and
 the `nps5 bug-report` zip to your issue, or send them to us; we decode them ourselves. `KYTY_MEMLOG=1` adds a once-a-second memory line.
 
-### Options on by default (v1.1.2)
+### Options on by default (v1.1.2, v1.2)
 
 The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with
 `nps5 run --env NAME=VALUE` or put it on the `ENV=` line of `titles/<id>.env` (both win over the profile).
@@ -152,6 +152,12 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   `KYTY_TEXTURE_RESIDENT_TRIM=1`, which the profile sets) and `KYTY_BDA_PAGETABLE_MB=64` (a smaller GPU address table).
   Without them Sky Garden peaked at 17.9-19.1 GB on a 24 GB Mac, at the 18.9 GB memory limit `nps5 run` sets. Off:
   `KYTY_TEX_MIP_SKIP=0` (full texture detail), `KYTY_BDA_PAGETABLE_MB=0` (the whole table).
+
+- **Partial render-target rebuild** (v1.2, `KYTY_ALIAS_REBUILD_PARTIAL=1`): when the game writes into part of a render
+  target that another image owns, Kyty now rebuilds only the blocks the target does not own (and skips blocks whose
+  bytes already match), instead of tiling the whole target out and back. In Sky Garden the tiler traffic fell from
+  about 2.4 to 1.8-2.0 GB/s; frame times were the same or slightly better (n=3 A/B), no picture differences. Off:
+  `KYTY_ALIAS_REBUILD_PARTIAL=0`.
 
 The flight recorder (below) and the rest of memory trim (`KYTY_MEMTRIM_BIG_WIDTH`) stay off by default.
 

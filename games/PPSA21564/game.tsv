@@ -105,6 +105,8 @@ env	KYTY_FPS_LIMIT_MILLI=auto	gpu=kyty	frame cap from the window's display: fixe
 env	KYTY_FAULT_CLASS=1	gpu=kyty	learned read class per guest page: pages the CPU polls every frame stay readable (fewer fault waits)
 env	KYTY_CLEAN_PAGE=1	gpu=kyty	a store to a page whose GPU bytes are already published skips the drain
 env	KYTY_GPU_ACCURACY=low	gpu=kyty	fast math for pixel/compute shaders outside fast-math-deny.txt (our Metal translations stay exact)
+# v1.2 default (README "Options"; off: `--env KYTY_ALIAS_REBUILD_PARTIAL=0`)
+env	KYTY_ALIAS_REBUILD_PARTIAL=1	gpu=kyty	a partly owned render target is rebuilt only in the blocks it does not own (Sky Garden tiler traffic 2.4 -> 1.8-2.0 GB/s)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
 env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
 env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
