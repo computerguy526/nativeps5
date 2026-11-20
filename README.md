@@ -117,6 +117,17 @@ ids, sizes, hashes and timings, no game bytes and no paths. `nps5 run` puts it i
 (otherwise `./flightrec`); the run logs are in the same run folder (`run.err`, `run.summary.txt`). Attach the `.flightrec` file and
 the `nps5 bug-report` zip to your issue, or send them to us; we decode them ourselves. `KYTY_MEMLOG=1` adds a once-a-second memory line.
 
+### Game speed (v1.2, ps5recomp)
+
+ASTRO BOT advances its game time by a fixed step per frame, read from one block that ps5recomp rewrites from the measured
+frame rate (`framerate_block` in `games/PPSA21564/game.tsv`). Up to v1.1.2 the estimate was an average of per-frame rates,
+which reads too high when frames arrive unevenly (pairs of fast frames, then a long one), and a load freeze could hold it
+at 60 fps for 30-50 s while a level streamed in: the game then ran at about half speed (Sky Garden: 47-54 % of real time,
+30-33 % in the first minute). v1.2 averages the frame period instead and caps the load freeze at 8 s
+(`NPS5_FRAMERATE_LOAD_MAX_MS`, `0` = no cap, the old behaviour): 98 % of real time (92 % in the first minute) on the
+same Sky Garden route. The `[framerate]` line every 5 s shows the estimate and why it is frozen
+(`frozen -|video|phase|vfs[ streaming]`).
+
 ### Options on by default (v1.1.2, v1.2)
 
 The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with

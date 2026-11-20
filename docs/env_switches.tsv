@@ -1,4 +1,3 @@
-name	component	meaning	source
 APS5_A	anyps5		tools/tests/test_env_reference.py
 APS5_AB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/RuntimeSwitches.cpp
 APS5_AB_FLAGS	anyps5	names of the switches APS5_AB_PERIOD alternates	core/libs/prx/libSceAgcDriver/Graphics/include/AbSwitch.hpp
@@ -841,8 +840,10 @@ KK_PIPELINE_ARCHIVE_DIR	kosmickrisp	folder of the segmented Metal 4 pipeline arc
 KK_PIPELINE_ARCHIVE_DIR	kyty	KosmicKrisp's pipeline archive folder; a prepare only waits for the archive writer when it is set	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KK_PIPELINE_ARCHIVE_DIR	nativeps5		scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_FLUSH_N	kosmickrisp		bridge/mtl_compiler.m
+KK_PIPELINE_ARCHIVE_FLUSH_N	nativeps5		scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_FLUSH_S	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_FLUSH_S	kyty	KosmicKrisp's archive flush period, read by a prepare to wait for the last segment before it ends	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KK_PIPELINE_ARCHIVE_FLUSH_S	nativeps5		scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_READAHEAD	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_SIGTERM	kosmickrisp		bridge/mtl_compiler.m
 KK_QUEUE_ERROR_EXIT	kosmickrisp	exit 74 after a Metal queue 'access revoked' error, once every waiter's event has been raised	vulkan/kk_safety.c
@@ -865,6 +866,7 @@ KYTY_ALIAS_BLOCK_VIEWS	kyty		src/graphics/host_gpu/renderer/cache/textureCache.c
 KYTY_ALIAS_BYTES	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_CPU_WRITE_DIAGNOSTICS	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_CPU_WRITE_DIAGNOSTICS	nativeps5		titles/kyty-preset.env
+KYTY_ALIAS_REBUILD_PARTIAL	kyty	1 = a partly owned render target is rebuilt only in the blocks it does not own (v1.2; the ASTRO BOT profile sets 1)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_SYNC_SKIP	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALPHA_TO_MASK	kyty		src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
 KYTY_AMD_CPU	kyty		src/main.cpp
@@ -1160,6 +1162,7 @@ KYTY_FAST_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 0 (v1 codegen); 1 = opt-in fast math, known 1-in-3-frame sky/rock/visor flicker at the crash site; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_ALLOW	kyty	file of guest shader hashes: only these get fast math	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_DENY	kyty	file of guest shader hashes kept at exact math under KYTY_FAST_MATH / KYTY_GPU_ACCURACY (games/<id>/fast-math-deny.txt)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FAST_MATH_DENY	nativeps5		scripts/nps5lib/run.py
 KYTY_FAST_MATH_LOG	kyty	1: one stderr line per guest shader with its fast-math decision	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_STAGES	kyty	fs|cs|fscs stages KYTY_FAST_MATH covers (default fscs)	src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH_VS	kyty	1 = vertex shaders fast too, position slice kept exact (= KYTY_FAST_MATH=3)	src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1179,6 +1182,7 @@ KYTY_FAULT_COST_LOG	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP_SECONDS	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_PAGE_LIFT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FAULT_PROCESS_VEC	kyty	1 = vectorised GPU fault-buffer parser (opt-in, default off)	src/graphics/host_gpu/renderer/cache/faultManager.cpp
 KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
 KYTY_FLIGHTREC	kyty	flight recorder (v1.1; compiled in, OFF unless set): 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); unset or 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
 KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
@@ -1802,6 +1806,7 @@ KYTY_TILER_SCRATCH_POOL	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
 KYTY_TILER_SCRATCH_POOL_IDLE_MS	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
 KYTY_TILER_SCRATCH_POOL_IDLE_MS	nativeps5		titles/kyty-preset.env
 KYTY_TILER_SCRATCH_POOL_MB	kyty		src/graphics/host_gpu/renderer/image/tiler.cpp
+KYTY_TILER_TRACE	kyty	N = tiler image-pass trace to stderr every N seconds (diagnostics, default off)	src/graphics/host_gpu/renderer/image/tilerTrace.cpp
 KYTY_TRACKER_LOCKFREE_DIRTY	kyty		src/graphics/host_gpu/memoryTracker.cpp
 KYTY_TRACKER_LOCK_PARK	kyty		src/graphics/host_gpu/parkingLock.h
 KYTY_TRACKER_LOCK_SPIN_US	kyty		src/graphics/host_gpu/parkingLock.h
@@ -1941,6 +1946,7 @@ NPS5_FRAMERATE_EMA	ps5recomp	weight of a new frame in the frame-rate average (de
 NPS5_FRAMERATE_HYST_MS	ps5recomp	the frame-rate block is rewritten only after the average stayed apart this long (default 1000 ms; 0..60000, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_HYST_PCT	ps5recomp	the frame-rate block is rewritten only when the average differs by this percentage (default 5; 0..50, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_LEGACY	ps5recomp	1 = old frame-rate block behaviour (no freeze during video/loading, short average)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
+NPS5_FRAMERATE_LOAD_MAX_MS	ps5recomp	longest frame-rate block freeze for one run of busy file-read seconds (default 8000 ms; 0 = no limit, the old behaviour)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MAX	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_MIN	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_NO_FREEZE_AV	ps5recomp	1 = do not freeze the frame-rate block while a video plays	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
@@ -2084,6 +2090,7 @@ NPS5_TEST_METALFX	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_PPSA21564_EBOOT	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_PS4_LIBC	ps5recomp		pkg/emitter/shim_test.go
 NPS5_TEST_UPSCALING	ps5recomp		pkg/emitter/patchchoice_test.go
+NPS5_TEST_XS	nativeps5		tests/test_patch.py
 NPS5_TIER1_CACHE	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_CACHE_MB	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_MAX_CONCURRENT	ps5recomp		pkg/runtime/core/nps5_tier1.c
@@ -2282,3 +2289,4 @@ PS4_VIDEODEC2_TRACE	ps5recomp		pkg/runtime/modules/libSceVideodec2/ps4_videodec2
 PS4_VIDEODEC_DUMP	ps5recomp		pkg/runtime/modules/libSceVideodec/ps4_videodec.c
 PS4_VIDEODEC_LOG	ps5recomp		pkg/runtime/modules/libSceVideodec/ps4_videodec.c
 PS4_WATCH	ps5recomp		pkg/runtime/core/recomp_runtime.c
+name	component	meaning	source
