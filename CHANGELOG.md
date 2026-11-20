@@ -9,8 +9,8 @@ Everything in v1.1.2. The game now runs at real speed, Kyty tiles less render-ta
 pipeline list is larger. **Update:** nativeps5-recomp and nativeps5-kyty move to `v1.2` (anyps5 stays at v1.1.1): rebuild
 the recompiler (`scripts/build.sh recomp`) and **translate the title again** (`nps5 build`, about 11 minutes: the fix is in
 the runtime that is linked into the translated program), rebuild Kyty (`scripts/build.sh kyty`), then run
-`nps5 cache prepare` once for the new pipeline-list entries. The shader cache keys do not change (Kyty's codegen
-fingerprint is the same as v1.1.2's), so an existing prepared cache stays valid.
+`nps5 cache prepare` once: the cache is keyed by the component commits and the list, so v1.2 prepares a new one (about
+6 minutes on an M4 Pro; the Metal library store is reused, so almost nothing compiles from source).
 
 - **Game speed = real time** (ps5recomp `nps5_framerate_logic.h`). ASTRO BOT advances a fixed step of game time per frame,
   read from a block that the runtime rewrites from the measured frame rate. The old estimate was an exponential average of
@@ -36,6 +36,13 @@ fingerprint is the same as v1.1.2's), so an existing prepared cache stays valid.
   name the v1.2 Kyty). Five G-buffer pairs that differed from KosmicKrisp by 1 f16 ulp on 1-3 of 8192 words under a newer
   real-input profile are recorded in `metal-gfx-pairs.tsv.verified` under a stated near-exact rule (stored precision,
   <= 1 f16 ulp; everything else bit-exact).
+- Clean-room check (public flow: `nps5 build` with the v1.2 recompiler, Kyty v1.2, `nps5 cache prepare`, then title -> hub ->
+  Sky Garden on a recorded pad route, 24 GB M4 Pro): prepare 949/949 shaders, Metal 68 of 68 kernels and 36 of 36 graphics
+  rows; game speed 89 % of real time over the run (82 % in the first minute, 100 % in the last 30 s); 0 live shader
+  compiles at the peak; no GPU watchdog, no RT budget-guard trip, no crash; footprint peak 17.0 GB (limit 18.9 GB).
+- Known issues: two long frames in that run (9.6 s while the world map loaded, 6.7 s in Sky Garden while the system was
+  swapping about 9.8 GB; the test machine was shared). Sky Garden on a 24 GB Mac still runs close to the memory limit.
+  Our faster shader set (lighting kernels, faster G-buffer/prepass/cloud pairs) is planned for v1.2.1.
 
 ## v1.1.2 (2026-11-19)
 
