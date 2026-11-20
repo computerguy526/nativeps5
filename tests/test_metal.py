@@ -475,6 +475,15 @@ class Gfx2(unittest.TestCase):
         st = self.gen([gfx2_row(sk + ":21", 2, self.kk_vs, "f" * 16, gfx_text(8, 2), "")])   # verified with record 8, listed as 7
         self.assertEqual(st["written"], 0, st)
 
+    def test_v12_list_counts_rows_as_v12_did(self):                         # review M2: "2 of 2", 2 index rows, list order
+        bl = ""
+        t = gfx_text(1, 2)
+        r1 = gfx2_row(metal.spec_key(SP[1]), 2, self.kk_vs, "f" * 16, t, bl)
+        st = self.gen([r1, r1.replace("fuzz2+mutant+play2", "autoval")])
+        self.assertIn("2 of 2 verified vertex+fragment pairs generated", metal.gfx_summary(st))
+        self.assertNotIn("GPU class", metal.gfx_summary(st))
+        self.assertEqual(metal.gfx_index_rows(self.out)[1], 2)
+
     def test_format_1_lists_still_parse_and_unknown_formats_fail(self):
         meta, rows = metal.parse_gfx_list(gfx_list([gfx_row(1, 2, self.kk_vs, "f" * 16, gfx_text(1, 2))]))
         self.assertEqual((meta["format"], rows[0]["blend"]), (("nps5-metal-gfx-pairs", "1"), ""))
@@ -520,7 +529,7 @@ class Classes(unittest.TestCase):
 
     def gen2(self, rows, cls, **kw):
         p = os.path.join(self.tmp, "metal-shaders.tsv"); open(p, "w").write(keys_list2(rows))
-        env = dict(self.env, NPS5_METAL_CLASS=cls)
+        env = dict(self.env, NPS5_METAL_CLASS=cls, NPS5_DEV="1")
         st = metal.generate(p, self.prog, os.path.join(self.tmp, "c", "metal-shaders"), env, out=io.StringIO(), **kw)
         d = os.path.join(self.tmp, "c", "metal-shaders")
         return st, {f[:-6]: open(os.path.join(d, f), "rb").read() for f in os.listdir(d) if f.endswith(".metal")}, p, env
@@ -533,8 +542,12 @@ class Classes(unittest.TestCase):
         self.assertEqual(metal.class_name(m6), "g18g@os27")
         self.assertEqual(metal.class_name(metal.device_class({"NPS5_GPU_ARCH": "applegpu_g16s"}, run=fake_run(IOREG_M6, "27.2"))), "g18@os27")  # another gen's letter is ignored
         self.assertIsNone(metal.device_class({}, run=fake_run("", "26.0")))          # no Apple GPU (VM): `*` rows only
-        self.assertIsNone(metal.device_class({"NPS5_METAL_CLASS": "none"}))
-        self.assertEqual(metal.class_name(metal.device_class({"NPS5_METAL_CLASS": "g18@os27"})), "g18@os27")
+        self.assertIsNone(metal.device_class({"NPS5_METAL_CLASS": "none", "NPS5_DEV": "1"}, run=fake_run(IOREG_M4, "26.6")))
+        forced = metal.device_class({"NPS5_METAL_CLASS": "g18@os27", "NPS5_DEV": "1"}, run=fake_run(IOREG_M4, "26.6"))
+        self.assertEqual((metal.class_name(forced), forced["note"]), ("g18@os27", "forced by NPS5_METAL_CLASS; this Mac is g16@os26"))
+        # review M3: without the developer switch a stray NPS5_METAL_CLASS is ignored, and the summary says so
+        stray = metal.device_class({"NPS5_METAL_CLASS": "g18@os27"}, run=fake_run(IOREG_M4, "26.6"))
+        self.assertEqual(metal.class_name(stray), "g16@os26"); self.assertIn("ignored", stray["note"])
         self.assertEqual(metal.class_name(metal.parse_device("applegpu_g16s")), "g16s")
         for bad in ("m4", "g1", "g16@27", "applegpu"):
             self.assertIsNone(metal.parse_device(bad), bad)
@@ -548,9 +561,10 @@ class Classes(unittest.TestCase):
         self.assertIsNone(metal.class_score("g16s", nolet))                         # a letter row needs the letter known
 
     def test_choose_orders_options_most_specific_first(self):
-        rows = [dict(kk="a", cls="*"), dict(kk="a", cls="g16"), dict(kk="a", cls="g18"), dict(kk="a", cls="g16@os26"), dict(kk="b", cls="g18")]
+        rows = [dict(kk="a", cls="*", mode="base"), dict(kk="a", cls="g16", mode="kk"), dict(kk="a", cls="g16", mode="fix6"),
+                dict(kk="a", cls="g18", mode="base"), dict(kk="a", cls="g16@os26", mode="base"), dict(kk="b", cls="g18", mode="base")]
         got = metal.choose(rows, metal.parse_device("g16@os26"), lambda r: r["kk"])
-        self.assertEqual([o[0]["cls"] for o in got["a"]], ["g16@os26", "g16", "*"])
+        self.assertEqual([(o[0]["cls"], o[0]["mode"]) for o in got["a"]], [("g16@os26", "base"), ("g16", "fix6"), ("g16", "kk"), ("*", "base")])
         self.assertNotIn("b", got)
         self.assertEqual([o[0]["cls"] for o in metal.choose(rows, None, lambda r: r["kk"])["a"]], ["*"])
 
@@ -585,7 +599,7 @@ class Classes(unittest.TestCase):
         self.assertEqual(f4, {"0" * 16: b_text_m(0, "m4fast"), "1" * 16: b_text_m(1)})
         self.assertEqual(f6, {"0" * 16: b_text_m(0, "m6fast"), "1" * 16: b_text_m(1), "2" * 16: b_text_m(2, "xf=7"), "5" * 16: b_text_m(5)})
         self.assertEqual((st4["cls"], st4["kk_class"], st4["other_class"], st4["written"]), ("g16@os26", 1, 1, 2))
-        self.assertIn("GPU class g16@os26, 1 listed for other GPUs only, 1 KosmicKrisp's on this GPU", metal.summary(st4))
+        self.assertRegex(metal.summary(st4), r"GPU class g16@os26 \(forced by NPS5_METAL_CLASS; this Mac is [^)]*\), 1 listed for other GPUs only, 1 KosmicKrisp's on this GPU")
         stn, fn, _, _ = self.gen2(self.mock_rows(), "none")                          # unknown GPU: the `*` rows only
         self.assertEqual(sorted(fn), ["1" * 16, "5" * 16])
 
@@ -597,12 +611,22 @@ class Classes(unittest.TestCase):
         self.assertEqual(f, {"0" * 16: b_text_m(0)})
         self.assertEqual((st["fallback"], st["reasons"]), (1, {"text differs from the verified kernel": 1}))
 
+    def test_failed_class_text_falls_back_to_kk_when_star_is_slower_there(self):   # review L8
+        rows = [crow(DG[0], SP[0], "0" * 16, b"not what this Mac emits", mode="m4fast", cls="g16"),
+                crow(DG[0], SP[0], "0" * 16, None, mode="kk", cls="g16", verdict="slower", ba="1.100"),
+                crow(DG[0], SP[0], "0" * 16, b_text_m(0), cls="*", verdict="shipped")]
+        st, f, _, _ = self.gen2(rows, "g16@os26")
+        self.assertEqual((f, st["kk_class"]), ({}, 1))
+        st, f, _, _ = self.gen2(rows, "g18@os27")                                 # other class: the `*` text
+        self.assertEqual(f, {"0" * 16: b_text_m(0)})
+
     def test_index_records_the_class_and_launch_checks_it(self):
         st, _, lp, env = self.gen2(self.mock_rows(), "g16@os26")
         cdir = os.path.join(self.tmp, "c")
         self.assertEqual(metal.index_class(os.path.join(cdir, "metal-shaders"), "index.tsv"), "g16@os26")
         self.assertEqual(metal.launch_words(cdir, lp, env)[0], [("KK_MSL_OVERRIDE_DIR", os.path.join(cdir, "metal-shaders"))])
         w, warn = metal.launch_words(cdir, lp, dict(env, NPS5_METAL_CLASS="g16@os27"))   # macOS update: regenerate
+        self.assertIn("forced", metal.summary(st))
         self.assertEqual(w, []); self.assertIn("this Mac is g16@os27", warn)
         self.assertEqual(metal.index_rows(os.path.join(cdir, "metal-shaders"))[1], 2)
 
@@ -661,7 +685,7 @@ class GfxClasses(unittest.TestCase):
         return {f: open(os.path.join(self.out, f), "rb").read() for f in sorted(os.listdir(self.out)) if f.endswith(".metal")}
 
     def test_pairs_per_class(self):
-        self.env["NPS5_METAL_CLASS"] = "g16@os26"
+        self.env.update(NPS5_METAL_CLASS="g16@os26", NPS5_DEV="1")
         st = self.gen(self.rows())
         f4 = self.files()
         self.assertEqual((st["written"], st["cls"]), (2, "g16@os26"), st)

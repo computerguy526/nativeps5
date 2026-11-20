@@ -83,15 +83,20 @@ PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 # v1.2.1 (keys format 2, pairs format 3): per GPU class rows end with five short words: emitter mode, GPU class, near-exact rule,
 # verdict, B/A (scripts/nps5lib/metal.py); a `kk` row (KosmicKrisp's shader on that class) has '-' for its text hashes.
-METAL_CLASS_TAIL = (rb"(?:\t(?:base|kk|[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?(?:\+[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?){0,7})"
-                    rb"\t(?:\*|g\d{2}[a-z]?(?:@os\d{2})?|@os\d{2})\t[a-z0-9][a-z0-9:=_.,-]{0,47}\t(?:faster|shipped|slower)\t(?:-|\d\.\d{1,4}))?$")
-METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t(?:[0-9a-f]{64}|-)\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,.+-]{0,48}" + METAL_CLASS_TAIL)
+METAL_CLASS_COLS = (rb"\t(?:base|kk|[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?(?:\+[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?){0,7})"
+                    rb"\t(?:\*|g\d{2}[a-z]?(?:@os\d{2})?|@os\d{2})\t[a-z0-9][a-z0-9:=_.,-]{0,47}\t(?:faster|shipped|slower)\t(?:-|\d\.\d{1,4})$")
+# Review L4: the class columns and '-' hashes are accepted ONLY in a per-class list (keys format 2 / pairs format 3), and are
+# required there; a v1.2-format list keeps the v1.2 row form (else it would pass here and fail every install).
+METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,]{0,32}$")
+METAL_ROW2_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t(?:[0-9a-f]{64}|-)\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,.+-]{0,48}" + METAL_CLASS_COLS)
 # games/<title id>/metal-gfx-pairs.tsv: the same for (vertex, fragment) pairs. Hashes plus three short number fields (descriptor
 # offsets binding:offset, vertex attributes loc:binding:format, colour mask) that the emitter needs; no shader text.
 # Format 2 (v1.1.1): a spec key may carry the record's push-data cursor (:n), and a blend column (per colour attachment
 # en:sc:dc:co:sa:da:ao:wm:class:components, ';'-joined: numbers and one class letter) comes before the evidence.
-METAL_GFX_ROW_RE = re.compile(rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{16}\t[0-9a-f]{16}\t(?:[0-9a-f]{64}|-)\t(?:[0-9a-f]{64}|-)"
-                              rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}(?:\t(?:\d{1,3}:){8}[fusix]:\d(?:;(?:\d{1,3}:){8}[fusix]:\d){0,7}|\t)?\t[a-z0-9_+,.-]{0,48}" + METAL_CLASS_TAIL)
+_GFX_ROW = (rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{16}\t[0-9a-f]{16}\t%s\t%s"
+            rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}(?:\t(?:\d{1,3}:){8}[fusix]:\d(?:;(?:\d{1,3}:){8}[fusix]:\d){0,7}|\t)?\t[a-z0-9_+,.-]{0,48}")
+METAL_GFX_ROW_RE = re.compile(_GFX_ROW % (rb"[0-9a-f]{64}", rb"[0-9a-f]{64}") + rb"$")
+METAL_GFX_ROW3_RE = re.compile(_GFX_ROW % (rb"(?:[0-9a-f]{64}|-)", rb"(?:[0-9a-f]{64}|-)") + METAL_CLASS_COLS)
 METAL_GFX_OK_LINE = b"result=verify: hashes and layout numbers only, no shader text"
 
 
@@ -143,6 +148,7 @@ def check_metal_keys(data, gfx=False):
     if b"\0" in data or len(data) > (1 << 20):
         return ["a Metal keys list is a short text file"]
     bad = []
+    pc = per_class(data)
     for n, line in enumerate(data.split(b"\n"), 1):
         if not line:
             continue
@@ -151,7 +157,8 @@ def check_metal_keys(data, gfx=False):
                 continue
             bad.append("line %d is a comment that looks like shader source" % n)
             continue
-        if not ((METAL_GFX_ROW_RE if gfx else METAL_ROW_RE).match(line) or METAL_HEAD_RE.match(line)):
+        rx = (METAL_GFX_ROW3_RE if gfx else METAL_ROW2_RE) if pc else (METAL_GFX_ROW_RE if gfx else METAL_ROW_RE)
+        if not (rx.match(line) or METAL_HEAD_RE.match(line)):
             bad.append("line %d is not a key row (hashes only) or a header line" % n)
             if len(bad) >= 3:
                 break
