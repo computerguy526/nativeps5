@@ -78,31 +78,60 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
-                 "metal-shaders.tsv", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt"}
+                 "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
-METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,]{0,32}$")
+# v1.2.1 (keys format 2, pairs format 3): per GPU class rows end with five short words: emitter mode, GPU class, near-exact rule,
+# verdict, B/A (scripts/nps5lib/metal.py); a `kk` row (KosmicKrisp's shader on that class) has '-' for its text hashes.
+METAL_CLASS_TAIL = (rb"(?:\t(?:base|kk|[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?(?:\+[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?){0,7})"
+                    rb"\t(?:\*|g\d{2}[a-z]?(?:@os\d{2})?|@os\d{2})\t[a-z0-9][a-z0-9:=_.,-]{0,47}\t(?:faster|shipped|slower)\t(?:-|\d\.\d{1,4}))?$")
+METAL_ROW_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t(?:[0-9a-f]{64}|-)\t\d{1,4}x\d{1,4}x\d{1,4}\t[a-z0-9_,.+-]{0,48}" + METAL_CLASS_TAIL)
 # games/<title id>/metal-gfx-pairs.tsv: the same for (vertex, fragment) pairs. Hashes plus three short number fields (descriptor
 # offsets binding:offset, vertex attributes loc:binding:format, colour mask) that the emitter needs; no shader text.
 # Format 2 (v1.1.1): a spec key may carry the record's push-data cursor (:n), and a blend column (per colour attachment
 # en:sc:dc:co:sa:da:ao:wm:class:components, ';'-joined: numbers and one class letter) comes before the evidence.
-METAL_GFX_ROW_RE = re.compile(rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{16}\t[0-9a-f]{16}\t[0-9a-f]{64}\t[0-9a-f]{64}"
-                              rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}(?:\t(?:\d{1,3}:){8}[fusix]:\d(?:;(?:\d{1,3}:){8}[fusix]:\d){0,7}|\t)?\t[a-z0-9_+,.-]{0,48}$")
+METAL_GFX_ROW_RE = re.compile(rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{16}\t[0-9a-f]{16}\t(?:[0-9a-f]{64}|-)\t(?:[0-9a-f]{64}|-)"
+                              rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}(?:\t(?:\d{1,3}:){8}[fusix]:\d(?:;(?:\d{1,3}:){8}[fusix]:\d){0,7}|\t)?\t[a-z0-9_+,.-]{0,48}" + METAL_CLASS_TAIL)
 METAL_GFX_OK_LINE = b"result=verify: hashes and layout numbers only, no shader text"
 
 
-def check_gfx_record(data, record):
-    """A metal-gfx-pairs.tsv with pair rows needs its .verified record (proof record, as pipelines.kyplst.verified): the list's
-    sha256 and the result line. -> reasons."""
-    if not any(line.startswith(b"gfx\t") for line in data.split(b"\n")):
+REPRO_RE = re.compile(rb"^reproduced=(\d+) of (\d+)$")
+
+
+def text_rows(data, gfx):
+    """Rows of a keys/pairs list that carry a text hash (every row except the `kk` ones of a per-class list)."""
+    n = 0
+    for line in data.split(b"\n"):
+        f = line.split(b"\t")
+        if (gfx and f[0] == b"gfx" and len(f) > 8 and f[7] != b"-") or (not gfx and len(f) > 5 and len(f[0]) == 32 and f[3] != b"-"):
+            n += 1
+    return n
+
+
+def per_class(data):
+    return re.search(rb"^format\tnps5-metal-(?:keys\t2|gfx-pairs\t3)$", data, re.M) is not None
+
+
+def check_gfx_record(data, record, gfx=True):
+    """A metal-gfx-pairs.tsv with pair rows (and, from v1.2.1, any per-class list: keys format 2 / pairs format 3) needs its .verified
+    record (proof record, as pipelines.kyplst.verified): the list's sha256 and the result line. A per-class list's record also needs
+    `reproduced=N of N` with N = its rows with a text: the public kyty_msl_dump regenerated EVERY row's text from its mode
+    (`nps5 cache metal <id> --reproduce` writes the line). -> reasons."""
+    name = "metal-gfx-pairs.tsv" if gfx else "metal-shaders.tsv"
+    if not (gfx and any(line.startswith(b"gfx\t") for line in data.split(b"\n"))) and not per_class(data):
         return []
     if not record:
-        return ["a graphics pairs list with rows needs its metal-gfx-pairs.tsv.verified record"]
+        return ["a %s list with rows needs its %s.verified record" % ("graphics pairs" if gfx else "per-class keys", name)]
     lines = record.split(b"\n")
     if ("sha256=" + hashlib.sha256(data).hexdigest()).encode() not in lines:
-        return ["metal-gfx-pairs.tsv.verified is for another version of the list (sha256 differs)"]
+        return ["%s.verified is for another version of the list (sha256 differs)" % name]
     if METAL_GFX_OK_LINE not in lines:
-        return ["metal-gfx-pairs.tsv.verified lacks the result line"]
+        return ["%s.verified lacks the result line" % name]
+    if per_class(data):
+        m = next((REPRO_RE.match(l) for l in lines if REPRO_RE.match(l)), None)
+        n = text_rows(data, gfx)
+        if not m or int(m.group(1)) != n or int(m.group(2)) != n:
+            return ["%s.verified must record reproduced=%d of %d (every row's text regenerated by the public generator)" % (name, n, n)]
     return []
 
 
@@ -478,15 +507,14 @@ class Check:
         if profile and profile.group(2) in ("metal-shaders.tsv", "metal-gfx-pairs.tsv"):
             for why in check_metal_keys(data, profile.group(2) == "metal-gfx-pairs.tsv"):
                 F(f": {why}")
-            if profile.group(2) == "metal-gfx-pairs.tsv":
-                for why in check_gfx_record(data, sibling(path + ".verified")):
-                    F(f": {why}")
+            for why in check_gfx_record(data, sibling(path + ".verified"), profile.group(2) == "metal-gfx-pairs.tsv"):
+                F(f": {why}")
             return
         if profile and profile.group(2) == "fast-math-deny.txt":
             for why in check_deny_list(data):
                 F(f": {why}")
             return
-        if profile and profile.group(2) == "metal-gfx-pairs.tsv.verified":
+        if profile and profile.group(2) in ("metal-gfx-pairs.tsv.verified", "metal-shaders.tsv.verified"):
             if not data.startswith(b"#") or b"\0" in data or len(data) > 4096:
                 F(": a .verified record is a short text file")
             return

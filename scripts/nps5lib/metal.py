@@ -21,19 +21,31 @@ kk-libcache/msl, written by pass 1; a copy is kept in <cache root>.kk-vs-keep be
 KosmicKrisp then writes no text), and keeps BOTH files only when both sha256 equal the list's. They go to
 <cache dir>/metal-shaders/<kk_vs>_<kk_fs>.vs.metal / .fs.metal; KosmicKrisp swaps a pipeline only when its two keys match a pair.
 
+Per GPU class (v1.2.1, keys list format 2 / pairs list format 3): a row may name an emitter MODE (the switches kyty_msl_dump applies
+for that row only, `--mode`; `base` = the plain text every earlier release shipped) and a GPU CLASS (`*` = every Mac; `g16` = Apple GPU
+generation 16 = M4 family, `g18` = M6 family, optionally `@os26` = only on macOS 26). Several rows may name one KosmicKrisp key for
+different classes. Per key this module takes the most specific row that matches THIS Mac (generation + OS > generation > OS > `*`),
+falls back to the next matching row when this Mac does not reproduce its text, and to KosmicKrisp's own shader when none is left.
+Mode `kk` = "KosmicKrisp's shader on this class" (a variant that was measured slower there). Rows are only listed for a class
+where the text was verified and measured faster on that class (verdict and B/A in the row). Lists of format 1 / 2 have no class
+column: every row is `*` + `base`, i.e. exactly the v1.2 behaviour.
+
 Switches: NPS5_METAL_SHADERS=0 turns the feature off (no generation, no KK_MSL_OVERRIDE_DIR at launch).
+          NPS5_METAL_CLASS=<g16[@os26]> overrides the detected GPU class (tests); =none uses only the `*` rows.
           NPS5_MSL_TOOL = the kyty_msl_dump binary (default <NPS5_KYTY_DIR>/build-arm64/kyty_msl_dump).
 Generated files never leave NPS5_SCRATCH (git-ignored); never commit or upload them."""
 import hashlib, os, re, shutil, struct, subprocess, sys, tempfile, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 FORMAT = ("nps5-metal-keys", "1")
+KEYS_FORMATS = ("1", "2")  # 2 (v1.2.1) adds mode, class, rule, verdict and B/A after the evidence column
 LIST_NAME = "metal-shaders.tsv"
 OUT_NAME = "metal-shaders"
 GFX_LIST_NAME = "metal-gfx-pairs.tsv"
 GFX_INDEX = "index-gfx.tsv"
 GFX_FORMAT = ("nps5-metal-gfx-pairs", "2")
-GFX_FORMATS = ("1", "2")   # 2 (v1.1.1) adds the blend column before the evidence: KosmicKrisp blends in the fragment shader
+GFX_FORMATS = ("1", "2", "3")   # 2 (v1.1.1) adds the blend column before the evidence: KosmicKrisp blends in the fragment shader;
+                                # 3 (v1.2.1) adds mode, class, rule, verdict and B/A after the evidence column (as keys format 2)
 GFX_COLS = ("vs", "vs_spec", "ps", "ps_spec", "kk_vs", "kk_fs", "b_vs", "b_fs", "variant", "set0", "va", "cmask")
 _GFX_HEAD = (r"^gfx\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64})\t([0-9a-f]{64})"
              r"\t(mipstats|twin)\t([0-9:,]*)\t([0-9:,]*)\t(\d+)")
@@ -43,6 +55,18 @@ GFX_ROW_RE = re.compile(_GFX_HEAD + r"\t([a-z0-9_+,.-]*)$")                     
 _BLEND_RT = r"(?:\d{1,3}:){8}[fusix]:\d"                                        # en:sc:dc:co:sa:da:ao:wm:class:components
 GFX_ROW2_RE = re.compile(_GFX_HEAD2 + r"\t((?:%s(?:;%s){0,7})?)\t([a-z0-9_+,.-]*)$" % (_BLEND_RT, _BLEND_RT))       # format 2: ... cmask blend evidence
 ROW_RE = re.compile(r"^([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64})\t(\d+x\d+x\d+)\t([a-z0-9_,]*)$")
+# per-class columns (keys format 2, pairs format 3): mode, class, rule, verdict, B/A. Hashes and short words only.
+MODE_PAT = r"(?:base|kk|[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?(?:\+[a-z][a-z0-9_]{0,15}(?:=[0-9a-z]{1,8})?){0,7})"
+CLASS_PAT = r"(?:\*|g\d{2}[a-z]?(?:@os\d{2})?|@os\d{2})"
+RULE_PAT = r"[a-z0-9][a-z0-9:=_.,-]{0,47}"
+VERDICT_PAT = r"(?:faster|shipped|slower)"
+BA_PAT = r"(?:-|\d\.\d{1,4})"
+CLASS_COLS = ("mode", "cls", "rule", "verdict", "ba")
+_CLASS_TAIL = r"\t(%s)\t(%s)\t(%s)\t(%s)\t(%s)$" % (MODE_PAT, CLASS_PAT, RULE_PAT, VERDICT_PAT, BA_PAT)
+ROW2_RE = re.compile(r"^([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64}|-)\t(\d+x\d+x\d+)\t([a-z0-9_,.+-]*)" + _CLASS_TAIL)
+CLASS_DEFAULTS = dict(mode="base", cls="*", rule="exact", verdict="shipped", ba="-")
+GFX_ROW3_RE = re.compile(_GFX_HEAD2.replace(r"\t([0-9a-f]{64})\t([0-9a-f]{64})", r"\t([0-9a-f]{64}|-)\t([0-9a-f]{64}|-)", 1)
+                         + r"\t((?:%s(?:;%s){0,7})?)\t([a-z0-9_+,.-]*)" % (_BLEND_RT, _BLEND_RT) + _CLASS_TAIL)       # format 3: ... evidence mode class rule verdict ba
 HEADER = "// kk-mslinject v1 local_size "
 KPRC = 0x4352504B
 SEEN_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16})")
@@ -59,10 +83,21 @@ def enabled(environ):
 
 
 # ---------------------------------------------------------------- the keys list (pure)
+def _row_rules(r, where):
+    """Per-class row consistency: mode kk carries no text and verdict slower; a text row never says slower."""
+    texts = [r[k] for k in ("b", "b_vs", "b_fs") if k in r]
+    if (r["mode"] == "kk") != all(t == "-" for t in texts) or any(t == "-" for t in texts) and r["mode"] != "kk":
+        raise MetalError("%s: mode kk (KosmicKrisp's shader on this class) and only it has no text hash" % where, 2)
+    if (r["mode"] == "kk") != (r["verdict"] == "slower"):
+        raise MetalError("%s: verdict slower goes with mode kk only" % where, 2)
+
+
 def parse_list(text):
-    """-> (meta dict, rows). Rows: dict(program, spec, kk, b, local, evidence). Raises MetalError on any malformed line, so a
-    corrupted list never generates anything."""
+    """-> (meta dict, rows). Rows: dict(program, spec, kk, b, local, evidence, mode, cls, rule, verdict, ba). Raises MetalError on any
+    malformed line, so a corrupted list never generates anything. Format 1 rows are mode base, class * (every Mac)."""
     meta, rows, seen = {}, [], {}
+    fmt = next((ln.split("\t") for ln in text.splitlines() if ln.startswith("format\t")), [])
+    v2 = len(fmt) > 2 and fmt[1] == FORMAT[0] and fmt[2] == "2"
     for n, line in enumerate(text.splitlines(), 1):
         if not line.strip() or line.startswith("#"):
             continue
@@ -70,16 +105,101 @@ def parse_list(text):
         if f[0] in ("format", "title", "emitter"):
             meta[f[0]] = tuple(f[1:])
             continue
-        m = ROW_RE.match(line)
+        m = (ROW2_RE if v2 else ROW_RE).match(line)
         if not m:
-            raise MetalError("%s line %d: not a key row (32 hex, 16 hex, 16 hex, 64 hex, XxYxZ, evidence)" % (LIST_NAME, n), 2)
-        r = dict(zip(("program", "spec", "kk", "b", "local", "evidence"), m.groups()))
-        if seen.setdefault(r["kk"], r["b"]) != r["b"]:       # two permutations may share one kernel, never with different texts
-            raise MetalError("%s line %d: kk_msl %s listed twice with different texts" % (LIST_NAME, n, r["kk"]), 2)
+            raise MetalError("%s line %d: not a key row (32 hex, 16 hex, 16 hex, 64 hex, XxYxZ, evidence%s)"
+                             % (LIST_NAME, n, ", mode, class, rule, verdict, B/A" if v2 else ""), 2)
+        g = m.groups()
+        r = dict(zip(("program", "spec", "kk", "b", "local", "evidence"), g[:6]), **(dict(zip(CLASS_COLS, g[6:])) if v2 else CLASS_DEFAULTS))
+        _row_rules(r, "%s line %d" % (LIST_NAME, n))
+        # two permutations may share one kernel, never with different texts for one class
+        if seen.setdefault((r["kk"], r["cls"]), (r["b"], r["mode"])) != (r["b"], r["mode"]):
+            raise MetalError("%s line %d: kk_msl %s listed twice for class %s with different texts" % (LIST_NAME, n, r["kk"], r["cls"]), 2)
         rows.append(r)
-    if meta.get("format", ())[:2] != FORMAT:
-        raise MetalError("%s: missing or unknown `format` line (want %s)" % (LIST_NAME, " ".join(FORMAT)), 2)
+    if meta.get("format", ())[:1] != FORMAT[:1] or meta.get("format", ("", ""))[1:2] not in [(x,) for x in KEYS_FORMATS]:
+        raise MetalError("%s: missing or unknown `format` line (want %s %s)" % (LIST_NAME, FORMAT[0], " or ".join(KEYS_FORMATS)), 2)
     return meta, rows
+
+
+# ---------------------------------------------------------------- GPU class of this Mac, and the row choice per key (pure)
+_IOCLASS_RE = re.compile(r'"IOClass" = "AGXAccelerator(G\d{2})([A-Z]?)"')
+_ARCH_RE = re.compile(r"^(?:applegpu_)?(g\d{2})([a-z]?)$")
+CLASS_SPEC_RE = re.compile(r"^(?:(g\d{2})([a-z]?))?(?:@os(\d{2}))?$")
+
+
+def _run_out(argv, timeout=10):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, errors="replace", timeout=timeout).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def parse_device(spec):
+    """'g16', 'g16s@os26', 'applegpu_g18g', 'none' -> dict(gen, var, os) or None (none / unparsable)."""
+    spec = (spec or "").strip().lower()
+    a, _, o = spec.partition("@")
+    m = _ARCH_RE.match(a) if a else None
+    if spec in ("", "none", "off") or (a and not m) or (o and not re.match(r"^os\d{2}$", o)):
+        return None
+    return dict(gen=m.group(1) if m else "", var=m.group(2) if m else "", os=o[2:] if o else "")
+
+
+def device_class(environ=None, run=_run_out):
+    """-> dict(gen 'g16', var '' or the Metal architecture letter, os '26', model) of this Mac, or None (unknown / NPS5_METAL_CLASS=none:
+    only the `*` rows apply). The GPU generation comes from the IORegistry (AGXAcceleratorG16X = generation 16: M4 family; G18G: M6),
+    the same number as MTLDevice.architecture.name (applegpu_g16s). No Metal device is opened. The OS major from sw_vers' product
+    version (sysctl kern.osproductversion). NPS5_GPU_ARCH=applegpu_g16s adds the architecture letter (rows like g16s)."""
+    environ = os.environ if environ is None else environ
+    o = environ.get("NPS5_METAL_CLASS")
+    if o is not None:
+        d = parse_device(o)
+        return dict(d, model="NPS5_METAL_CLASS") if d else None
+    m = _IOCLASS_RE.search(run(["/usr/sbin/ioreg", "-r", "-c", "AGXAccelerator", "-d", "1"]))
+    if not m:
+        return None
+    mm = re.search(r'"model" = "([^"]{1,40})"', run(["/usr/sbin/ioreg", "-r", "-c", "AGXAccelerator", "-d", "1"]))
+    osv = run(["/usr/sbin/sysctl", "-n", "kern.osproductversion"]).strip()
+    am = _ARCH_RE.match((environ.get("NPS5_GPU_ARCH") or "").strip().lower())
+    var = am.group(2) if am and am.group(1) == m.group(1).lower() else ""
+    return dict(gen=m.group(1).lower(), var=var, os=osv.split(".")[0] if re.match(r"^\d{2}\b", osv) else "", model=mm.group(1) if mm else "")
+
+
+def class_name(dev):
+    """dict -> 'g16@os26' (the string written to the index and printed), 'none' for None."""
+    if not dev:
+        return "none"
+    return "%s%s%s" % (dev["gen"], dev["var"], "@os" + dev["os"] if dev["os"] else "")
+
+
+def class_score(spec, dev):
+    """How specifically a row's class spec matches this Mac: None = not at all, 0 = `*`, else generation 4 + letter 2 + OS 1."""
+    if spec == "*":
+        return 0
+    m = CLASS_SPEC_RE.match(spec)
+    if not m or not dev:
+        return None
+    gen, var, osm = m.groups()
+    if gen and gen != dev["gen"] or var and var != dev["var"] or osm and osm != dev["os"]:
+        return None
+    return (4 if gen else 0) + (2 if var else 0) + (1 if osm else 0)
+
+
+def choose(rows, dev, key):
+    """-> {key: [option, ...]} where an option is the list of rows (permutations) of one (key, class) and the options are ordered best
+    first: most specific matching class, then list order. Rows of a class that does not match this Mac are left out; a key with no
+    matching row is absent (KosmicKrisp's shader)."""
+    opts = {}
+    for i, r in enumerate(rows):
+        sc = class_score(r["cls"], dev)
+        if sc is None:
+            continue
+        o = opts.setdefault(key(r), {}).setdefault(r["cls"], [sc, i, []])
+        o[2].append(r)
+    return {k: [o[2] for o in sorted(v.values(), key=lambda o: (-o[0], o[1]))] for k, v in opts.items()}
+
+
+def has_classes(rows):
+    return any(r["cls"] != "*" or r["mode"] != "base" for r in rows)
 
 
 def spec_key(spec):
@@ -155,8 +275,13 @@ def tool_path(environ):
     return t if os.path.isfile(t) and os.access(t, os.X_OK) else None
 
 
-def run_dump(tool, programs, perm, out, env):
-    r = subprocess.run([tool, "--programs", programs, "--perm", str(perm), "--kk-bda", "--no-comments", "--out", out],
+def mode_args(mode):
+    """kyty_msl_dump arguments of a row's emitter mode: none for `base` (the v1.2 command line, byte for byte)."""
+    return [] if mode in ("base", "", None) else ["--mode", mode]
+
+
+def run_dump(tool, programs, perm, out, env, mode="base"):
+    r = subprocess.run([tool, "--programs", programs, "--perm", str(perm), "--kk-bda", "--no-comments"] + mode_args(mode) + ["--out", out],
                        capture_output=True, text=True, errors="replace", env=env, timeout=120)
     return r.returncode, r.stderr
 
@@ -185,9 +310,11 @@ class Progress:
                       file=self.out, flush=True)
 
 
-def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_dump, label="", out=None):
-    """Write out_dir (atomically replaced) with <kk>.metal per accepted row + index.tsv + skipped.tsv.
-    -> dict(listed, written, skipped, seen (None if unknown), reasons {reason: count})."""
+def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_dump, label="", out=None, dev=False):
+    """Write out_dir (atomically replaced) with <kk>.metal per accepted key + index.tsv + skipped.tsv. Per key the best row for this
+    Mac's GPU class (choose(); dev=False detects it, dev=None = class unknown: `*` rows only) whose text this Mac reproduces.
+    -> dict(listed, written, skipped, seen (None if unknown), reasons {reason: count}, cls, kk_class (keys left to KosmicKrisp by a
+    kk row), fallback (keys that took a less specific row))."""
     out = out or sys.stdout
     with open(list_path) as f:
         text = f.read()
@@ -198,65 +325,86 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
         raise MetalError("no kyty_msl_dump (build it with scripts/build.sh, or set NPS5_MSL_TOOL)")
     if not os.path.isfile(programs):
         raise MetalError("no %s (prepare the cache first)" % programs)
+    classes = has_classes(rows)
+    if dev is False:
+        dev = device_class(environ) if classes else None
+    keys = choose(rows, dev, lambda r: r["kk"])
     perms = read_perms(programs)
     env = clean_env(environ)
     parent = os.path.dirname(out_dir)
     os.makedirs(parent, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix=".metal-new-", dir=parent)
-    prog = Progress(len(rows), label, out)
+    prog = Progress(len(keys), label, out)
     reused = [0]
 
-    def one(ir):
-        i, r = ir
-        try:
-            idx = perms.get((r["program"], r["spec"]))
-            if idx is None:
-                return r, "not in programs.bin"
-            dst = os.path.join(tmp, r["kk"] + ".metal")
-            old = os.path.join(out_dir, r["kk"] + ".metal")      # prepfast: text already generated for this key (sha256 = the verified one)
-            if os.path.isfile(old) and file_sha(old) == r["b"]:
-                try:
-                    os.link(old, dst)
-                except FileExistsError:                  # a second permutation of the same kernel
-                    pass
-                except OSError:
-                    shutil.copyfile(old, dst)
-                reused[0] += 1
-                return r, None
-            part = "%s.%d.part" % (dst, i)
+    def try_row(i, r):
+        idx = perms.get((r["program"], r["spec"]))
+        if idx is None:
+            return "not in programs.bin"
+        dst = os.path.join(tmp, r["kk"] + ".metal")
+        old = os.path.join(out_dir, r["kk"] + ".metal")      # prepfast: text already generated for this key (sha256 = the verified one)
+        if os.path.isfile(old) and file_sha(old) == r["b"]:
             try:
-                rc, err = dump(tool, programs, idx, part, env)
-            except (OSError, subprocess.SubprocessError) as e:
-                return r, "dump failed: %s" % type(e).__name__
-            m = re.search(r"// complete=(\d)", err or "")
-            if rc != 0 or not os.path.isfile(part):
-                return r, "dump failed rc=%s" % rc
-            if m and m.group(1) != "1":
-                return r, "incomplete translation"
-            with open(part, "rb") as f:
-                head = f.read(len(HEADER))
-            if head != HEADER.encode():
-                return r, "no kk-mslinject header"
-            if file_sha(part) != r["b"]:
-                return r, "text differs from the verified kernel"
-            os.replace(part, dst)
-            return r, None
+                os.link(old, dst)
+            except FileExistsError:
+                pass
+            except OSError:
+                shutil.copyfile(old, dst)
+            reused[0] += 1
+            return None
+        part = "%s.%d.part" % (dst, i)
+        try:
+            rc, err = dump(tool, programs, idx, part, env) if r["mode"] == "base" else dump(tool, programs, idx, part, env, mode=r["mode"])
+        except (OSError, subprocess.SubprocessError) as e:
+            return "dump failed: %s" % type(e).__name__
+        m = re.search(r"// complete=(\d)", err or "")
+        if rc != 0 or not os.path.isfile(part):
+            return "dump failed rc=%s" % rc
+        if m and m.group(1) != "1":
+            return "incomplete translation"
+        with open(part, "rb") as f:
+            head = f.read(len(HEADER))
+        if head != HEADER.encode():
+            return "no kk-mslinject header"
+        if file_sha(part) != r["b"]:
+            return "text differs from the verified kernel"
+        os.replace(part, dst)
+        return None
+
+    def one(ik):
+        i, k = ik
+        tried = []
+        try:
+            for opt in keys[k]:
+                if opt[0]["mode"] == "kk":                  # measured slower on this class: KosmicKrisp's own kernel
+                    return k, None, "kk", tried
+                why = None
+                for j, r in enumerate(opt):                 # permutations of one kernel: any one reproduces it
+                    why = try_row(i * 64 + j, r)
+                    if why is None:
+                        return k, r, None, tried
+                tried.append((opt[0], why))
+            return k, None, tried[0][1] if tried else "no row", tried
         finally:
             prog.step()
 
     try:
         with ThreadPoolExecutor(max(1, jobs)) as ex:
-            res = list(ex.map(one, enumerate(rows)))
+            res = list(ex.map(one, enumerate(sorted(keys))))
         for fn in os.listdir(tmp):
             if fn.endswith(".part"):
                 os.remove(os.path.join(tmp, fn))
-        ok = list({r["kk"]: r for r, why in res if why is None}.values())   # one index row per kernel
-        bad = [(r, why) for r, why in res if why is not None]
+        ok = [r for _, r, why, _ in res if r is not None]
+        bad = [(keys[k][0][0], why) for k, r, why, _ in res if r is None and why != "kk"]
+        kkc = [k for k, r, why, _ in res if why == "kk"]
+        fb = [k for k, r, why, tried in res if r is not None and tried]
         with open(os.path.join(tmp, "index.tsv"), "w") as f:
             f.write("# written by nps5 cache metal; LOCAL ONLY (generated from your dump). list_sha=%s\n" % list_sha)
             f.write("list_sha\t%s\n" % list_sha)
+            if classes:
+                f.write("class\t%s\n" % class_name(dev))
             for r in ok:
-                f.write("%s\t%s\t%s\t%s\n" % (r["kk"], r["program"], r["spec"], r["local"]))
+                f.write("%s\t%s\t%s\t%s%s\n" % (r["kk"], r["program"], r["spec"], r["local"], "\t%s\t%s" % (r["mode"], r["cls"]) if classes else ""))
         with open(os.path.join(tmp, "skipped.tsv"), "w") as f:
             for r, why in bad:
                 f.write("%s\t%s\t%s\t%s\n" % (r["kk"], r["program"], r["spec"], why))
@@ -271,7 +419,8 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
         reasons[why] = reasons.get(why, 0) + 1
     nseen = None if seen is None else len({r["kk"] for r in rows} & set(seen))
     return dict(listed=len({r["kk"] for r in rows}), written=len(ok), skipped=len(bad), seen=nseen, reasons=reasons, list_sha=list_sha, reused=reused[0],
-                emitter=meta.get("emitter", ()))
+                emitter=meta.get("emitter", ()), cls=class_name(dev) if classes else None, kk_class=len(kkc), fallback=len(fb),
+                other_class=len({r["kk"] for r in rows}) - len(keys))
 
 
 def summary(st):
@@ -282,6 +431,18 @@ def summary(st):
         s += "; KosmicKrisp built %d of the listed kernels in pass 1" % st["seen"]
     if st.get("reused"):
         s += "; %d unchanged from an earlier prepare" % st["reused"]
+    return s + class_summary(st)
+
+
+def class_summary(st):
+    """'' for a list without classes (the v1.2 summary, unchanged)."""
+    if not st.get("cls"):
+        return ""
+    s = "; GPU class %s" % st["cls"]
+    for k, what in (("other_class", "listed for other GPUs only"), ("kk_class", "KosmicKrisp's on this GPU (measured slower here)"),
+                    ("fallback", "took a less specific row")):
+        if st.get(k):
+            s += ", %d %s" % (st[k], what)
     return s
 
 
@@ -352,12 +513,12 @@ def blake3_64(data):
 # ---------------------------------------------------------------- graphics pairs (vertex + fragment)
 def parse_gfx_list(text):
     """-> (meta dict, rows). Row: dict(vs, vs_spec, ps, ps_spec, kk_vs, kk_fs, b_vs, b_fs, variant, set0, va, cmask, blend, evidence)
-    (blend is '' in a format-1 list). Raises MetalError on a malformed line or on one (kk_vs, kk_fs) pair listed with different texts."""
+    + mode, cls, rule, verdict, ba (format 3; base / * / exact / shipped / - before). (blend is '' in a format-1 list). Raises MetalError on a malformed line or on one (kk_vs, kk_fs) pair listed with different texts."""
     meta, rows, seen = {}, [], {}
     fmt = next((ln.split("\t") for ln in text.splitlines() if ln.startswith("format\t")), [])
     if fmt[1:2] != [GFX_FORMAT[0]] or len(fmt) < 3 or fmt[2] not in GFX_FORMATS:
         raise MetalError("%s: missing or unknown `format` line (want %s %s)" % (GFX_LIST_NAME, GFX_FORMAT[0], " or ".join(GFX_FORMATS)), 2)
-    v2 = fmt[2] == "2"
+    v2, v3 = fmt[2] in ("2", "3"), fmt[2] == "3"
     for n, line in enumerate(text.splitlines(), 1):
         if not line.strip() or line.startswith("#"):
             continue
@@ -365,13 +526,18 @@ def parse_gfx_list(text):
         if f[0] in ("format", "title", "emitter"):
             meta[f[0]] = tuple(f[1:])
             continue
-        m = (GFX_ROW2_RE if v2 else GFX_ROW_RE).match(line)
+        m = (GFX_ROW3_RE if v3 else GFX_ROW2_RE if v2 else GFX_ROW_RE).match(line)
         if not m:
             raise MetalError("%s line %d: not a pair row" % (GFX_LIST_NAME, n), 2)
         g = m.groups()
-        r = dict(zip(GFX_COLS, g[:12]), blend=g[12] if v2 else "", evidence=g[-1])
-        if seen.setdefault((r["kk_vs"], r["kk_fs"]), (r["b_vs"], r["b_fs"])) != (r["b_vs"], r["b_fs"]):
-            raise MetalError("%s line %d: pair %s_%s listed twice with different texts" % (GFX_LIST_NAME, n, r["kk_vs"], r["kk_fs"]), 2)
+        if v3:
+            r = dict(zip(GFX_COLS, g[:12]), blend=g[12], evidence=g[13], **dict(zip(CLASS_COLS, g[14:])))
+        else:
+            r = dict(zip(GFX_COLS, g[:12]), blend=g[12] if v2 else "", evidence=g[-1], **CLASS_DEFAULTS)
+        _row_rules(r, "%s line %d" % (GFX_LIST_NAME, n))
+        k = (r["kk_vs"], r["kk_fs"], r["cls"])
+        if seen.setdefault(k, (r["b_vs"], r["b_fs"], r["mode"])) != (r["b_vs"], r["b_fs"], r["mode"]):
+            raise MetalError("%s line %d: pair %s_%s listed twice for class %s with different texts" % (GFX_LIST_NAME, n, r["kk_vs"], r["kk_fs"], r["cls"]), 2)
         rows.append(r)
     return meta, rows
 
@@ -494,6 +660,11 @@ def perm_key(digest, spec):
 
 
 def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gfx):
+    if r.get("mode", "base") != "base":                 # the row's emitter mode reaches both stages (and only through argv)
+        inner = dump
+
+        def dump(tool, programs, perm, out, env, extra=()):
+            return inner(tool, programs, perm, out, env, tuple(mode_args(r["mode"])) + tuple(extra))
     """-> (None, (vs_part, fs_part)) when both texts equal the verified ones, else (reason, None)."""
     vi, pi = perms.get(perm_key(r["vs"], r["vs_spec"])), perms.get(perm_key(r["ps"], r["ps_spec"]))
     if vi is None or pi is None:
@@ -537,7 +708,7 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
 KK_VS_KEEP = "kk-vs-keep"
 
 
-def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None, keep_dir=None):
+def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None, keep_dir=None, dev=False):
     """Add <kk_vs>_<kk_fs>.vs.metal/.fs.metal to out_dir (created if needed; call after generate(), which replaces the directory)
     plus index-gfx.tsv/skipped-gfx.tsv. -> dict(listed, written, skipped, reasons, list_sha)."""
     out = out or sys.stdout
@@ -552,12 +723,15 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
         raise MetalError("no %s (prepare the cache first)" % programs)
     perms = read_perms(programs, cursors=True)
     env = clean_env(environ)
+    classes = has_classes(rows)
+    if dev is False:
+        dev = device_class(environ) if classes else None
     # KosmicKrisp writes its vertex MSL to kk-libcache/msl only when it compiles a shader; a later prepare LOADS the metallibs, so
     # the texts are gone and every pair would be dropped. Keep a copy of each needed vertex text in keep_dir (prepare: next to the
     # metallib store, it outlives the cache dir; default <out_dir>/../kk-vs-keep) as <kk key>.metal. The key is KosmicKrisp's
     # BLAKE3 of the text, so the store is content-addressed; the sha256 check of our texts still decides.
     keep = keep_dir or os.path.join(os.path.dirname(os.path.abspath(out_dir)), KK_VS_KEEP)
-    wanted = {r["kk_vs"] for r in rows}
+    wanted = {r["kk_vs"] for r in rows if r["mode"] != "kk"}
     kkv = {k: os.path.join(keep, k + ".metal") for k in wanted if os.path.isfile(os.path.join(keep, k + ".metal"))}
     found = find_kk_vertex(kk_msl_dir, wanted - set(kkv), lens) if wanted - set(kkv) else {}
     if found:
@@ -572,23 +746,38 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
         if fn.endswith((".vs.metal", ".fs.metal")) or fn in (GFX_INDEX, "skipped-gfx.tsv"):
             os.remove(os.path.join(out_dir, fn))
     tmp = tempfile.mkdtemp(prefix=".metal-gfx-", dir=os.path.dirname(out_dir) or ".")
-    prog = Progress(len(rows), label, out, what="Metal graphics")
+    pairs = choose(rows, dev, lambda r: (r["kk_vs"], r["kk_fs"]))
+    prog = Progress(len(pairs), label, out, what="Metal graphics")
 
-    def one(ir):
-        i, r = ir
+    def one(ik):
+        i, k = ik
+        tried = []
         try:
-            return r, gen_pair(r, tool, programs, perms, kkv.get(r["kk_vs"]), tmp, i, env, dump)
+            for opt in pairs[k]:
+                if opt[0]["mode"] == "kk":
+                    return k, None, "kk", None, tried
+                why = None
+                for j, r in enumerate(opt):
+                    why, files = gen_pair(r, tool, programs, perms, kkv.get(r["kk_vs"]), tmp, i * 64 + j, env, dump)
+                    if not why:
+                        return k, r, None, files, tried
+                tried.append((opt[0], why))
+            return k, None, tried[0][1] if tried else "no row", None, tried
         finally:
             prog.step()
 
     try:
         with ThreadPoolExecutor(max(1, jobs)) as ex:
-            res = list(ex.map(one, enumerate(rows)))
-        ok, bad = [], []
-        for r, (why, files) in res:
-            if why:
-                bad.append((r, why))
+            res = list(ex.map(one, enumerate(sorted(pairs))))
+        ok, bad, kkc, fb = [], [], 0, 0
+        for k, r, why, files, tried in res:
+            if why == "kk":
+                kkc += 1
                 continue
+            if why:
+                bad.append((pairs[k][0][0], why))
+                continue
+            fb += 1 if tried else 0
             pair = "%s_%s" % (r["kk_vs"], r["kk_fs"])
             os.replace(files[0], os.path.join(out_dir, pair + ".vs.metal"))
             os.replace(files[1], os.path.join(out_dir, pair + ".fs.metal"))
@@ -596,8 +785,10 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
         with open(os.path.join(out_dir, GFX_INDEX), "w") as f:
             f.write("# written by nps5 cache metal; LOCAL ONLY. list_sha=%s\n" % list_sha)
             f.write("list_sha\t%s\n" % list_sha)
+            if classes:
+                f.write("class\t%s\n" % class_name(dev))
             for r in ok:
-                f.write("%s\t%s\t%s\t%s\n" % (r["kk_vs"], r["kk_fs"], r["vs"], r["ps"]))
+                f.write("%s\t%s\t%s\t%s%s\n" % (r["kk_vs"], r["kk_fs"], r["vs"], r["ps"], "\t%s\t%s" % (r["mode"], r["cls"]) if classes else ""))
         with open(os.path.join(out_dir, "skipped-gfx.tsv"), "w") as f:
             for r, why in bad:
                 f.write("%s\t%s\t%s\n" % (r["kk_vs"], r["kk_fs"], why))
@@ -606,7 +797,9 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
     reasons = {}
     for _, why in bad:
         reasons[why] = reasons.get(why, 0) + 1
-    return dict(listed=len(rows), written=len(ok), skipped=len(bad), reasons=reasons, list_sha=list_sha, emitter=meta.get("emitter", ()))
+    nlisted = len({(r["kk_vs"], r["kk_fs"]) for r in rows})
+    return dict(listed=len(rows) if not classes else nlisted, written=len(ok), skipped=len(bad), reasons=reasons, list_sha=list_sha,
+                emitter=meta.get("emitter", ()), cls=class_name(dev) if classes else None, kk_class=kkc, fallback=fb, other_class=nlisted - len(pairs))
 
 
 TEXT_DIFFERS = ("text differs from the verified kernel", "text differs from the verified pair")
@@ -636,7 +829,7 @@ def gfx_summary(st):
     s = "Metal graphics: %d of %d verified vertex+fragment pairs generated" % (st["written"], st["listed"])
     if st["reasons"]:
         s += "; skipped: " + ", ".join("%s %d" % (k, v) for k, v in sorted(st["reasons"].items()))
-    return s
+    return s + class_summary(st)
 
 
 def gfx_index_rows(out_dir):
@@ -647,9 +840,82 @@ def gfx_index_rows(out_dir):
     except OSError:
         return None, 0
     sha = next((l[1] for l in lines if l[0] == "list_sha" and len(l) > 1), None)
-    n = sum(1 for l in lines if l[0] != "list_sha" and len(l) >= 4
+    n = sum(1 for l in lines if l[0] not in ("list_sha", "class") and len(l) >= 4
             and os.path.isfile(os.path.join(out_dir, "%s_%s.vs.metal" % (l[0], l[1]))) and os.path.isfile(os.path.join(out_dir, "%s_%s.fs.metal" % (l[0], l[1]))))
     return sha, n
+
+
+# ---------------------------------------------------------------- reproducibility of a per-class list (every row, every class)
+def _class_sublist(text, cls, gfx):
+    """The list with only the rows of one class spec, rewritten to class `*` (so they generate on any Mac). Header lines kept."""
+    out = []
+    for line in text.splitlines():
+        f = line.split("\t")
+        is_row = (f[0] == "gfx") if gfx else (len(f) > 5 and len(f[0]) == 32 and not line.startswith("#"))
+        if not is_row:
+            out.append(line)
+        elif f[-4] == cls and f[-5] != "kk":
+            f[-4] = "*"
+            out.append("\t".join(f))
+    return "\n".join(out) + "\n"
+
+
+def reproduce(list_path, gfx_path, programs, kk_msl_dir, environ, work, jobs=4, keep_dir=None, out=None):
+    """Regenerate EVERY text row of the lists (all classes, not only this Mac's) and compare with the listed sha256: the proof that the
+    public generator reproduces the list. -> dict(rows, reproduced, per_class {cls: (ok, n)}, failed [(kind, key, cls, why)])."""
+    out = out or sys.stdout
+    res = dict(rows=0, reproduced=0, per_class={}, failed=[])
+    for path, gfx in ((list_path, False), (gfx_path, True)):
+        if not path or not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            text = f.read()
+        _meta, rows = (parse_gfx_list if gfx else parse_list)(text)
+        for cls in sorted({r["cls"] for r in rows if r["mode"] != "kk"}):
+            sub = [r for r in rows if r["cls"] == cls and r["mode"] != "kk"]
+            tag = "%s-%s" % ("gfx" if gfx else "cs", re.sub(r"[^a-z0-9]", "_", cls))
+            lp = os.path.join(work, tag + ".tsv")
+            with open(lp, "w") as f:
+                f.write(_class_sublist(text, cls, gfx))
+            od = os.path.join(work, tag)
+            if gfx:
+                st = generate_gfx(lp, programs, kk_msl_dir, od, environ, jobs=jobs, out=out, keep_dir=keep_dir, dev=None)
+                done = {(l[0], l[1]) for l in _index_lines(os.path.join(od, GFX_INDEX))}
+                why = {(l[0], l[1]): l[2] for l in _index_lines(os.path.join(od, "skipped-gfx.tsv"))}
+                for r in sub:
+                    k = (r["kk_vs"], r["kk_fs"])
+                    ok = k in done
+                    res["rows"] += 1; res["reproduced"] += ok
+                    pc = res["per_class"].setdefault(("gfx", cls), [0, 0]); pc[0] += ok; pc[1] += 1
+                    if not ok:
+                        res["failed"].append(("gfx", "%s_%s" % k, cls, why.get(k, "?")))
+            else:
+                st = generate(lp, programs, od, environ, jobs=jobs, out=out, dev=None)
+                done = {l[0] for l in _index_lines(os.path.join(od, "index.tsv"))}
+                why = {l[0]: l[3] for l in _index_lines(os.path.join(od, "skipped.tsv")) if len(l) > 3}
+                for r in sub:
+                    ok = r["kk"] in done
+                    res["rows"] += 1; res["reproduced"] += ok
+                    pc = res["per_class"].setdefault(("cs", cls), [0, 0]); pc[0] += ok; pc[1] += 1
+                    if not ok:
+                        res["failed"].append(("cs", r["kk"], cls, why.get(r["kk"], "?")))
+    return res
+
+
+def _index_lines(path):
+    try:
+        with open(path) as f:
+            return [l.rstrip("\n").split("\t") for l in f if l.strip() and not l.startswith(("#", "list_sha\t", "class\t"))]
+    except OSError:
+        return []
+
+
+def reproduce_record(res):
+    """The record lines for <list>.verified (scripts/nps5_check.py requires `reproduced=N of N` for a per-class list)."""
+    lines = ["reproduced=%d of %d" % (res["reproduced"], res["rows"])]
+    for (kind, cls), (ok, n) in sorted(res["per_class"].items()):
+        lines.append("class %s %s: %d of %d" % (kind, cls, ok, n))
+    return lines
 
 
 # ---------------------------------------------------------------- launch words
@@ -661,7 +927,7 @@ def index_rows(out_dir):
     except OSError:
         return None, 0
     sha = next((l[1] for l in lines if l[0] == "list_sha" and len(l) > 1), None)
-    n = sum(1 for l in lines if l[0] != "list_sha" and len(l) >= 4 and os.path.isfile(os.path.join(out_dir, l[0] + ".metal")))
+    n = sum(1 for l in lines if l[0] not in ("list_sha", "class") and len(l) >= 4 and os.path.isfile(os.path.join(out_dir, l[0] + ".metal")))
     return sha, n
 
 
@@ -686,4 +952,22 @@ def launch_words(cache_dir, list_path, environ):
         return [], "the Metal shaders of this cache were made for another %s: not used; `nps5 cache metal <id>` regenerates them" % LIST_NAME
     if gn and gsha != current(os.path.join(os.path.dirname(list_path), GFX_LIST_NAME)):
         return [], "the Metal graphics pairs of this cache were made for another %s: not used; `nps5 cache metal <id>` regenerates them" % GFX_LIST_NAME
+    made = {c for c in (index_class(d, "index.tsv") if n else None, index_class(d, GFX_INDEX) if gn else None) if c}
+    if made:                                           # per-class lists: the texts were chosen for one GPU class (and macOS major)
+        here = class_name(device_class(environ))
+        if made != {here}:
+            return [], ("the Metal shaders of this cache were chosen for GPU class %s, this Mac is %s (another Mac or a macOS update): "
+                        "not used; `nps5 cache metal <id>` regenerates them" % ("/".join(sorted(made)), here))
     return [("KK_MSL_OVERRIDE_DIR", d)], None
+
+
+def index_class(out_dir, name):
+    """-> the `class` line of a generated index (None for a list without classes, i.e. every v1.2 index)."""
+    try:
+        with open(os.path.join(out_dir, name)) as f:
+            for l in f:
+                if l.startswith("class\t"):
+                    return l.rstrip("\n").split("\t")[1]
+    except OSError:
+        pass
+    return None

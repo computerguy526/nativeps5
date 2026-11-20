@@ -12,8 +12,9 @@
                                                                       every listed pipeline in a start that exits before the game runs;
                                                                       two starts with KK's library cache (see below), --single-pass = one;
                                                                       then two short warm starts (window helper pipelines), --no-warm = none
-  nps5 cache metal   <id> [--dry-run]                                (re)generate our Metal kernels for the listed verified keys from this
-                                                                      cache's programs.bin (prepare does it between its passes; metal.py)
+  nps5 cache metal   <id> [--dry-run] [--reproduce]                   (re)generate our Metal kernels for the listed verified keys from this
+                                                                      cache's programs.bin (prepare does it between its passes; metal.py);
+                                                                      --reproduce: every row of every GPU class, prints the record line
   nps5 cache check   <id> [--scene NAME ...] [--secs N] [--dry-run]   first-visit runs on a clone of the prepared cache: live compiles, stalls
   nps5 cache status  <id>                                              fresh | partial | prepared | stale (exit 0 only when prepared)
 
@@ -943,8 +944,31 @@ def cmd_metal(ctx, o, runner):
     if o["dry"]:
         print("[dry-run] would generate %s from %s and %s/%s.programs.bin" % (os.path.join(ctx.dir, metalmod.OUT_NAME), metal_list(ctx), ctx.dir, ctx.tid))
         return 0
+    if o.get("reproduce"):
+        return metal_reproduce(ctx)
     st = metal_step(ctx, runner, None, label="")
     return 0 if st and not st.get("error") and not st.get("mismatch") else 1
+
+
+def metal_reproduce(ctx):
+    """`nps5 cache metal <id> --reproduce`: regenerate every row of both lists for EVERY GPU class (not only this Mac's) from this
+    cache and print the `reproduced=N of N` record line the per-class lists' .verified records need. Writes nothing into the cache."""
+    import tempfile
+    prog = os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)
+    lp, gp = (os.path.join(ctx.p.dir, n) for n in (metalmod.LIST_NAME, metalmod.GFX_LIST_NAME))
+    work = tempfile.mkdtemp(prefix="metal-repro-", dir=ctx.root)
+    try:
+        res = metalmod.reproduce(lp, gp, prog, os.path.join(ctx.dir, "kk-libcache", "msl"), ctx.environ, work, jobs=compile_jobs(ctx.environ),
+                                 keep_dir=ctx.root + "." + metalmod.KK_VS_KEEP)
+    except (metalmod.MetalError, OSError) as e:
+        print("reproduce: %s" % e); return 1
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    for kind, key, cls, why in res["failed"]:
+        print("NOT reproduced: %s %s class %s: %s" % (kind, key, cls, why))
+    for l in metalmod.reproduce_record(res):
+        print(l)
+    return 0 if res["rows"] and res["reproduced"] == res["rows"] else 1
 
 
 def warm_starts(ctx, app0, o, runner, build_libs):
@@ -1047,7 +1071,7 @@ def default_runner(cmd, env=None, capture=False):
 
 
 def parse(argv):
-    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, nowarm=False, list=None, shaders=[], contrib=[], pr=False, confirm=None, **{"from": []})
+    o = dict(scene=[], secs=None, dry=False, rebuild=False, write=False, single=False, nowarm=False, list=None, shaders=[], contrib=[], pr=False, confirm=None, reproduce=False, **{"from": []})
     pos, i = [], 0
     VAL = {"--scene": "scene", "--from": "from", "--shaders": "shaders", "--secs": "secs", "--list": "list"}
     while i < len(argv):
@@ -1062,7 +1086,7 @@ def parse(argv):
             if isinstance(o[k], list): o[k].append(v)
             else: o[k] = v
             i += 1
-        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass", "--pr", "--no-warm"):
+        elif a in ("--dry-run", "--rebuild", "--write", "--single-pass", "--pr", "--no-warm", "--reproduce"):
             o[{"--dry-run": "dry", "--single-pass": "single", "--no-warm": "nowarm"}.get(a, a[2:])] = True
         elif a.startswith("--"):
             raise CacheError("unknown option %s" % a, 2)
