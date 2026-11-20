@@ -3,6 +3,40 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.2 (unreleased)
+
+Everything in v1.1.2. The game now runs at real speed, Kyty tiles less render-target memory back and forth, and the shipped
+pipeline list is larger. **Update:** nativeps5-recomp and nativeps5-kyty move to `v1.2` (anyps5 stays at v1.1.1): rebuild
+the recompiler (`scripts/build.sh recomp`) and **translate the title again** (`nps5 build`, about 11 minutes: the fix is in
+the runtime that is linked into the translated program), rebuild Kyty (`scripts/build.sh kyty`), then run
+`nps5 cache prepare` once for the new pipeline-list entries. The shader cache keys do not change (Kyty's codegen
+fingerprint is the same as v1.1.2's), so an existing prepared cache stays valid.
+
+- **Game speed = real time** (ps5recomp `nps5_framerate_logic.h`). ASTRO BOT advances a fixed step of game time per frame,
+  read from a block that the runtime rewrites from the measured frame rate. The old estimate was an exponential average of
+  per-frame rates 1/dt: with uneven frames (pairs of ~16 ms frames, then 80-105 ms gaps) that mean reads 15-23 fps above the
+  real rate, so the game ran slow. And the file-read load freeze (+2 s per busy second, no limit) held the block at 60 for
+  30-50 s while a slow Sky Garden streamed in. Now the average is over the frame PERIOD (one interval counts at most
+  max(3 periods, 125 ms), so a compile stall does not cause a rewrite), and the file-read freeze lasts at most
+  `NPS5_FRAMERATE_LOAD_MAX_MS` (default 8000; 0 = the old unlimited freeze) per run of busy seconds, after which streaming
+  is ignored until 5 quiet seconds. The clamp, hysteresis, warm-up and the 5 s level-open freeze are unchanged. Sky Garden
+  route (same stack, A/B): game speed 47-54 % -> 98 % of real time (first 60 s 30-33 % -> 92 %); frame time mean
+  52 -> 42 ms, p95 76 -> 67 ms. The `[framerate]` line ends `frozen -|video|phase|vfs[ streaming]`. Unit test
+  `tests/framerate/framerate_unit.c` (flip intervals from recorded sessions).
+- **Partial render-target rebuild** (Kyty `KYTY_ALIAS_REBUILD_PARTIAL=1`, on in the ASTRO BOT profile; `=0` turns it off): a
+  render target that is partly owned by another image and modified through a buffer was tiled out in full and detiled
+  back in full (Sky Garden: a 2432x1368 target, about 1 GB/s of the 2.4 GB/s tiler traffic). Kyty now refreshes only the
+  blocks the target does not own and skips blocks whose bytes already match (exact: segments aligned to the tile layout's
+  row/column periods). Sky Garden tiler traffic 2.4 -> 1.8-2.0 GB/s; frame time the same to slightly better (A/B n=3:
+  p50 18.1 -> 17.5 ms), memory the same, no picture differences. Unit test `owned_rebuild_plan_tests`. Opt-in diagnostics
+  that came with it: `KYTY_TILER_TRACE=N` (tiler pass trace), `KYTY_FAULT_PROCESS_VEC=1` (vectorised fault parser, off).
+- **Pipeline list refreshed** from the play-test and route sessions since v1.1.2: 920 -> 949 shader permutations,
+  1,604 -> 1,608 pipelines (886 shaders). Keys and hashes only, with its no-game-code record.
+- **Our Metal shaders:** the 68 compute kernels and 32 graphics pairs (36 rows) of v1.1.2 keep their texts (the lists now
+  name the v1.2 Kyty). Five G-buffer pairs that differed from KosmicKrisp by 1 f16 ulp on 1-3 of 8192 words under a newer
+  real-input profile are recorded in `metal-gfx-pairs.tsv.verified` under a stated near-exact rule (stored precision,
+  <= 1 f16 ulp; everything else bit-exact).
+
 ## v1.1.2 (2026-11-19)
 
 Everything in v1.1.1, with new Kyty features and memory settings on by default in the ASTRO BOT profile (each has an off switch, README
