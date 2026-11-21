@@ -139,18 +139,6 @@ If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an is
 - **Fullscreen on a chosen display** (`NPS5_WINDOW_SCREEN=builtin|main|<index>` together with fullscreen): the window opens
   on that display and goes fullscreen there. Without the variable, fullscreen opens as before.
 
-### Opt-in Kyty options (v1.2.2, off by default)
-
-All four are off unless the variable is set (`nps5 run --env NAME=VALUE`); with them off Kyty behaves as in v1.2.1. None changed
-the frame time we measured in Sky Garden (an M4 Pro), so none is on by default.
-- `KYTY_SUBRES_CONTAINS=1` and `KYTY_DEPTH_GROW_RECREATE=1`: ports of upstream KytyPS5 #2410 (compare image subresources by
-  containment) and #2417 (recreate a depth target that is narrower than the request).
-- `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1` (experimental; with `KYTY_ALIAS_REBUILD_PARTIAL=1`, which the ASTRO BOT profile sets): a
-  partial render-target rebuild moves only the blocks it owns. Bit-exact in our checks (`=verify` compares both moves on the GPU).
-- `KYTY_COMPUTE_IMAGE_COPY=1` (experimental; `verify-kernel` / `verify` compare against the guest's own result): a guest compute
-  pass proven to copy one whole surface to another becomes a native image copy. Exact in our checks; anything it cannot prove
-  runs as before.
-
 ### Flight recorder (off by default)
 
 `KYTY_FLIGHTREC=1` turns on a small recorder in the Kyty back end (about 13 MB of memory, a ring write per event) that keeps the
@@ -192,6 +180,11 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   540p (about 6 % shorter frames, a softer picture); a Mac whose GPU holds 30 fps at 720p stays at 720p. `NPS5_RENDER=720`
   (or `patch.render_scale=p720`) = 720p always, as in v1.2.1; `NPS5_RENDER=540` = 540p always; `NPS5_RENDER_LEVELS=
   <level>=auto|720|540,...,*=<mode>` per level; `NPS5_RENDER_TARGET_MS=<ms>` another budget. One `[rscale]` line per switch.
+- **Four Kyty options** (v1.2.2, set by the ASTRO BOT profile; off: `--env NAME=0`; exact in our checks, no frame-time change measured):
+  `KYTY_SUBRES_CONTAINS` and `KYTY_DEPTH_GROW_RECREATE` (upstream KytyPS5 #2410 image subresources compared by containment, #2417
+  depth targets narrower than the request are recreated); `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT` (a partial render-target rebuild
+  moves only the blocks it owns; `=verify` compares both moves on the GPU); `KYTY_COMPUTE_IMAGE_COPY` (a guest compute pass proven
+  to copy a whole surface becomes a native image copy; `verify-kernel` / `verify` compare against the guest's own result).
 - **Banner text layout** (v1.2.1, ps5recomp libSceFont): `sceFontGetHorizontalLayout` returns the face bounding box, as the
   PS5 font driver does, so banners such as BOT RESCUED no longer lose the tops of their capitals. Old values:
   `NPS5_FONT_LAYOUT=hhea`.

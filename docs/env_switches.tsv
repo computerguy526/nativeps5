@@ -869,7 +869,7 @@ KYTY_ALIAS_BYTES	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_CPU_WRITE_DIAGNOSTICS	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_CPU_WRITE_DIAGNOSTICS	nativeps5		titles/kyty-preset.env
 KYTY_ALIAS_REBUILD_PARTIAL	kyty	1 = a partly owned render target is rebuilt only in the blocks it does not own (v1.2; the ASTRO BOT profile sets 1)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
-KYTY_ALIAS_REBUILD_PRESERVE_TIGHT	kyty	1 = a partial render-target rebuild (KYTY_ALIAS_REBUILD_PARTIAL=1) moves only the blocks it owns (opt-in, default off; verify = also compare with the whole-segment move on the GPU; v1.2.2)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_ALIAS_REBUILD_PRESERVE_TIGHT	kyty	1 = a partial render-target rebuild (KYTY_ALIAS_REBUILD_PARTIAL=1) moves only the blocks it owns (default 1 in the ASTRO BOT profile since v1.2.2, 0 = off; verify = also compare with the whole-segment move on the GPU)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_SYNC_SKIP	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALPHA_TO_MASK	kyty		src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
 KYTY_AMD_CPU	kyty		src/main.cpp
@@ -956,7 +956,7 @@ KYTY_CMASK_FAST_CLEAR	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_MSAA	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_NATIVE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_CMD_GUARD	kyty		src/graphics/host_gpu/renderer/commandRecorder.cpp
-KYTY_COMPUTE_IMAGE_COPY	kyty	1 = a guest compute pass proven to copy one surface to another becomes a native image copy (opt-in, default off; verify-kernel / verify = compare; v1.2.2)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_COMPUTE_IMAGE_COPY	kyty	1 = a guest compute pass proven to copy one surface to another becomes a native image copy (default 1 in the ASTRO BOT profile since v1.2.2, 0 = off; verify-kernel / verify = compare)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_COMPUTE_META_CLEAR_DISPATCH	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_COMPUTE_WAVE64	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_COPY_VIA_BUFFER_BATCH	kyty		src/graphics/host_gpu/renderer/image/image.cpp
@@ -1049,7 +1049,7 @@ KYTY_DEFER_UNPROTECT	kyty		src/graphics/host_gpu/pageManager.cpp
 KYTY_DEPTH_FEEDBACK_KEEP	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_FEEDBACK_LAZY	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_FEEDBACK_USAGE	kyty	`0` creates depth images without the attachment feedback-loop usage, so KosmicKrisp keeps Metal lossless depth compression (about -2 ms/frame in ASTRO BOT); default 1 = as before; opt-in	src/graphics/host_gpu/renderer/image/image.cpp
-KYTY_DEPTH_GROW_RECREATE	kyty	1 = recreate a depth target that is narrower than the request (upstream KytyPS5 #2417; opt-in, default off; v1.2.2)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_DEPTH_GROW_RECREATE	kyty	1 = recreate a depth target that is narrower than the request (upstream KytyPS5 #2417; default 1 in the ASTRO BOT profile since v1.2.2, 0 = off)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DEPTH_LAYOUT_STABLE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_RO_STORE_NONE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DESCRIPTOR_OFFSET_AUDIT	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1780,7 +1780,7 @@ KYTY_SUBMISSION_MODE	kyty		src/common/profiler.cpp
 KYTY_SUBMISSION_MODE	nativeps5		titles/kyty-preset.env
 KYTY_SUBMIT_MIN_INTERVAL_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SUBMIT_WAIT_BEFORE_SIGNAL	kyty		src/graphics/host_gpu/queueSubmission.cpp
-KYTY_SUBRES_CONTAINS	kyty	1 = compare image subresources by containment (upstream KytyPS5 #2410; opt-in, default off; v1.2.2)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_SUBRES_CONTAINS	kyty	1 = compare image subresources by containment (upstream KytyPS5 #2410; default 1 in the ASTRO BOT profile since v1.2.2, 0 = off)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_SWAPCHAIN_MAX_MB	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_SYNC_COMMAND_SPIN_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SYNC_EPOCH	kyty		src/graphics/host_gpu/syncEpoch.h

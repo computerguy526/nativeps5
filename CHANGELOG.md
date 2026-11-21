@@ -6,7 +6,7 @@ pinned commits are in [components.lock](components.lock).
 ## v1.2.2 (2026-11-21)
 
 Everything in v1.2.1. Metal shaders now match on every Mac, a bigger list of faster Metal shaders (M4, M5 and M6 families),
-an automatic 720p / 540p render scale, a fix for flickering leaves, and four opt-in Kyty options. **Update:** nativeps5-recomp and nativeps5-kyty move to
+an automatic 720p / 540p render scale, a fix for flickering leaves, and four more Kyty options on by default. **Update:** nativeps5-recomp and nativeps5-kyty move to
 `v1.2.2` (anyps5 stays at v1.1.1): pull, check out `v1.2.2` in `../ps5recomp` and `../kyty`, rebuild the recompiler
 (`scripts/build.sh recomp`), **translate the title again** (`nps5 build`: the render-scale controller is in the runtime that is
 linked into the translated program), rebuild KosmicKrisp (`scripts/build.sh kosmickrisp`: patches 0027 and 0028 are new) and
@@ -47,15 +47,17 @@ Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (ne
 - KosmicKrisp patch 0028 (upstream Mesa 0db4e29): allocations beyond 95 % of the recommended working set fail with
   `VK_ERROR_OUT_OF_DEVICE_MEMORY` instead of a Metal kernel panic on macOS 26 (workaround 20).
 - **Fewer shader compiles in game:** pipeline list refreshed from a 31-minute play session of the clean-room build: 962 -> 989 shader permutations, 1,739 -> 1,752 pipelines (920 shaders). The list holds keys and hashes only; its no-game-code record is `games/PPSA21564/pipelines.kyplst.verified`.
-- **Kyty, opt-in (all off by default; off = the v1.2.1 behaviour, the shader fingerprint is unchanged).**
-  `KYTY_SUBRES_CONTAINS=1` and `KYTY_DEPTH_GROW_RECREATE=1` (ports of upstream KytyPS5 #2410 and #2417): neutral in our test
-  (ABA, moving Sky Garden, 52.7 / 52.1 / 54.6 ms mean; no visual change in a play session), so not on by default.
-  `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1` (with `KYTY_ALIAS_REBUILD_PARTIAL=1`, `=verify` compares with the whole-segment move on
-  the GPU): a partial render-target rebuild moves only the blocks it owns, 14 % fewer tiler bytes; bit-exact in 300 unit
-  cases and 1,793 GPU compares (0 mismatches), but the frame time did not change (49.9 / 56.8 vs 50.1 ms): experimental.
-  `KYTY_COMPUTE_IMAGE_COPY=1` (`verify-kernel`, `verify`): a guest compute pass proven to be a whole-surface copy becomes a native
-  image copy (tiler traffic 1,925 -> 1,337 MB/s, -31 %); exact on 473 kernel and 289 image GPU compares (0 mismatches), the frame
-  time did not change (49.8 / 49.9 vs 48.6 / 50.1 ms): experimental. Both keep the old path for everything they cannot prove.
+- **Four Kyty options are on by default in the ASTRO BOT profile (each off with `NAME=0`; with them off Kyty behaves as in v1.2.1, the
+  shader fingerprint is unchanged).** They were on in a 31-minute play session of the clean-room build ("flying, very responsive"
+  was the verdict); exact in our checks, but none changed the frame time we measured in Sky Garden, so no speed-up is claimed.
+  `KYTY_SUBRES_CONTAINS` and `KYTY_DEPTH_GROW_RECREATE` (ports of upstream KytyPS5 #2410 and #2417): ABA, moving Sky Garden,
+  52.7 / 52.1 / 54.6 ms mean. `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT` (with `KYTY_ALIAS_REBUILD_PARTIAL=1`, `=verify` compares with the
+  whole-segment move on the GPU): a partial render-target rebuild moves only the blocks it owns, 14 % fewer tiler bytes;
+  bit-exact in 300 unit cases and 1,793 GPU compares (0 mismatches); 49.9 / 56.8 vs 50.1 ms. `KYTY_COMPUTE_IMAGE_COPY`
+  (`verify-kernel`, `verify` compare): a guest compute pass proven to be a whole-surface copy becomes a native image copy (tiler
+  traffic 1,925 -> 1,337 MB/s, -31 %); exact on 473 kernel and 289 image GPU compares; 49.8 / 49.9 vs 48.6 / 50.1 ms. Both keep
+  the old path for everything they cannot prove. They are set by `games/PPSA21564/game.tsv` (the profile), so other titles are
+  unchanged.
 - Emitter modes for the list rows (`kyty_msl_dump --mode`): `vgroup`, `cload` (vertex load grouping / constant loads), `lcont`,
   `blim`, `gexit` (loop and guard tails). Off = byte-identical text; the list rows name the modes they need.
 - `nps5 data compress` was also tested on a cloud Mac with an M5 Pro (macOS 27.0, Python 3.9): a 159.8 GB game folder to

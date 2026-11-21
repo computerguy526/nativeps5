@@ -109,6 +109,11 @@ env	KYTY_GPU_ACCURACY=low	gpu=kyty	fast math for pixel/compute shaders outside f
 env	KYTY_ALIAS_REBUILD_PARTIAL=1	gpu=kyty	a partly owned render target is rebuilt only in the blocks it does not own (Sky Garden tiler traffic 2.4 -> 1.8-2.0 GB/s)
 # v1.2.1 default (README "Options"; off: `--env KYTY_CP_LEAD_MAX_MS=0`)
 env	KYTY_CP_LEAD_MAX_MS=16	gpu=kyty	the command processor runs at most 16 ms ahead of the GPU (Sky Garden: moving mean -3.5 ms, p90 -6.5 ms, frames over 70 ms -55 %)
+# v1.2.2 defaults (README "Options on by default"; each off with `--env NAME=0`; all exact in our checks)
+env	KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1	gpu=kyty	a partial render-target rebuild moves only the blocks it owns (tiler bytes -14 %; bit-exact: 300 unit cases, 1,793 GPU compares)
+env	KYTY_COMPUTE_IMAGE_COPY=1	gpu=kyty	a guest compute pass proven to copy one whole surface becomes a native image copy (tiler traffic -31 %; bit-exact: 473 kernel + 289 image GPU compares)
+env	KYTY_SUBRES_CONTAINS=1	gpu=kyty	image subresources compared by containment (upstream KytyPS5 #2410)
+env	KYTY_DEPTH_GROW_RECREATE=1	gpu=kyty	a depth target narrower than the request is recreated (upstream KytyPS5 #2417)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
 env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
 env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
