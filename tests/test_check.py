@@ -293,5 +293,35 @@ class TestRange(Base):
         self.assertEqual(e.exception.code, 2)
 
 
+class TestPerClassMetalLists(unittest.TestCase):
+    """v1.2.1: keys format 2 / pairs format 3 (mode, GPU class, rule, verdict, B/A) need a record with `reproduced=N of N`."""
+    H = "format\tnps5-metal-keys\t2\ntitle\tPPSA00000\t01.000.000\nemitter\tabcdef0\tv1.2.1\n"
+    R1 = "%s\t%s\t%s\t%s\t64x1x1\tautoval\tfix6+vsperf\tg16\toutprec:k=1\tfaster\t0.910" % ("1" * 32, "2" * 16, "3" * 16, "4" * 64)
+    R2 = "%s\t%s\t%s\t-\t64x1x1\tautoval\tkk\tg18@os27\texact\tslower\t1.176" % ("1" * 32, "2" * 16, "3" * 16)
+
+    def test_rows_and_record(self):
+        data = (self.H + self.R1 + "\n" + self.R2 + "\n").encode()
+        self.assertEqual(C.check_metal_keys(data), [])
+        rec = lambda n: ("# r\nsha256=%s\n%s\nreproduced=%d of %d\n" % (hashlib.sha256(data).hexdigest(), C.METAL_GFX_OK_LINE.decode(), n, n)).encode()
+        self.assertEqual(C.check_gfx_record(data, rec(1), gfx=False), [])            # the kk row has no text to reproduce
+        self.assertIn("reproduced=1 of 1", " ".join(C.check_gfx_record(data, rec(2), gfx=False)))
+        self.assertIn("needs its", " ".join(C.check_gfx_record(data, None, gfx=False)))
+        v1 = ("format\tnps5-metal-keys\t1\n" + "\t".join(self.R1.split("\t")[:6]) + "\n").encode()
+        self.assertEqual(C.check_gfx_record(v1, None, gfx=False), [])                # a v1.2 keys list needs no record (as before)
+        # review L4: class columns / '-' hashes only in a per-class format, and required there
+        v1tail = ("format\tnps5-metal-keys\t1\n" + self.R1 + "\n").encode()
+        self.assertTrue(C.check_metal_keys(v1tail), "format 1 with class columns")
+        self.assertTrue(C.check_metal_keys(("format\tnps5-metal-keys\t1\n" + "\t".join(self.R2.split("\t")[:6]) + "\n").encode()), "'-' in format 1")
+        self.assertTrue(C.check_metal_keys((self.H + "\t".join(self.R1.split("\t")[:6]) + "\n").encode()), "format 2 without the columns")
+        g = "gfx\t%s\t%s:0\t%s\t%s\t%s\t%s\t%s\t%s\ttwin\t0:0\t0:0:106\t31\t\tautoval" % ("1" * 32, "2" * 16, "3" * 32, "4" * 16, "5" * 16, "6" * 16, "7" * 64, "8" * 64)
+        self.assertEqual(C.check_metal_keys(("format\tnps5-metal-gfx-pairs\t2\n" + g + "\n").encode(), True), [])
+        self.assertTrue(C.check_metal_keys(("format\tnps5-metal-gfx-pairs\t2\n" + g + "\tbase\t*\texact\tshipped\t-\n").encode(), True))
+        self.assertEqual(C.check_metal_keys(("format\tnps5-metal-gfx-pairs\t3\n" + g + "\tbase\t*\texact\tshipped\t-\n").encode(), True), [])
+        self.assertTrue(C.check_metal_keys(("format\tnps5-metal-gfx-pairs\t3\n" + g + "\n").encode(), True))
+        for bad in (self.R1.replace("\tg16\t", "\tM4 Pro\t"), self.R1.replace("fix6+vsperf", "#include"), self.R1 + "\tmore",
+                    self.R1.replace("\tfaster\t", "\tgreat\t")):
+            self.assertTrue(C.check_metal_keys((self.H + bad + "\n").encode()), bad)
+
+
 if __name__ == "__main__":
     unittest.main()
