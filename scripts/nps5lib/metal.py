@@ -23,7 +23,7 @@ KosmicKrisp then writes no text), and keeps BOTH files only when both sha256 equ
 
 Per GPU class (v1.2.1, keys list format 2 / pairs list format 3): a row may name an emitter MODE (the switches kyty_msl_dump applies
 for that row only, `--mode`; `base` = the plain text every earlier release shipped) and a GPU CLASS (`*` = every Mac; `g16` = Apple GPU
-generation 16 = M4 family, `g18` = M6 family, optionally `@os26` = only on macOS 26). Several rows may name one KosmicKrisp key for
+generation 16 = M4 family, `g17` = M5 family, `g18` = M6 family, optionally `@os26` = only on macOS 26). Several rows may name one KosmicKrisp key for
 different classes. Per key this module takes the most specific row that matches THIS Mac (generation + OS > generation > OS > `*`),
 falls back to the next matching row when this Mac does not reproduce its text, and to KosmicKrisp's own shader when none is left.
 Mode `kk` = "KosmicKrisp's shader on this class" (a variant that was measured slower there). Rows are only listed for a class

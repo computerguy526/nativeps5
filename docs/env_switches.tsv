@@ -808,11 +808,11 @@ KK_METALLIB_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_METAL_CACHE_ID	kosmickrisp	name of a private OS Metal shader cache for this configuration; use a fresh one per arm of a shader comparison	bridge/mtl_compiler.m
 KK_METAL_CACHE_ID	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_CACHE_BUST	kosmickrisp		bridge/mtl_compiler.m
+KK_MSL_CANON_KEY	kosmickrisp	1 = also key every shader by the MSL text macOS 26 / Apple GPU family 9 writes (canonical key, log field canon=); an override is looked up under this Mac's own key first, then the canonical key. Default 0 (v1.2.2 oskey)	vulkan/kk_shader.c
+KK_MSL_CANON_KEY	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_COLLECT_DIR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_MSL_COLLECT_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_MSL_COLLECT_DIR	nativeps5		kosmickrisp/tests/vecload/run.sh
-KK_MSL_CANON_KEY	kosmickrisp	1 = also key every shader by the MSL text macOS 26 / Apple GPU family 9 writes (canonical key, log field canon=); an override is looked up under this Mac's own key first, then the canonical key. Default 0 (v1.2.2 oskey)	vulkan/kk_shader.c
-KK_MSL_CANON_KEY	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_COMPRESS	kosmickrisp		vulkan/kk_shader.c
 KK_MSL_COMPRESS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_DUMP_DIR	nativeps5	diagnostic: writes generated MSL per shader hash; output is game data	tools/xray/tests/run_tests.sh
@@ -869,6 +869,7 @@ KYTY_ALIAS_BYTES	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_CPU_WRITE_DIAGNOSTICS	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_CPU_WRITE_DIAGNOSTICS	nativeps5		titles/kyty-preset.env
 KYTY_ALIAS_REBUILD_PARTIAL	kyty	1 = a partly owned render target is rebuilt only in the blocks it does not own (v1.2; the ASTRO BOT profile sets 1)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_ALIAS_REBUILD_PRESERVE_TIGHT	kyty	1 = a partial render-target rebuild (KYTY_ALIAS_REBUILD_PARTIAL=1) moves only the blocks it owns (opt-in, default off; verify = also compare with the whole-segment move on the GPU; v1.2.2)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALIAS_SYNC_SKIP	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_ALPHA_TO_MASK	kyty		src/graphics/guest_gpu/command_processor/pm4Handlers.cpp
 KYTY_AMD_CPU	kyty		src/main.cpp
@@ -955,6 +956,7 @@ KYTY_CMASK_FAST_CLEAR	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_MSAA	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_NATIVE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_CMD_GUARD	kyty		src/graphics/host_gpu/renderer/commandRecorder.cpp
+KYTY_COMPUTE_IMAGE_COPY	kyty	1 = a guest compute pass proven to copy one surface to another becomes a native image copy (opt-in, default off; verify-kernel / verify = compare; v1.2.2)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_COMPUTE_META_CLEAR_DISPATCH	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_COMPUTE_WAVE64	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_COPY_VIA_BUFFER_BATCH	kyty		src/graphics/host_gpu/renderer/image/image.cpp
@@ -1047,6 +1049,7 @@ KYTY_DEFER_UNPROTECT	kyty		src/graphics/host_gpu/pageManager.cpp
 KYTY_DEPTH_FEEDBACK_KEEP	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_FEEDBACK_LAZY	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_FEEDBACK_USAGE	kyty	`0` creates depth images without the attachment feedback-loop usage, so KosmicKrisp keeps Metal lossless depth compression (about -2 ms/frame in ASTRO BOT); default 1 = as before; opt-in	src/graphics/host_gpu/renderer/image/image.cpp
+KYTY_DEPTH_GROW_RECREATE	kyty	1 = recreate a depth target that is narrower than the request (upstream KytyPS5 #2417; opt-in, default off; v1.2.2)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DEPTH_LAYOUT_STABLE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_RO_STORE_NONE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DESCRIPTOR_OFFSET_AUDIT	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1448,7 +1451,13 @@ KYTY_MSL_VS_SINGLE_LANE	kyty	MSL back end, vertex stage: single-lane subgroup se
 KYTY_MSL_WAITCNT_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAVE64	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_XF	kyty		src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_BLIM	kyty	emitter transform bounds_lim (kyty_msl_dump --mode blim; list rows only, off = unchanged text; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_CLOAD	kyty	emitter transform vs_const_load (mode cload; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_GEXIT	kyty	emitter transform guard_exit (mode gexit; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_LCONT	kyty	emitter transform loop_cont (mode lcont; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_LSEL	kyty	emitter transform load_select (mode lsel; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
 KYTY_MSL_XF_TABLE	kyty		src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_VGROUP	kyty	emitter transform vs_load_group (mode vgroup; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
 KYTY_MUTEX_HANDOFF_US	kyty		src/kernel/pthread.cpp
 KYTY_NATIVE_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_NATIVE_FMINMAX	nativeps5		titles/kyty-preset.env
@@ -1664,6 +1673,7 @@ KYTY_RES_AUDIT_INTERNAL	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_RES_AUDIT_MAX	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_RES_AUDIT_SHADERS	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_ROBUST_BUFFER_LOADS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_RTIMAGE_PROBE	kyty	1 = diagnostic: log the dispatch shape of compute shaders that touch formatted buffers (v1.2.2)	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_BUDGET_GUARD	kyty	software RT dispatches skipped while lanes exhaust the BVH node budget (default on, 0 off)	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_BUDGET_GUARD_HOLD_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_BUDGET_GUARD_LANES	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
@@ -1770,6 +1780,7 @@ KYTY_SUBMISSION_MODE	kyty		src/common/profiler.cpp
 KYTY_SUBMISSION_MODE	nativeps5		titles/kyty-preset.env
 KYTY_SUBMIT_MIN_INTERVAL_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SUBMIT_WAIT_BEFORE_SIGNAL	kyty		src/graphics/host_gpu/queueSubmission.cpp
+KYTY_SUBRES_CONTAINS	kyty	1 = compare image subresources by containment (upstream KytyPS5 #2410; opt-in, default off; v1.2.2)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_SWAPCHAIN_MAX_MB	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_SYNC_COMMAND_SPIN_US	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_SYNC_EPOCH	kyty		src/graphics/host_gpu/syncEpoch.h
@@ -2076,6 +2087,13 @@ NPS5_PROFILES	ps5recomp		pkg/pack/profile.go
 NPS5_PUBLIC_DIR	nativeps5		scripts/build.sh
 NPS5_RECOMP_DIR	nativeps5		nps5.conf.example
 NPS5_REGRESS_SKIP	nativeps5		scripts/nps5lib/regress.py
+NPS5_RENDER	ps5recomp	auto (default) | 720 | 540: render scale; 720 = v1.2.1 (v1.2.2)	pkg/runtime/core/nps5_rscale.c
+NPS5_RENDER_FILE	ps5recomp	a file holding auto|720|540 overrides the render-scale mode while it exists (checked twice a second; v1.2.2)	pkg/runtime/core/nps5_rscale.c
+NPS5_RENDER_LEVELS	ps5recomp	per-level render scale: <level>=auto|720|540,...,*=<mode> (v1.2.2)	pkg/runtime/core/nps5_rscale.c
+NPS5_RENDER_LOG	ps5recomp	0 = render-scale switches only, 1 (default) = + a status line every 30 s, 2 = + every 5 s (v1.2.2)	pkg/runtime/core/nps5_rscale.c
+NPS5_RENDER_SWITCH	ps5recomp	any (default) = the render scale may switch mid-level; scene = a decision waits for the next level or load (v1.2.2)	pkg/runtime/core/nps5_rscale.c
+NPS5_RENDER_TARGET_MS	ps5recomp	frame-time budget of the render-scale controller in ms (default 33; v1.2.2)	pkg/runtime/core/nps5_rscale.c
+NPS5_RENDER_TUNE	ps5recomp	render-scale controller tuning keys down,up,gain,down_s,up_s,dwell_s,warm_s,tau_s (v1.2.2)	pkg/runtime/core/nps5_rscale.c
 NPS5_REPO	ps5recomp		pkg/pack/build.go
 NPS5_ROOT	nativeps5		nps5.conf.example
 NPS5_ROOT	ps5recomp		pkg/diag/tools.go

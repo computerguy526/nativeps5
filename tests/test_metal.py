@@ -577,6 +577,7 @@ def keys_list2(rows):
 
 IOREG_M4 = '+-o AGXAcceleratorG16X  <class AGXAcceleratorG16X>\n    {\n      "model" = "Apple M4 Pro"\n      "IOClass" = "AGXAcceleratorG16X"\n      "gpu-core-count" = 20\n    }\n'
 IOREG_M6 = IOREG_M4.replace("G16X", "G18G").replace("M4 Pro", "M6")
+IOREG_M5 = IOREG_M4.replace("G16X", "G17X").replace("M4 Pro", "M5 Pro")   # box3 2026-11-21: Apple M5 Pro, AGXAcceleratorG17X (MTLDevice.architecture applegpu_g17s)
 
 
 def fake_run(ioreg, osv):
@@ -613,6 +614,22 @@ class Classes(unittest.TestCase):
         self.assertEqual(metal.class_name(metal.parse_device("applegpu_g16s")), "g16s")
         for bad in ("m4", "g1", "g16@27", "applegpu"):
             self.assertIsNone(metal.parse_device(bad), bad)
+
+    def test_m5_class_g17(self):
+        """m5class: the M5 family is class g17 (IORegistry AGXAcceleratorG17X): g17 rows apply there and nowhere else; the other classes and `*` are unchanged."""
+        m5 = metal.device_class({}, run=fake_run(IOREG_M5, "27.0"))
+        self.assertEqual((m5["gen"], m5["var"], m5["os"], m5["model"]), ("g17", "", "27", "Apple M5 Pro"))
+        self.assertEqual(metal.class_name(m5), "g17@os27")
+        self.assertEqual(metal.class_name(metal.device_class({"NPS5_GPU_ARCH": "applegpu_g17s"}, run=fake_run(IOREG_M5, "27.2"))), "g17s@os27")
+        self.assertEqual(metal.class_name(metal.device_class({"NPS5_GPU_ARCH": "applegpu_g16s"}, run=fake_run(IOREG_M5, "27.2"))), "g17@os27")
+        self.assertEqual([metal.class_score(c, m5) for c in ("*", "g17", "g16", "g18", "g17@os27", "g17@os26", "g17s")], [0, 4, None, None, 5, None, None])
+        rows = [dict(kk="a", cls="*", mode="base"), dict(kk="a", cls="g16", mode="fix6"), dict(kk="a", cls="g17", mode="fix6+vsperf"), dict(kk="a", cls="g18", mode="xf=7")]
+        pick = lambda dev: [(o[0]["cls"], o[0]["mode"]) for o in metal.choose(rows, dev, lambda r: r["kk"])["a"]]
+        self.assertEqual(pick(m5), [("g17", "fix6+vsperf"), ("*", "base")])
+        self.assertEqual(pick(metal.parse_device("g16@os26")), [("g16", "fix6"), ("*", "base")])    # off-class behaviour unchanged
+        self.assertEqual(pick(metal.parse_device("g18@os27")), [("g18", "xf=7"), ("*", "base")])
+        self.assertEqual(pick(None), [("*", "base")])
+        self.assertEqual(metal.class_name(metal.parse_device("applegpu_g17s")), "g17s")
 
     def test_class_score(self):
         dev = metal.parse_device("g16s@os26")
