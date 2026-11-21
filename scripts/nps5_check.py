@@ -93,7 +93,7 @@ METAL_ROW2_RE = re.compile(rb"^[0-9a-f]{32}\t[0-9a-f]{16}\t[0-9a-f]{16}\t(?:[0-9
 # offsets binding:offset, vertex attributes loc:binding:format, colour mask) that the emitter needs; no shader text.
 # Format 2 (v1.1.1): a spec key may carry the record's push-data cursor (:n), and a blend column (per colour attachment
 # en:sc:dc:co:sa:da:ao:wm:class:components, ';'-joined: numbers and one class letter) comes before the evidence.
-_GFX_ROW = (rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t[0-9a-f]{16}\t[0-9a-f]{16}\t%s\t%s"
+_GFX_ROW = (rb"^gfx\t[0-9a-f]{32}\t[0-9a-f]{16}(?::\d{1,4})?\t(?:[0-9a-f]{32}|-)\t(?:[0-9a-f]{16}(?::\d{1,4})?|-)\t[0-9a-f]{16}\t[0-9a-f]{16}\t%s\t%s"
             rb"\t(?:mipstats|twin)\t[0-9:,]{0,400}\t[0-9:,]{0,200}\t\d{1,3}(?:\t(?:\d{1,3}:){8}[fusix]:\d(?:;(?:\d{1,3}:){8}[fusix]:\d){0,7}|\t)?\t[a-z0-9_+,.-]{0,48}")
 METAL_GFX_ROW_RE = re.compile(_GFX_ROW % (rb"[0-9a-f]{64}", rb"[0-9a-f]{64}") + rb"$")
 METAL_GFX_ROW3_RE = re.compile(_GFX_ROW % (rb"(?:[0-9a-f]{64}|-)", rb"(?:[0-9a-f]{64}|-)") + METAL_CLASS_COLS)

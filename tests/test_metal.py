@@ -206,7 +206,9 @@ GDUMP = """#!/bin/bash
 # fake kyty_msl_dump for graphics: the fragment text is first (declares its reads), the vertex text needs --link-ps and the reads + KK outputs + layout words
 while [ $# -gt 0 ]; do case $1 in --perm) p=$2; shift;; --out) o=$2; shift;; --link-ps) lp=$2; shift;; --mode) m=$2; shift;; esac; shift; done
 [ "$p" = 4 ] && exit 3
-if [ -n "$lp" ]; then
+if [ -z "$lp" ] && [ -n "${KYTY_MSL_KK_PS_READS+x}" ] && [ -z "$KYTY_MSL_KK_PS_READS" ]; then   # VS-only pipeline: no linked PS, reads nothing
+  printf "// kk-mslinject v1 stage vertex entry main0 math safe\\nvs %s vs-only va=%s\\n" "$p" "$KYTY_MSL_KK_VA" > $o
+elif [ -n "$lp" ]; then
   [ "$KYTY_MSL_KK_PS_READS" = "1:15" ] || { echo "no ps reads" >&2; exit 5; }
   printf "// kk-mslinject v1 stage vertex entry main0 math safe\\nvs %s outs=%s set0=%s va=%s cm=%s plain=%s%s\\n" "$p" "$KYTY_MSL_KK_VS_OUTS" "$KYTY_MSL_KK_SET0" "$KYTY_MSL_KK_VA" "$KYTY_MSL_KK_COLOR_MASK" "${KYTY_MSL_MIPSTATS_PLAIN:-0}" "${m:+ mode=$m}" > $o
 else
@@ -527,6 +529,22 @@ class Gfx2(unittest.TestCase):
         self.assertIn("2 of 2 verified vertex+fragment pairs generated", metal.gfx_summary(st))
         self.assertNotIn("GPU class", metal.gfx_summary(st))
         self.assertEqual(metal.gfx_index_rows(self.out)[1], 2)
+
+    def test_vs_only_pipeline_pairs_the_vertex_text_with_kk_empty_fragment(self):
+        kk_fs = metal.blake3_64(metal.KK_EMPTY_FS.encode())
+        v = b"// kk-mslinject v1 stage vertex entry main0 math safe\nvs 1 vs-only va=0:0:109\n"
+        f = (metal.KK_EMPTY_FS_HEADER + metal.KK_EMPTY_FS).encode()
+        r = "\t".join(["gfx", DG[1].hex(), metal.spec_key(SP[1]), "-", "-", self.kk_vs, kk_fs, hashlib.sha256(v).hexdigest(),
+                       hashlib.sha256(f).hexdigest(), "mipstats", "0:0,53:32", "0:0:109", "0", "", "fuzz2+mutant"])
+        st = self.gen([r])
+        self.assertEqual(st["written"], 1, st)
+        pair = "%s_%s" % (self.kk_vs, kk_fs)
+        self.assertEqual(open(os.path.join(self.out, pair + ".vs.metal"), "rb").read(), v)
+        self.assertEqual(open(os.path.join(self.out, pair + ".fs.metal"), "rb").read(), f)
+        st = self.gen([r.replace(kk_fs, "e" * 16)])                     # a fragment key that is not KK's empty shader
+        self.assertEqual(list(st["reasons"]), ["KosmicKrisp fragment shader is not its empty one"], st)
+        with self.assertRaises(metal.MetalError):                         # format 1 has no VS-only rows
+            metal.parse_gfx_list(gfx_list([gfx_row(1, 2, self.kk_vs, "f" * 16, gfx_text(1, 2)).replace("\t" + DG[2].hex() + "\t", "\t-\t")]))
 
     def test_format_1_lists_still_parse_and_unknown_formats_fail(self):
         meta, rows = metal.parse_gfx_list(gfx_list([gfx_row(1, 2, self.kk_vs, "f" * 16, gfx_text(1, 2))]))
