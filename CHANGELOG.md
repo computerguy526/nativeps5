@@ -6,12 +6,18 @@ pinned commits are in [components.lock](components.lock).
 ## v1.2.2 (2026-11-21)
 
 Everything in v1.2.1. Metal shaders now match on every Mac, a bigger list of faster Metal shaders (M4, M5 and M6 families),
-an automatic 720p / 540p render scale, and four opt-in Kyty options. **Update:** nativeps5-recomp and nativeps5-kyty move to
+an automatic 720p / 540p render scale, a fix for flickering leaves, and four opt-in Kyty options. **Update:** nativeps5-recomp and nativeps5-kyty move to
 `v1.2.2` (anyps5 stays at v1.1.1): pull, check out `v1.2.2` in `../ps5recomp` and `../kyty`, rebuild the recompiler
 (`scripts/build.sh recomp`), **translate the title again** (`nps5 build`: the render-scale controller is in the runtime that is
 linked into the translated program), rebuild KosmicKrisp (`scripts/build.sh kosmickrisp`: patches 0027 and 0028 are new) and
 Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (new Kyty, new Metal rows).
 
+- **Leaves no longer flicker (physics, on by default, needs `nps5 build` again):** v1.2.1's world step split (the fix for the crash
+  at the "feel the wall" gate) left the LAST sub-step's dt / n and n / dt as the world's step dt and in the Havok solver info, so
+  code that reads them once per frame (the leaves and other debris) saw one step of dt / n for a frame that advanced dt, and the
+  leaves flickered. After the last sub-step the shim now writes the frame's dt and 1 / dt back (three parameters in
+  `profiles/funcrepl/PPSA21564-physsub.json`). Checked by eye in play sessions (leaves clean, the gate opens, no crash, 26 thousand
+  split world calls in one session). Off: `NPS5_PHYS_SUBSTEP_DTFIX=0`; `[physsub] world dtfix on` is in the log.
 - **Metal shaders now match on every macOS and GPU.** KosmicKrisp's generated MSL, which the override keys hash, differs between
   macOS 26 and 27 and between GPU families (M4 and M5/M6); v1.2.1's replacements therefore matched only on macOS 26 with an M3/M4
   (on an M6 with macOS 27: 0 of 97 graphics pairs and 0 of 71 kernels were found). KosmicKrisp patch 0027 (`KK_MSL_CANON_KEY`)
@@ -53,6 +59,7 @@ Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (ne
   `blim`, `gexit` (loop and guard tails). Off = byte-identical text; the list rows name the modes they need.
 - `nps5 data compress` was also tested on a cloud Mac with an M5 Pro (macOS 27.0, Python 3.9): a 159.8 GB game folder to
   49.4 GB on disk in 8.4 minutes (88,624 files, 0 failed), SHA-256 read-back of 14 files equal to the original.
+- Clean room (public flow from fresh clones of the tagged sources, 24 GB M4 Pro): @@CLEANROOM@@
 - Checks: the pinned-list tests accept a `-dev` suffix in a list's emitter tag; the list header records Kyty `5091f4bb` (v1.2.2).
 
 ## v1.2.1 (2026-11-21)

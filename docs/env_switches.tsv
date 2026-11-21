@@ -2074,6 +2074,7 @@ NPS5_PHYS_SPRING_LOG	ps5recomp	physsub: per-bridge spring log	pkg/runtime/module
 NPS5_PHYS_SPRING_MAX	ps5recomp	physsub: most spring sub-steps per call (8)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP	ps5recomp	physsub: Havok world sub-steps + cloth clamp (default 1; 0 = steps unchanged)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_CLOTH	ps5recomp	physsub: cloth clamp|substep|off	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_DTFIX	ps5recomp	0 = do not write the frame dt / 1/dt back after a split world step (default 1: fixes flickering leaves; v1.2.2)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_HZ	ps5recomp	physsub: longest world/cloth step 1/hz s (60)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_LOG	ps5recomp	physsub: [physsub] line every 5 s	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_MAX	ps5recomp	physsub: most world steps per frame (4)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c

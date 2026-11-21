@@ -184,6 +184,7 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   build of the game is refused by `nps5 build`. Off (no rebuild needed): `NPS5_PHYS_SUBSTEP=0` (world + cloth),
   `NPS5_PHYS_SUBSTEP_WORLD=0`, `NPS5_PHYS_SUBSTEP_CLOTH=off`, `NPS5_PHYS_SPRING=0`; `NPS5_PHYS_SUBSTEP_LOG=1` and
   `NPS5_PHYS_SPRING_LOG=1` print `[physsub]` lines.
+  v1.2.2: after a split world step the frame's real dt is written back, which stops the leaves flickering (off: `NPS5_PHYS_SUBSTEP_DTFIX=0`; needs `nps5 build` again).
 - **Automatic render scale** (v1.2.2, ps5recomp `render_scale` setting + `[rscale]` controller, needs `nps5 build` again): the 3D
   scene renders at 720p and drops to 540p while the frame time stays over a budget of 33 ms (30 fps), then returns to 720p when
   there is headroom (hysteresis, at least 20 s between switches). It uses the game's own dynamic-resolution pipeline sets, so a
