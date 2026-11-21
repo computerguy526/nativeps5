@@ -1,13 +1,13 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=5a5654cd717b260e3ee962a437332084b40102e1ea18d7cbd32ea6131b0be048
+sha256=019fa28070a915972749a608592bb875efe03d44aab9f6d96ac3f935a3ab01b4
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
 reproduced=166 of 166
 class gfx *: 36 of 36
 class gfx g16: 47 of 47
 class gfx g18: 83 of 83
-emitter=f29386f56ea5cd6d51e625357debf94e40ff1732 v1.2.1 (nativeps5-kyty)
+emitter=76d5265d1e9af798b8c60a710a7c8582054b8b78 v1.2.1 (nativeps5-kyty)
 evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16)
-date=2026-11-20
+date=2026-11-21
