@@ -706,6 +706,8 @@ def cmd_prepare(ctx, o, runner):
     mlist = metal_list(ctx) or metal_gfx_list(ctx)
     if mlist:
         words.append(("KK_MSL_OVERRIDE_LOG", "1"))     # pass 1: KK names every compute kernel it builds (how many listed keys it sees)
+        if metalmod.canon_enabled(ctx.environ):
+            words.append(("KK_MSL_CANON_KEY", "1"))    # ... and the canonical (macOS 26 / GPU family 9) key of each: the lists' keys
     # A prepare exits by itself when the list is built; --secs is only its ceiling. 180 s (the old default) cut a first prepare of
     # ~1,600 pipelines on a busy Mac (no until target: the watcher ends a run at its secs), so the default is 30 min.
     cmd = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words)
@@ -819,6 +821,8 @@ def cmd_prepare(ctx, o, runner):
             # pass 2 compiles every generated kernel once, synchronously, under the progress card; KK collects its MSL, so the
             # library build below makes its metallib and normal starts only load it (asynchronously)
             mw = [("KK_MSL_OVERRIDE_DIR", os.path.join(ctx.dir, metalmod.OUT_NAME)), ("KK_MSL_OVERRIDE_ASYNC", "0")]
+            if metalmod.canon_enabled(ctx.environ):
+                mw.append(("KK_MSL_CANON_KEY", "1"))
             cmd2 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + mw)
         rc = one_pass("pass 2 of 2", cmd2); passes = 2
         if rc == 0:
@@ -915,6 +919,7 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
         if glist:
             g = metalmod.generate_gfx(glist, prog, os.path.join(ctx.dir, "kk-libcache", "msl"), odir, ctx.environ, jobs=compile_jobs(ctx.environ), label=label,
                                       lens=metalmod.seen_vertex_lens(run_logs(rd)) if rd else None,
+                                      alias=metalmod.seen_canon_aliases(run_logs(rd)) if rd else None,
                                       keep_dir=ctx.root + "." + metalmod.KK_VS_KEEP)   # outlives the cache dir (a new prepare starts empty)
             st["gfx_listed"], st["gfx_written"] = g["listed"], g["written"]
             st["written"] += g["written"]

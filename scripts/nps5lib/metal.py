@@ -31,6 +31,11 @@ where the text was verified and measured faster on that class (verdict and B/A i
 column: every row is `*` + `base`, i.e. exactly the v1.2 behaviour.
 
 Switches: NPS5_METAL_SHADERS=0 turns the feature off (no generation, no KK_MSL_OVERRIDE_DIR at launch).
+          NPS5_METAL_CANON=1 (default off, v1.2.2 oskey) = KK_MSL_CANON_KEY=1 in prepare and launch: KosmicKrisp's MSL text, so its
+          override key, differs between macOS 26 and 27 and between GPU families (workaround sets, texture lowering). With the switch
+          KosmicKrisp also keys every shader by the text a macOS 26 / Apple GPU family 9 Mac writes (the Mac the lists' keys come
+          from) and looks a replacement up under that key when none exists under this Mac's own key; the keys in the lists are those
+          canonical keys. Prepare then finds the Mac's own vertex text through the `canon=` field of KosmicKrisp's log line.
           NPS5_METAL_CLASS=<g16[@os26]> overrides the detected GPU class, =none uses only the `*` rows: honoured ONLY with
           NPS5_DEV=1 (developer/tests; the summary says "forced ... this Mac is ..."), ignored with a note otherwise.
           NPS5_MSL_TOOL = the kyty_msl_dump binary (default <NPS5_KYTY_DIR>/build-arm64/kyty_msl_dump).
@@ -77,6 +82,11 @@ OVERRIDE_RE = re.compile(r"\[kk-mslinject\] override ([0-9a-f]{16}) (local_size|
 class MetalError(Exception):
     def __init__(self, msg, code=1):
         super().__init__(msg); self.code = code
+
+
+def canon_enabled(environ):
+    """NPS5_METAL_CANON=1: KosmicKrisp looks replacements up under the canonical (macOS 26 / GPU family 9) key as well."""
+    return (environ.get("NPS5_METAL_CANON") or "").strip().lower() in ("1", "yes", "on", "true")
 
 
 def enabled(environ):
@@ -249,8 +259,17 @@ def read_perms(path, cursors=False):
     return out
 
 
+CANON_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16}) len=\d+ (compute|vertex|fragment) canon=([0-9a-f]{16})")
+
+
 def seen_keys(text):
-    return set(SEEN_RE.findall(text))
+    """Keys KosmicKrisp logged as seen: its own, plus (KK_MSL_CANON_KEY) the canonical key of each."""
+    return set(SEEN_RE.findall(text)) | {c for _, _, c in CANON_RE.findall(text)}
+
+
+def seen_canon_aliases(text):
+    """-> {canonical key: this Mac's own key} of the shaders KosmicKrisp logged with KK_MSL_CANON_KEY=1 (vertex and fragment)."""
+    return {c: r for r, _, c in CANON_RE.findall(text)}
 
 
 def override_counts(text):
@@ -652,10 +671,14 @@ def seen_vertex_lens(text):
     return {k: int(n) for k, n in SEEN_LEN_RE.findall(text)}
 
 
-def find_kk_vertex(kk_msl_dir, wanted, lens=None):
+def find_kk_vertex(kk_msl_dir, wanted, lens=None, alias=None):
     """-> {key: path}: the files of KosmicKrisp's library cache (named by its own cache key) whose text hashes to a wanted override key.
     A logged length narrows the candidates to files of that size; without a log every vertex text is hashed (BLAKE3 in pure Python:
     slow, a minute or two on a big cache)."""
+    if alias:                                          # canonical key -> this Mac's key: search by the latter, answer by the former
+        back = {alias.get(k, k): k for k in wanted}
+        found = find_kk_vertex(kk_msl_dir, set(back), {alias.get(k, k): n for k, n in (lens or {}).items()} if lens else lens)
+        return {back[k]: v for k, v in found.items()}
     lens = lens or {}
     try:
         files = [(fn, os.path.getsize(os.path.join(kk_msl_dir, fn))) for fn in os.listdir(kk_msl_dir) if fn.endswith(".metal")]
@@ -810,7 +833,7 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
 KK_VS_KEEP = "kk-vs-keep"
 
 
-def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None, keep_dir=None, dev=False):
+def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump=run_dump_gfx, label="", out=None, lens=None, keep_dir=None, dev=False, alias=None):
     """Add <kk_vs>_<kk_fs>.vs.metal/.fs.metal to out_dir (created if needed; call after generate(), which replaces the directory)
     plus index-gfx.tsv/skipped-gfx.tsv. -> dict(listed, written, skipped, reasons, list_sha)."""
     out = out or sys.stdout
@@ -837,7 +860,7 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
     keep = keep_dir or os.path.join(os.path.dirname(os.path.abspath(out_dir)), KK_VS_KEEP)
     wanted = {r["kk_vs"] for r in rows if r["mode"] != "kk"}
     kkv = {k: os.path.join(keep, k + ".metal") for k in wanted if os.path.isfile(os.path.join(keep, k + ".metal"))}
-    found = find_kk_vertex(kk_msl_dir, wanted - set(kkv), lens) if wanted - set(kkv) else {}
+    found = find_kk_vertex(kk_msl_dir, wanted - set(kkv), lens, alias) if wanted - set(kkv) else {}
     if found:
         os.makedirs(keep, exist_ok=True)
         for k, src in found.items():
@@ -1140,7 +1163,7 @@ def launch_words(cache_dir, list_path, environ):
         if made != {here}:
             return [], ("the Metal shaders of this cache were chosen for GPU class %s, this Mac is %s (another Mac or a macOS update): "
                         "not used; `nps5 cache metal <id>` regenerates them" % ("/".join(sorted(made)), here))
-    return [("KK_MSL_OVERRIDE_DIR", d)], None
+    return [("KK_MSL_OVERRIDE_DIR", d)] + ([("KK_MSL_CANON_KEY", "1")] if canon_enabled(environ) else []), None
 
 
 def index_class(out_dir, name):

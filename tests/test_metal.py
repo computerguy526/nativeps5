@@ -168,6 +168,30 @@ class T(unittest.TestCase):
         self.assertEqual(metal.override_counts(log), (1, 1))
         self.assertTrue(metal.enabled({})); self.assertFalse(metal.enabled({"NPS5_METAL_SHADERS": "off"}))
 
+    def test_canon_switch_and_launch_word(self):                 # v1.2.2 oskey: default off, the word only with the switch
+        self.assertFalse(metal.canon_enabled({})); self.assertFalse(metal.canon_enabled({"NPS5_METAL_CANON": "0"}))
+        self.assertTrue(metal.canon_enabled({"NPS5_METAL_CANON": "1"})); self.assertTrue(metal.canon_enabled({"NPS5_METAL_CANON": " On "}))
+        lp = self.write_list([row(DG[0], SP[0], "0" * 16, b_text(0))])
+        cdir = os.path.join(self.tmp, "c")
+        metal.generate(lp, self.prog, os.path.join(cdir, "metal-shaders"), self.env, out=io.StringIO())
+        d = os.path.join(cdir, "metal-shaders")
+        self.assertEqual(metal.launch_words(cdir, lp, self.env)[0], [("KK_MSL_OVERRIDE_DIR", d)])
+        self.assertEqual(metal.launch_words(cdir, lp, dict(self.env, NPS5_METAL_CANON="1"))[0],
+                         [("KK_MSL_OVERRIDE_DIR", d), ("KK_MSL_CANON_KEY", "1")])
+
+    def test_canon_log_lines_are_parsed(self):
+        # a macOS 27 / M6 Mac: its own key differs, the canonical key (the lists' key) is on the same line
+        log = ("[kk-mslinject] seen 00000000000000a1 len=9 compute canon=00000000000000c1\n"
+               "[kk-mslinject] seen 00000000000000b1 len=7 vertex canon=00000000000000c2\n"
+               "[kk-mslinject] seen 00000000000000b2 len=8 fragment canon=00000000000000c3\n"
+               "[kk-mslinject] seen 00000000000000d1 len=4 compute\n")                      # no canonical key (switch off for it)
+        self.assertEqual(metal.seen_keys(log), {"00000000000000a1", "00000000000000b1", "00000000000000b2", "00000000000000d1",
+                                                "00000000000000c1", "00000000000000c2", "00000000000000c3"})
+        self.assertEqual(metal.seen_canon_aliases(log), {"00000000000000c1": "00000000000000a1", "00000000000000c2": "00000000000000b1",
+                                                         "00000000000000c3": "00000000000000b2"})
+        self.assertEqual(metal.seen_vertex_lens(log), {"00000000000000b1": 7})              # the real key, as before
+        self.assertEqual(metal.seen_canon_aliases("[kk-mslinject] seen 00000000000000a1 len=9 compute\n"), {})
+
 
 GDUMP = """#!/bin/bash
 # fake kyty_msl_dump for graphics: the fragment text is first (declares its reads), the vertex text needs --link-ps and the reads + KK outputs + layout words
@@ -232,6 +256,17 @@ class Gfx(unittest.TestCase):
         sized = metal.find_kk_vertex(self.kkdir, {self.kk_vs, k2}, {self.kk_vs: len(KKVS), k2: len(other)})
         self.assertEqual(sorted(sized), sorted([self.kk_vs, k2]))
         self.assertEqual(metal.find_kk_vertex(self.kkdir, {k2}, {k2: 5}), {})           # a wrong logged length excludes the file
+
+    def test_find_kk_vertex_by_the_canonical_key(self):
+        # the list names the canonical key; this Mac's own vertex text hashes to another key (the log line's alias)
+        own = KKVS + "// macOS 27: no NaN guard\n"
+        open(os.path.join(self.kkdir, "own.metal"), "w").write(own)
+        k_own = metal.blake3_64(own.encode()); canon = "c" * 16
+        self.assertEqual(metal.find_kk_vertex(self.kkdir, {canon}), {})                       # no alias: not found (v1.2.1 behaviour)
+        got = metal.find_kk_vertex(self.kkdir, {canon}, {k_own: len(own)}, {canon: k_own})
+        self.assertEqual(list(got), [canon]); self.assertEqual(open(got[canon]).read(), own)
+        got = metal.find_kk_vertex(self.kkdir, {canon, self.kk_vs}, None, {canon: k_own})     # keys without an alias are looked up as before
+        self.assertEqual(sorted(got), sorted([canon, self.kk_vs]))
 
     def test_blake3_matches_the_reference(self):
         self.assertEqual(metal.blake3_64(b""), "af1349b9f5f9a1a6")
