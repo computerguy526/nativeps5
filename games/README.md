@@ -67,6 +67,12 @@ The folder holds:
   Mac and keeps the pair only when BOTH texts hash to the listed sha256. A list with only the header lines means no graphics
   step and KosmicKrisp's own pipelines. `scripts/check.sh` accepts the file only in that form, and a list with pair rows only
   with its `metal-gfx-pairs.tsv.verified` record (sha256 of the list + result line, like `pipelines.kyplst.verified`).
+- **Per-GPU-class rows** (v1.2.1; keys format 2, pairs format 3): each row also names the emitter mode (`kyty_msl_dump --mode`),
+  the GPU class (`*` every Mac, `g16` M4 family, `g18` M6 family; class = the GPU generation from the IORegistry + the macOS
+  major), the pass rule and the verdict. `nps5 cache prepare` uses the most specific row for your Mac, then `*`, then
+  KosmicKrisp. A class row ships only when it was validated on every pipeline of its key AND timed faster on that class.
+  A list with class rows needs its `.verified` record (`metal-shaders.tsv.verified`, `metal-gfx-pairs.tsv.verified`) with the
+  per-class reproduction counts.
 - **`fast-math-deny.txt`** (optional, v1.1.2): 64-bit guest shader hashes, one per line, plus comments; nothing else
   (`scripts/check.sh`). `nps5 run` passes it as `KYTY_FAST_MATH_DENY` on the Kyty back end: these shaders keep exact math
   at every `KYTY_GPU_ACCURACY`, which keeps KosmicKrisp's keys (and the verified texts) of the shaders the Metal lists replace.

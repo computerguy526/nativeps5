@@ -1,12 +1,13 @@
-# Record of the no-game-code proof for metal-gfx-pairs.tsv (scripts/check.sh accepts a list with pair rows only with this record).
-# The list holds hashes (program digests, specialization keys, KosmicKrisp keys, sha256 of our texts) and small layout numbers
-# only, every row passed the row form check, and the public generator (kyty_msl_dump of the emitter commit below, run by
-# scripts/nps5lib/metal.py) reproduced every listed text sha256-exact from a program cache, so no text has to be shipped.
-sha256=f9025b912e725625bb7c13a09352228d6a0d707c1d5dc262afe93b64abbfffe2
+# Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
+# Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
+# every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
+sha256=5a5654cd717b260e3ee962a437332084b40102e1ea18d7cbd32ea6131b0be048
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
-counts=pairs 32, rows 36, reproduced 36 of 36 (texts sha256-exact)
-emitter=dc0c881ef9735272084c2507f269b978b6aac979 v1.2 (nativeps5-kyty)
-evidence=autoval GPU differential test vs KosmicKrisp's pair on every pipeline of the key (VERIFIED class; the keys under rule= below use that stated rule)
+reproduced=166 of 166
+class gfx *: 36 of 36
+class gfx g16: 47 of 47
+class gfx g18: 83 of 83
+emitter=f29386f56ea5cd6d51e625357debf94e40ff1732 v1.2.1 (nativeps5-kyty)
+evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16)
 date=2026-11-20
-rule=outprec for 0a795ecb1b016fde_38261c510225b461,0a795ecb1b016fde_44b6758459ad7061,6f800fc105b81619_44b6758459ad7061,968423674843b758_44b6758459ad7061,a5ae661bb628317b_a855bd3c14a520b9: render targets compared at their stored precision, |A-B| <= 1 f16 ulp, integer/flag outputs, depth, buffers and control flow bit-exact, A==A deterministic, nan/oob edges unchanged (USER-approved 2026-11-20)
