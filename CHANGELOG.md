@@ -47,6 +47,12 @@ Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (ne
   windowed, moved to that display and made fullscreen there. Without the variable fullscreen is unchanged.
 - **Pipeline list refreshed** from play sessions since v1.2: 949 -> 962 permutations, 1,608 -> 1,739 pipelines
   (893 shaders), merged with the v1.2 list. Keys and hashes only, with its no-game-code record.
+- Clean-room check (public flow on a 24 GB M4 Pro: all components built from the v1.2.1 sources, `nps5 build`,
+  `nps5 cache prepare` 312 s, GPU class g16: 68 kernels + 73 graphics pairs; `nps5 cache metal --reproduce` 237 of 237
+  rows of every class): recorded route title -> hub -> level, 240 s, window closed by the test hook: rc 0, no crash or
+  GPU watchdog, 0 shader compiles in play, game speed 89 % (last 30 s 99 %), peak footprint 16.5 GB, world step split in
+  5,399 of 6,728 calls. Direct start in the bridge level (spring_punch_sky_aztec), 120 s: bridge spring steps up to 5 ms
+  split, 0 non-finite nodes, no crash. The gate and the bridge themselves were checked in play sessions, not by the route.
 - `nps5 data compress|status|decompress <folder>`: stores a game folder with APFS transparent compression (LZFSE,
   the kernel decompresses on read; the game and every tool see identical files). About 3x smaller for ASTRO BOT data.
   Dry run by default with an estimate from a sample; `--apply` works file by file: temporary file, flush, SHA-256
