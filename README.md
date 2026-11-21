@@ -102,11 +102,42 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    `--scene worldmap` skips the intro; `--dry-run` prints the environment and command and starts nothing. The profile's canonical settings are in [games/PPSA21564/README.md](games/PPSA21564/README.md). It also lists the optional binary patches, including `nt`, which always takes the non-tiled lighting path and skips the tiled-lighting compute kernels; that changes the picture and has not been reviewed.
 8. **Quit** by closing the window. This exits at once, without the renderer teardown; since v1.0.3 the Vulkan driver pipeline cache is written first (up to about 3 s), and the pipeline journals are written as they grow. Only one title runs at a time, and `nps5 run` refuses to start while another GPU process is running.
 
+### Save disk space: keep the game folder compressed
+
+An extracted game is large (ASTRO BOT: about 160 GB) and mostly textures and models, which compress well. On an APFS
+disk macOS can store files compressed and still hand every program the original bytes, so nothing else changes:
+
+```sh
+scripts/nps5 data compress "<your game folder>"            # dry run: what would be done, an estimate, free space
+scripts/nps5 data compress "<your game folder>" --apply    # do it (safe to stop and run again)
+scripts/nps5 data status "<your game folder>"              # what it saved
+scripts/nps5 data decompress "<your game folder>" --apply  # undo
+```
+
+On the development machine 32 GB of ASTRO BOT data (22,000 files) went to 9.6 GB in about six minutes on two
+cores, and reading compressed data costs about one CPU-second per GB. The folder must be on APFS (a Mac's internal disk, or an external disk formatted as APFS); exFAT
+and network disks are refused with a message. Each file is written to a temporary file, read back and compared by
+SHA-256, and only then renamed over the original, so a crash or a power cut leaves every file either as it was or
+complete. Symbolic links, hard-linked files, tiny files and files that do not shrink are left alone. It changes how
+your copy is stored, never its content (permissions, dates, extended attributes and flags are kept). Name the game
+folder itself: a whole disk, your home folder, ~/Library and system folders are refused, because other programs write
+to files there. Files written in the last minute (a fresh copy, a decompress) are left for a second run a
+minute later: the command says NOT DONE YET and exits with code 3 (0 = done, 1 = some files failed and are unchanged,
+2 = the folder cannot be used). Details: `scripts/nps5 data --help`.
+
 `nps5 run` sets a memory limit from your RAM, silences audio by default and scrubs the environment. These rules exist because breaking them has rebooted the development machine; read "Running safely" in [AGENTS.md](AGENTS.md) before doing GPU work of your own.
 
 If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an issue with the command and its output.
 
 **Troubleshooting.** `nps5 doctor` checks the machine. After a run that stopped, crashed or looks wrong, `nps5 log --last` shows the log without the noise and ends with a SUMMARY block (verdict, fps, compiles, stalls, crashes, settings), and `nps5 bug-report` writes one zip of redacted text (log, versions, commits, settings, crash report) to attach to an issue; `--dry-run` lists what would go in. It never includes game files. See [docs/reference/logging.md](docs/reference/logging.md). For a stall, a slow run or a run ended by a guard, also turn on the flight recorder (below).
+
+### Opt-in (v1.2.1, off by default)
+
+- **ProMotion frame cap** (`KYTY_FPS_AUTOCAP=promotion`, with the default `KYTY_FPS_LIMIT_MILLI=auto`): on an adaptive
+  (ProMotion) screen the cap becomes the highest 120/n (60, 40, 30, 24 fps) the scene holds, so frames land on whole
+  refreshes. Without it, adaptive screens stay uncapped as before.
+- **Fullscreen on a chosen display** (`NPS5_WINDOW_SCREEN=builtin|main|<index>` together with fullscreen): the window opens
+  on that display and goes fullscreen there. Without the variable, fullscreen opens as before.
 
 ### Flight recorder (off by default)
 
@@ -128,10 +159,26 @@ at 60 fps for 30-50 s while a level streamed in: the game then ran at about half
 same Sky Garden route. The `[framerate]` line every 5 s shows the estimate and why it is frozen
 (`frozen -|video|phase|vfs[ streaming]`).
 
-### Options on by default (v1.1.2, v1.2)
+### Options on by default (v1.1.2, v1.2, v1.2.1)
 
 The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with
 `nps5 run --env NAME=VALUE` or put it on the `ENV=` line of `titles/<id>.env` (both win over the profile).
+- **Physics steps that fit a slower frame rate** (v1.2.1, ps5recomp `[physsub]`, needs `nps5 build` again): the game steps
+  its physics once per frame with the frame time, which below 30 fps is three times the step it was tuned for. ps5recomp
+  now splits the Havok world step into steps of at most 1/60 s (at most 4 per frame), clamps the cloth step to 1/60 s,
+  and splits the rope-bridge spring steps to at most 1/600 s (at most 8 per call). This fixes the crumpled pool membrane
+  in Sky Garden, the crash at the "feel the wall" gate (Havok particles) and the missing rope bridge after it. The
+  functions are named by address and sha256 in `profiles/funcrepl/PPSA21564-physsub.json` of nativeps5-recomp: another
+  build of the game is refused by `nps5 build`. Off (no rebuild needed): `NPS5_PHYS_SUBSTEP=0` (world + cloth),
+  `NPS5_PHYS_SUBSTEP_WORLD=0`, `NPS5_PHYS_SUBSTEP_CLOTH=off`, `NPS5_PHYS_SPRING=0`; `NPS5_PHYS_SUBSTEP_LOG=1` and
+  `NPS5_PHYS_SPRING_LOG=1` print `[physsub]` lines.
+- **Banner text layout** (v1.2.1, ps5recomp libSceFont): `sceFontGetHorizontalLayout` returns the face bounding box, as the
+  PS5 font driver does, so banners such as BOT RESCUED no longer lose the tops of their capitals. Old values:
+  `NPS5_FONT_LAYOUT=hhea`.
+- **Command-processor lead bound** (v1.2.1, `KYTY_CP_LEAD_MAX_MS=16`): Kyty's command processor runs at most 16 ms ahead
+  of the GPU (the wait is bounded and never fatal). Off: `KYTY_CP_LEAD_MAX_MS=0`.
+- **Faster Metal shaders per GPU class** (v1.2.1): the Metal lists carry rows for M4-family (`g16`) and M6-family (`g18`)
+  GPUs, used only on that class; other Macs keep the shared rows. `NPS5_METAL_SHADERS=0` turns all of our shaders off.
 - **Ray-tracing load hold and budget guard** (`KYTY_RT_LOAD_HOLD=1`, `KYTY_RT_BUDGET_GUARD=1`): Kyty's software ray tracing
   waits while a level streams in (5 s after a level opens, and while the game reads files fast), and skips its dispatches
   for a moment when they run out of their BVH node budget (a BVH that is not valid yet). This removes the long GPU stalls (and the GPU watchdog stops they could cause) at level entry.

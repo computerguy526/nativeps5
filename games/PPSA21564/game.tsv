@@ -107,6 +107,8 @@ env	KYTY_CLEAN_PAGE=1	gpu=kyty	a store to a page whose GPU bytes are already pub
 env	KYTY_GPU_ACCURACY=low	gpu=kyty	fast math for pixel/compute shaders outside fast-math-deny.txt (our Metal translations stay exact)
 # v1.2 default (README "Options"; off: `--env KYTY_ALIAS_REBUILD_PARTIAL=0`)
 env	KYTY_ALIAS_REBUILD_PARTIAL=1	gpu=kyty	a partly owned render target is rebuilt only in the blocks it does not own (Sky Garden tiler traffic 2.4 -> 1.8-2.0 GB/s)
+# v1.2.1 default (README "Options"; off: `--env KYTY_CP_LEAD_MAX_MS=0`)
+env	KYTY_CP_LEAD_MAX_MS=16	gpu=kyty	the command processor runs at most 16 ms ahead of the GPU (Sky Garden: moving mean -3.5 ms, p90 -6.5 ms, frames over 70 ms -55 %)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
 env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
 env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling

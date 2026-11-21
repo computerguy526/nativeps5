@@ -3,7 +3,64 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.2 (unreleased)
+## v1.2.1 (2026-11-21)
+
+Everything in v1.2. Physics that holds up below 30 fps, banner text, a bounded command-processor lead, faster Metal
+shaders on M4- and M6-family GPUs, a larger pipeline list and `nps5 data`. **Update:** nativeps5-recomp and
+nativeps5-kyty move to `v1.2.1` (anyps5 stays at v1.1.1): pull, check out `v1.2.1` in `../ps5recomp` and `../kyty`,
+rebuild the recompiler (`scripts/build.sh recomp`), **translate the title again** (`nps5 build`: the physics and font
+fixes are in the runtime linked into the translated program, and the profile now passes the physics table), rebuild
+Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (new Kyty, new list, new Metal rows).
+
+- **Physics sub-steps** (ps5recomp `[physsub]`, on by default for ASTRO BOT): with real-time game speed the game hands its
+  physics the real frame time, 43-50 ms in Sky Garden, three times the step it was tuned for. Three things broke:
+  the rainbow pool membrane crumpled (ApCloth step), the Havok particle solver ran away to infinity and crashed the game
+  at the "feel the wall" gate (3 of 3 sessions without the fix), and the rope bridge after the gate vanished (the game's
+  own mass-spring bridge, 10 explicit steps per frame, diverges above a frame time of about 42-45 ms in a model of it).
+  The runtime now wraps those step functions ("wrap" entries of a `-hle-replace` table: the guest body stays and the shim
+  calls it): the Havok world step is split into steps of at most 1/60 s (at most 4), the cloth step is clamped to 1/60 s,
+  and the JungleBridge / SuspentionBridge spring steps are split to at most 1/600 s (at most 8 per call). Checked in play
+  sessions: membrane correct, the gate opens with no crash, the bridge is there (0 non-finite nodes). The table
+  (`profiles/funcrepl/PPSA21564-physsub.json`, addresses + sha256) is passed by `profiles/PPSA21564.json`; another build
+  of the game is refused. The translation stamp now covers the `-hle-replace` table. Off: `NPS5_PHYS_SUBSTEP=0`,
+  `NPS5_PHYS_SUBSTEP_WORLD=0`, `NPS5_PHYS_SUBSTEP_CLOTH=off`, `NPS5_PHYS_SPRING=0`. Tests `tools/physsub_unit.sh`,
+  `tools/physsub_test.sh`, `pkg/emitter/funcwrap_test.go`.
+- **Banner text** (ps5recomp libSceFont): `sceFontGetHorizontalLayout` returned the hhea ascender (0.82 em for the level-name
+  font) where the PS5 driver returns the face bounding box (1.274 em); the game places banner baselines from it, so the
+  tops of the capitals were cut (BOT RESCUED). Now the bbox layout, as the PS5 FreeType driver. `NPS5_FONT_LAYOUT=hhea` =
+  old. Unit test `tests/font/font_glyph_unit.c` section 10.
+- **Command-processor lead bound** (Kyty `KYTY_CP_LEAD_MAX_MS`, 16 in the ASTRO BOT profile, `0` off): the CP waits when
+  its oldest unfinished submit is older than 16 ms. The wait is bounded (timeout = bound + 50 ms; a stuck tick is
+  abandoned and never fatal). Sky Garden, moving route, BEST stack (2 clean runs with against 3 without): mean frame
+  time 51.3 / 49.7 ms against 53.7-54.4, p90 62.9 / 60.7 against 67.5-69.3 ms, frames over 70 ms 97 / 68 against
+  141-171, game speed 96-97 % against 91-92 %. Test `tests/CpLeadBoundTests.cpp` (407,344 checks).
+- **Metal shaders per GPU class** (keys list format 2, pairs list format 3; Kyty `kyty_msl_dump --mode`): rows may name an
+  emitter mode and a GPU class (`g16` = M4 family, `g18` = M6 family; class = IORegistry GPU generation + macOS major).
+  `nps5 cache prepare` takes the most specific row for the Mac, then `*`, then KosmicKrisp. A class row ships only where
+  it was validated against KosmicKrisp on every pipeline of its key AND timed faster on that class (g16 on an M4 Pro,
+  g18 on a cloud M6). v1.2.1: g16 47 graphics rows, g18 83 graphics rows + 2 compute rows, the shared `*` rows of v1.2
+  unchanged (69 compute rows, 36 graphics rows). The emitter modes are off unless a row names one, so `*` texts are byte-for-byte
+  the v1.2 texts.
+- **ProMotion frame cap** (Kyty, opt-in `KYTY_FPS_AUTOCAP=promotion`): on an adaptive screen, the highest 120/n cap the
+  scene sustains (p90 hysteresis, probe backoff). Default unchanged (no cap on ProMotion). Tests `tests/AutoCapTests.cpp`.
+- **Fullscreen on a chosen display** (Kyty, opt-in `NPS5_WINDOW_SCREEN=builtin|main|<index>`): the window is created
+  windowed, moved to that display and made fullscreen there. Without the variable fullscreen is unchanged.
+- **Pipeline list refreshed** from play sessions since v1.2: 949 -> 962 permutations, 1,608 -> 1,739 pipelines
+  (893 shaders), merged with the v1.2 list. Keys and hashes only, with its no-game-code record.
+- `nps5 data compress|status|decompress <folder>`: stores a game folder with APFS transparent compression (LZFSE,
+  the kernel decompresses on read; the game and every tool see identical files). About 3x smaller for ASTRO BOT data.
+  Dry run by default with an estimate from a sample; `--apply` works file by file: temporary file, flush, SHA-256
+  read-back, unchanged-original check, atomic rename. Resumable, idempotent, refuses non-APFS volumes, leaves symbolic
+  links, hard links, tiny and incompressible files alone; `decompress` undoes it. Python standard library plus the
+  system's own libcompression; no new dependency. Streams each file (memory: one compressed file per worker, at
+  most 1 GB of files in flight), keeps the creation date, refuses volume roots, the home folder, ~/Library, system
+  folders and read-only volumes (in any letter case, through links or firmlinks); files written in the last
+  minute are left for a re-run and reported. Tests: `tests/test_data.py` (round trip at the chunk and xattr edges, metadata,
+  killed process and Ctrl-C in the middle, a file changing underneath, out of space mid-file on a small APFS disk
+  image, a FAT disk image refused, refusal cases). Exit codes: 0 done, 1 some files failed (unchanged), 2 the folder cannot
+  be used, 3 NOT DONE YET (files changed in the last minute were left; run it again in a minute).
+
+## v1.2 (2026-11-20)
 
 Everything in v1.1.2. The game now runs at real speed, Kyty tiles less render-target memory back and forth, and the shipped
 pipeline list is larger. **Update:** nativeps5-recomp and nativeps5-kyty move to `v1.2` (anyps5 stays at v1.1.1): rebuild
