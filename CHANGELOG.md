@@ -3,20 +3,57 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.2.2 (unreleased)
+## v1.2.2 (2026-11-21)
+
+Everything in v1.2.1. Metal shaders now match on every Mac, a bigger list of faster Metal shaders (M4, M5 and M6 families),
+an automatic 720p / 540p render scale, and four opt-in Kyty options. **Update:** nativeps5-recomp and nativeps5-kyty move to
+`v1.2.2` (anyps5 stays at v1.1.1): pull, check out `v1.2.2` in `../ps5recomp` and `../kyty`, rebuild the recompiler
+(`scripts/build.sh recomp`), **translate the title again** (`nps5 build`: the render-scale controller is in the runtime that is
+linked into the translated program), rebuild KosmicKrisp (`scripts/build.sh kosmickrisp`: patches 0027 and 0028 are new) and
+Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (new Kyty, new Metal rows).
 
 - **Metal shaders now match on every macOS and GPU.** KosmicKrisp's generated MSL, which the override keys hash, differs between
-  macOS 26 and 27 and between GPU families (M4 and M5/M6); v1.2.1's replacements therefore matched only on macOS 26 with an M3/M4.
-  KosmicKrisp patch 0027 (`KK_MSL_CANON_KEY`) also keys every shader by the text a macOS 26 / GPU family 9 Mac writes (the Mac the
-  lists were made on); `nps5` turns it on by default (`NPS5_METAL_CANON=0` = off), and `cache prepare` prints how many listed
-  kernels and pairs match on this Mac. A no-op on a Mac that already writes the canonical text.
+  macOS 26 and 27 and between GPU families (M4 and M5/M6); v1.2.1's replacements therefore matched only on macOS 26 with an M3/M4
+  (on an M6 with macOS 27: 0 of 97 graphics pairs and 0 of 71 kernels were found). KosmicKrisp patch 0027 (`KK_MSL_CANON_KEY`)
+  also keys every shader by the text a macOS 26 / GPU family 9 Mac writes (the Mac the lists were made on); `nps5` turns it on by
+  default (`NPS5_METAL_CANON=0` = off), and `cache prepare` prints how many listed kernels and pairs match on this Mac. A no-op on
+  a Mac that already writes the canonical text.
+- **More and faster Metal rows, per GPU class.** The lists now carry 302 rows, every one regenerated text-exact by the public
+  `kyty_msl_dump` of Kyty v1.2.2 (`nps5 cache metal --reproduce`: 302 of 302): shared rows (`*`) 36 graphics pairs + 69 kernels,
+  M4 family `g16` 72 graphics rows, M5 family `g17` 12 graphics rows (new), M6 family `g18` 111 graphics rows + 2 kernels. New
+  are depth-only vertex rows, the foliage rows (vertex-load grouping and constant-load modes), a prepass row and the
+  fullscreen-pass rows. A class row is listed only where the text was verified exact on the game's captured inputs and timed
+  faster on a Mac of that class. Coverage of Sky Garden's measured GPU time per second (700.7 ms/s of shader time):
+  g16 51.8 % covered, 50.1 % of it by a text timed faster (before the last g16 rows: 41.1 % / 39.4 %); g18 45.6 % / 31.6 %; g17 25.2 % / 8.3 %
+  (first rows; the shared rows were not timed on an M5). In a frame-time test an earlier 60-key g16 candidate of this list made no
+  measurable difference (ABA, moving Sky Garden, 55.1 / 51.8 / 50.6 ms mean, within the run-to-run spread): the list is for
+  coverage and correctness, not a frame-rate promise.
+- **M5-family Macs (GPU g17) are recognised:** `nps5` picks the `g17` rows only on an M5 (tested on a cloud M5 Pro, macOS 27.0,
+  where the canonical keys match as on the M4 Pro, 24 of 24 in a smoke test).
 - **Automatic render scale (720p / 540p):** nativeps5-recomp's ASTRO BOT patch profile gets a `render_scale` setting (`auto`
   default, `p540`, `p720` = v1.2.1) and the runtime a controller that switches the game's own dynamic-resolution level from the
   frame time (540p while frames take longer than 33 ms, 720p with headroom; hysteresis, 20 s dwell). New patch-profile site
   operations `override` and `data32` (live settings). `NPS5_RENDER=auto|720|540`, `NPS5_RENDER_LEVELS`, `NPS5_RENDER_TARGET_MS`.
-  Needs `nps5 build` again.
+  Needs `nps5 build` again. Measured on an M4 Pro (same binary, warm, moving Sky Garden): 720p 53.5 / 56.4 ms mean frame time
+  vs auto 50.3 / 46.3 ms, p99 88.5 / 96.5 vs 82.1 / 77.3 ms, game speed 92 / 86 vs 99 / 100 %; no stutter at 6 forced switches
+  (the worst frame within 2 s of a switch 63-117 ms vs 60-168 ms in the 4 s before), no shader compile or render-target
+  allocation at a switch. A `[rscale]` line per switch (with the worst frame around it) is in the log.
 - KosmicKrisp patch 0028 (upstream Mesa 0db4e29): allocations beyond 95 % of the recommended working set fail with
   `VK_ERROR_OUT_OF_DEVICE_MEMORY` instead of a Metal kernel panic on macOS 26 (workaround 20).
+- **Kyty, opt-in (all off by default; off = the v1.2.1 behaviour, the shader fingerprint is unchanged).**
+  `KYTY_SUBRES_CONTAINS=1` and `KYTY_DEPTH_GROW_RECREATE=1` (ports of upstream KytyPS5 #2410 and #2417): neutral in our test
+  (ABA, moving Sky Garden, 52.7 / 52.1 / 54.6 ms mean; no visual change in a play session), so not on by default.
+  `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1` (with `KYTY_ALIAS_REBUILD_PARTIAL=1`, `=verify` compares with the whole-segment move on
+  the GPU): a partial render-target rebuild moves only the blocks it owns, 14 % fewer tiler bytes; bit-exact in 300 unit
+  cases and 1,793 GPU compares (0 mismatches), but the frame time did not change (49.9 / 56.8 vs 50.1 ms): experimental.
+  `KYTY_COMPUTE_IMAGE_COPY=1` (`verify-kernel`, `verify`): a guest compute pass proven to be a whole-surface copy becomes a native
+  image copy (tiler traffic 1,925 -> 1,337 MB/s, -31 %); exact on 473 kernel and 289 image GPU compares (0 mismatches), the frame
+  time did not change (49.8 / 49.9 vs 48.6 / 50.1 ms): experimental. Both keep the old path for everything they cannot prove.
+- Emitter modes for the list rows (`kyty_msl_dump --mode`): `vgroup`, `cload` (vertex load grouping / constant loads), `lcont`,
+  `blim`, `gexit` (loop and guard tails). Off = byte-identical text; the list rows name the modes they need.
+- `nps5 data compress` was also tested on a cloud Mac with an M5 Pro (macOS 27.0, Python 3.9): a 159.8 GB game folder to
+  49.4 GB on disk in 8.4 minutes (88,624 files, 0 failed), SHA-256 read-back of 14 files equal to the original.
+- Checks: the pinned-list tests accept a `-dev` suffix in a list's emitter tag; the list header records Kyty `5091f4bb` (v1.2.2).
 
 ## v1.2.1 (2026-11-21)
 

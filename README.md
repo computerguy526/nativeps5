@@ -139,6 +139,18 @@ If a step fails for you, that is a bug in [BUILDING.md](BUILDING.md): open an is
 - **Fullscreen on a chosen display** (`NPS5_WINDOW_SCREEN=builtin|main|<index>` together with fullscreen): the window opens
   on that display and goes fullscreen there. Without the variable, fullscreen opens as before.
 
+### Opt-in Kyty options (v1.2.2, off by default)
+
+All four are off unless the variable is set (`nps5 run --env NAME=VALUE`); with them off Kyty behaves as in v1.2.1. None changed
+the frame time we measured in Sky Garden (an M4 Pro), so none is on by default.
+- `KYTY_SUBRES_CONTAINS=1` and `KYTY_DEPTH_GROW_RECREATE=1`: ports of upstream KytyPS5 #2410 (compare image subresources by
+  containment) and #2417 (recreate a depth target that is narrower than the request).
+- `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1` (experimental; with `KYTY_ALIAS_REBUILD_PARTIAL=1`, which the ASTRO BOT profile sets): a
+  partial render-target rebuild moves only the blocks it owns. Bit-exact in our checks (`=verify` compares both moves on the GPU).
+- `KYTY_COMPUTE_IMAGE_COPY=1` (experimental; `verify-kernel` / `verify` compare against the guest's own result): a guest compute
+  pass proven to copy one whole surface to another becomes a native image copy. Exact in our checks; anything it cannot prove
+  runs as before.
+
 ### Flight recorder (off by default)
 
 `KYTY_FLIGHTREC=1` turns on a small recorder in the Kyty back end (about 13 MB of memory, a ring write per event) that keeps the
@@ -184,8 +196,10 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   `NPS5_FONT_LAYOUT=hhea`.
 - **Command-processor lead bound** (v1.2.1, `KYTY_CP_LEAD_MAX_MS=16`): Kyty's command processor runs at most 16 ms ahead
   of the GPU (the wait is bounded and never fatal). Off: `KYTY_CP_LEAD_MAX_MS=0`.
-- **Faster Metal shaders per GPU class** (v1.2.1): the Metal lists carry rows for M4-family (`g16`) and M6-family (`g18`)
-  GPUs, used only on that class; other Macs keep the shared rows. `NPS5_METAL_SHADERS=0` turns all of our shaders off.
+- **Faster Metal shaders per GPU class** (v1.2.1, v1.2.2): the Metal lists carry rows for M4-family (`g16`, 72 graphics rows),
+  M5-family (`g17`, 12) and M6-family (`g18`, 111 graphics rows + 2 kernels) GPUs, used only on that class; other Macs keep the
+  shared rows. Since v1.2.2 the rows match on every macOS and GPU (canonical KosmicKrisp keys, KosmicKrisp patch 0027;
+  `NPS5_METAL_CANON=0` = off). `NPS5_METAL_SHADERS=0` turns all of our shaders off.
 - **Ray-tracing load hold and budget guard** (`KYTY_RT_LOAD_HOLD=1`, `KYTY_RT_BUDGET_GUARD=1`): Kyty's software ray tracing
   waits while a level streams in (5 s after a level opens, and while the game reads files fast), and skips its dispatches
   for a moment when they run out of their BVH node budget (a BVH that is not valid yet). This removes the long GPU stalls (and the GPU watchdog stops they could cause) at level entry.

@@ -140,7 +140,7 @@ def check_gfx_record(data, record, gfx=True):
     return []
 
 
-METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-(?:keys|gfx-pairs)\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40}(?:\tv\d+\.\d+(?:\.\d+)?)?)$")
+METAL_HEAD_RE = re.compile(rb"^(format\tnps5-metal-(?:keys|gfx-pairs)\t\d+|title\t(?:PPSA|CUSA|PCAS|PLAS)\d{5}\t[0-9.]{1,16}|emitter\t[0-9a-f]{7,40}(?:\tv\d+\.\d+(?:\.\d+)?(?:-dev)?)?)$")
 
 
 def check_metal_keys(data, gfx=False):
