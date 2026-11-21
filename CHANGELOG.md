@@ -46,6 +46,7 @@ Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (ne
   allocation at a switch. A `[rscale]` line per switch (with the worst frame around it) is in the log.
 - KosmicKrisp patch 0028 (upstream Mesa 0db4e29): allocations beyond 95 % of the recommended working set fail with
   `VK_ERROR_OUT_OF_DEVICE_MEMORY` instead of a Metal kernel panic on macOS 26 (workaround 20).
+- **Fewer shader compiles in game:** pipeline list refreshed from a 31-minute play session of the clean-room build: 962 -> 989 shader permutations, 1,739 -> 1,752 pipelines (920 shaders). The list holds keys and hashes only; its no-game-code record is `games/PPSA21564/pipelines.kyplst.verified`.
 - **Kyty, opt-in (all off by default; off = the v1.2.1 behaviour, the shader fingerprint is unchanged).**
   `KYTY_SUBRES_CONTAINS=1` and `KYTY_DEPTH_GROW_RECREATE=1` (ports of upstream KytyPS5 #2410 and #2417): neutral in our test
   (ABA, moving Sky Garden, 52.7 / 52.1 / 54.6 ms mean; no visual change in a play session), so not on by default.
