@@ -10,6 +10,11 @@ pinned commits are in [components.lock](components.lock).
   KosmicKrisp patch 0027 (`KK_MSL_CANON_KEY`) also keys every shader by the text a macOS 26 / GPU family 9 Mac writes (the Mac the
   lists were made on); `nps5` turns it on by default (`NPS5_METAL_CANON=0` = off), and `cache prepare` prints how many listed
   kernels and pairs match on this Mac. A no-op on a Mac that already writes the canonical text.
+- **Automatic render scale (720p / 540p):** nativeps5-recomp's ASTRO BOT patch profile gets a `render_scale` setting (`auto`
+  default, `p540`, `p720` = v1.2.1) and the runtime a controller that switches the game's own dynamic-resolution level from the
+  frame time (540p while frames take longer than 33 ms, 720p with headroom; hysteresis, 20 s dwell). New patch-profile site
+  operations `override` and `data32` (live settings). `NPS5_RENDER=auto|720|540`, `NPS5_RENDER_LEVELS`, `NPS5_RENDER_TARGET_MS`.
+  Needs `nps5 build` again.
 - KosmicKrisp patch 0028 (upstream Mesa 0db4e29): allocations beyond 95 % of the recommended working set fail with
   `VK_ERROR_OUT_OF_DEVICE_MEMORY` instead of a Metal kernel panic on macOS 26 (workaround 20).
 

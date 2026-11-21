@@ -172,6 +172,13 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   build of the game is refused by `nps5 build`. Off (no rebuild needed): `NPS5_PHYS_SUBSTEP=0` (world + cloth),
   `NPS5_PHYS_SUBSTEP_WORLD=0`, `NPS5_PHYS_SUBSTEP_CLOTH=off`, `NPS5_PHYS_SPRING=0`; `NPS5_PHYS_SUBSTEP_LOG=1` and
   `NPS5_PHYS_SPRING_LOG=1` print `[physsub]` lines.
+- **Automatic render scale** (v1.2.2, ps5recomp `render_scale` setting + `[rscale]` controller, needs `nps5 build` again): the 3D
+  scene renders at 720p and drops to 540p while the frame time stays over a budget of 33 ms (30 fps), then returns to 720p when
+  there is headroom (hysteresis, at least 20 s between switches). It uses the game's own dynamic-resolution pipeline sets, so a
+  switch is seamless; MetalFX upscales either size and menus and text stay sharp. On a MacBook Pro M4 Pro, Sky Garden runs at
+  540p (about 6 % shorter frames, a softer picture); a Mac whose GPU holds 30 fps at 720p stays at 720p. `NPS5_RENDER=720`
+  (or `patch.render_scale=p720`) = 720p always, as in v1.2.1; `NPS5_RENDER=540` = 540p always; `NPS5_RENDER_LEVELS=
+  <level>=auto|720|540,...,*=<mode>` per level; `NPS5_RENDER_TARGET_MS=<ms>` another budget. One `[rscale]` line per switch.
 - **Banner text layout** (v1.2.1, ps5recomp libSceFont): `sceFontGetHorizontalLayout` returns the face bounding box, as the
   PS5 font driver does, so banners such as BOT RESCUED no longer lose the tops of their capitals. Old values:
   `NPS5_FONT_LAYOUT=hhea`.
