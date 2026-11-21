@@ -1,0 +1,602 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 12:00:00 +0000
+Subject: [PATCH 27/27] kosmickrisp: KK_MSL_CANON_KEY (default off): canonical override keys, macOS/GPU independent
+
+KK's generated MSL (so every KK_MSL_OVERRIDE_DIR key) depends on the OS and the
+GPU family (workarounds resolved on macOS 27, M5+ only workarounds, texture
+lowering by family). With KK_MSL_CANON_KEY=1 every shader also gets the key of
+the text a macOS 26 / Apple GPU family 9 machine writes: a second, text-only
+translation of cloned NIR with the canonical workaround set / family / OS
+(thread-local), none on that machine class itself. Override lookup tries the
+real key, then the canonical key, so tables made on that class match
+unchanged. The `seen` log line carries canon=<key>. The keys are stored as an
+optional shader-binary trailer (old caches stay valid, codegen unchanged);
+the pipeline cache UUID only changes where the keys can differ and the switch is
+on. Only plain VS/FS/compute pipelines get the second translation.
+
+Generated-by: LLM
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_physical_device.c |  91 +++++++----
+ src/kosmickrisp/vulkan/kk_physical_device.h |   8 +
+ src/kosmickrisp/vulkan/kk_shader.c          | 238 ++++++++++++++++++++++++----
+ src/kosmickrisp/vulkan/kk_shader.h          |   9 ++
+ 4 files changed, 287 insertions(+), 59 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index e4c439e..15da9d7 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1038,6 +1038,15 @@ kk_physical_device_init_pipeline_cache(struct kk_physical_device *pdev)
+       _mesa_blake3_update(&blake3_ctx, &cap, sizeof(cap));
+    }
+ 
++   /* nps5 oskey: shaders cached on a machine whose text differs from the
++    * canonical one carry their canonical keys (KK_MSL_CANON_KEY): a cache
++    * written without them must not be reused. No change on the canonical
++    * machine class or with the switch off (warm caches stay valid). */
++   if (pdev->settings.canon_differs) {
++      const uint32_t canon_v = 1;
++      _mesa_blake3_update(&blake3_ctx, &canon_v, sizeof(canon_v));
++   }
++
+    unsigned char blake3[BLAKE3_KEY_LEN];
+    _mesa_blake3_final(&blake3_ctx, blake3);
+ 
+@@ -1150,6 +1159,41 @@ get_metal_limits(struct kk_physical_device *pdev)
+    assert(pdev->info.supported_sample_counts <= (KK_MAX_SAMPLES << 1) - 1);
+ }
+ 
++/* Workarounds disabled for a GPU family / OS (mask = the user's
++ * MESA_KK_DISABLE_WORKAROUNDS). Shared by the real settings and the nps5
++ * canonical key pass (KK_MSL_CANON_KEY). */
++static uint64_t
++kk_resolve_workarounds(uint64_t mask, uint32_t family, bool os27)
++{
++   if (mask == UINT64_MAX)
++      return mask;
++
++   /* Workarounds resolved on macOS 27 */
++   if (os27) {
++      /* 1-6 */
++      mask |= BITFIELD64_MASK(7);
++
++      mask |= BITFIELD64_BIT(8);
++      mask |= BITFIELD64_BIT(11);
++      mask |= BITFIELD64_BIT(12);
++      mask |= BITFIELD64_BIT(17);
++      mask |= BITFIELD64_BIT(18);
++   }
++   /* M5 only workarounds */
++   if (family >= 10)
++      mask &= ~BITFIELD64_BIT(2);
++   if (family < 10)
++      mask |= BITFIELD64_BIT(16);
++   /* M3+ only workarounds */
++   if (family < 9)
++      mask |= BITFIELD64_BIT(18);
++   if (family >= 9) {
++      mask |= BITFIELD64_BIT(10);
++      mask |= BITFIELD64_BIT(19);
++   }
++   return mask;
++}
++
+ static void
+ kk_parse_environment_options(struct kk_physical_device *pdev)
+ {
+@@ -1176,42 +1220,31 @@ kk_parse_environment_options(struct kk_physical_device *pdev)
+    const char *list = debug_get_option("MESA_KK_DISABLE_WORKAROUNDS", "");
+    const char *all_workarounds = "all";
+    const size_t all_len = strlen(all_workarounds);
++   uint64_t env_mask = 0;
+    for (unsigned n; n = strcspn(list, ","), *list; list += MAX2(1, n)) {
+       if (n == all_len && !strncmp(list, all_workarounds, n)) {
+-         settings->disabled_workarounds = UINT64_MAX;
+-         return;
++         env_mask = UINT64_MAX;
++         break;
+       }
+ 
+       int index = atoi(list);
+-      settings->disabled_workarounds |= BITFIELD64_BIT(index);
++      env_mask |= BITFIELD64_BIT(index);
+    }
+ 
+-   /* Workarounds resolved on macOS 27 */
+-   if (ns_is_os_version_at_least(27, 0, 0)) {
+-      /* 1-6 */
+-      settings->disabled_workarounds |= BITFIELD64_MASK(7);
+-
+-      settings->disabled_workarounds |= BITFIELD64_BIT(8);
+-      settings->disabled_workarounds |= BITFIELD64_BIT(11);
+-      settings->disabled_workarounds |= BITFIELD64_BIT(12);
+-      settings->disabled_workarounds |= BITFIELD64_BIT(17);
+-      settings->disabled_workarounds |= BITFIELD64_BIT(18);
+-   }
+-   /* M5 only workarounds */
+-   if (pdev->info.gpu_apple_family >= 10) {
+-      settings->disabled_workarounds &= ~BITFIELD64_BIT(2);
+-   }
+-   if (pdev->info.gpu_apple_family < 10) {
+-      settings->disabled_workarounds |= BITFIELD64_BIT(16);
+-   }
+-   /* M3+ only workarounds */
+-   if (pdev->info.gpu_apple_family < 9) {
+-      settings->disabled_workarounds |= BITFIELD64_BIT(18);
+-   }
+-   if (pdev->info.gpu_apple_family >= 9) {
+-      settings->disabled_workarounds |= BITFIELD64_BIT(10);
+-      settings->disabled_workarounds |= BITFIELD64_BIT(19);
+-   }
++   settings->disabled_workarounds =
++      kk_resolve_workarounds(env_mask, pdev->info.gpu_apple_family,
++                             ns_is_os_version_at_least(27, 0, 0));
++
++   /* nps5 oskey: the set macOS 26 on an M3/M4 (Apple GPU family 9) resolves
++    * to, the machine the shipped override keys were made on. */
++   settings->canon_workarounds =
++      kk_resolve_workarounds(env_mask, KK_CANON_GPU_FAMILY, false);
++   settings->canon_key = debug_get_bool_option("KK_MSL_CANON_KEY", false);
++   settings->canon_differs =
++      settings->canon_key &&
++      (settings->canon_workarounds != settings->disabled_workarounds ||
++       pdev->info.gpu_apple_family != KK_CANON_GPU_FAMILY ||
++       ns_is_os_version_at_least(27, 0, 0));
+ }
+ 
+ VkResult
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.h b/src/kosmickrisp/vulkan/kk_physical_device.h
+index d9ecb5d..e919fa8 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.h
++++ b/src/kosmickrisp/vulkan/kk_physical_device.h
+@@ -50,12 +50,20 @@ struct kk_device_info {
+    bool supports_32_bit_float_filtering;
+ };
+ 
++#define KK_CANON_GPU_FAMILY 9u
++
+ struct kk_env_settings {
+    bool experimental_enabled;
+    bool gpu_capture_enabled;
+    bool gpu_capture_immediately;
+    const char *gpu_capture_dir;
+    uint64_t disabled_workarounds;
++   /* nps5 oskey: KK_MSL_CANON_KEY=1 also keys every shader by the hash of the
++    * MSL text a macOS 26 / Apple GPU family 9 machine generates (where the
++    * shipped override keys come from), so overrides match on any macOS / GPU. */
++   uint64_t canon_workarounds;
++   bool canon_key;
++   bool canon_differs; /* canon_key set and this machine's text can differ */
+    /* KK_MSL_OPT, see nir_to_msl.h */
+    uint32_t msl_opt;
+ };
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index e67028a..04fbc5d 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -318,6 +318,31 @@ enum kk_feature_key {
+    KK_FEAT_IMAGE_VIEW_MIN_LOD_EMULATED = BITFIELD_BIT(2),
+ };
+ 
++/* nps5 oskey (KK_MSL_CANON_KEY): while kk_tls_canon is set, everything that
++ * shapes the generated MSL (workaround set, GPU family, OS) reads the
++ * canonical machine instead of this one, so a second, text-only translation
++ * yields the text macOS 26 on an Apple GPU family 9 would have written. */
++static __thread bool kk_tls_canon;
++
++static inline uint64_t
++kk_wa_mask(const struct kk_physical_device *pdev)
++{
++   return kk_tls_canon ? pdev->settings.canon_workarounds
++                       : pdev->settings.disabled_workarounds;
++}
++
++static inline uint32_t
++kk_gpu_family(const struct kk_physical_device *pdev)
++{
++   return kk_tls_canon ? KK_CANON_GPU_FAMILY : pdev->info.gpu_apple_family;
++}
++
++static inline bool
++kk_os27(void)
++{
++   return !kk_tls_canon && ns_is_os_version_at_least(27, 0, 0);
++}
++
+ static enum kk_feature_key
+ kk_make_feature_key(const struct vk_features *feats,
+                     const struct kk_physical_device *pdev)
+@@ -328,7 +353,7 @@ kk_make_feature_key(const struct vk_features *feats,
+    if (feats->nullDescriptor)
+       key |= KK_FEAT_NULL_DESCRIPTOR;
+    /* Emulated in shader on M5 and below */
+-   if (feats->minLod && pdev->info.gpu_apple_family < 11)
++   if (feats->minLod && kk_gpu_family(pdev) < 11)
+       key |= KK_FEAT_IMAGE_VIEW_MIN_LOD_EMULATED;
+    return key;
+ }
+@@ -702,7 +727,7 @@ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
+        state->ms->sample_mask != UINT16_MAX) {
+ 
+       /* KK_WORKAROUND_7 */
+-      if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(7))) {
++      if (!(kk_wa_mask(pdev) & BITFIELD64_BIT(7))) {
+          if (!nir->info.fs.early_fragment_tests) {
+             nir_function_impl *entrypoint = nir_shader_get_entrypoint(nir);
+             nir_builder b = nir_builder_at(nir_after_impl(entrypoint));
+@@ -732,19 +757,19 @@ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
+        * case with multisample, we get a clean run. This does not mean we are
+        * Vulkan conformant with macOS26 for M1 and M2.
+        */
+-      bool ms_bug_present = !ns_is_os_version_at_least(27, 0, 0) &&
+-                            (pdev->info.gpu_apple_family == 7 ||
+-                             pdev->info.gpu_apple_family == 8) &&
++      bool ms_bug_present = !kk_os27() &&
++                            (kk_gpu_family(pdev) == 7 ||
++                             kk_gpu_family(pdev) == 8) &&
+                             state->ms && state->ms->rasterization_samples > 1;
+       if (!ms_bug_present)
+          NIR_PASS(_, nir, msl_disable_triangle_merge);
+    }
+ 
+    /* KK_WORKAROUND_5 */
+-   if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(5)))
++   if (!(kk_wa_mask(pdev) & BITFIELD64_BIT(5)))
+       NIR_PASS(_, nir, msl_nir_fake_guard_for_discards);
+    /* KK_WORKAROUND_4 */
+-   if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(4))) {
++   if (!(kk_wa_mask(pdev) & BITFIELD64_BIT(4))) {
+       NIR_PASS(_, nir, nir_lower_helper_writes, true);
+       NIR_PASS(_, nir, nir_lower_is_helper_invocation);
+    }
+@@ -879,7 +904,7 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+ 
+    /* Common msl texture lowering needs to happen after ycbcr lowering and
+     * before descriptor lowering. */
+-   NIR_PASS(_, nir, msl_lower_textures, pdev->info.gpu_apple_family < 10);
++   NIR_PASS(_, nir, msl_lower_textures, kk_gpu_family(pdev) < 10);
+ 
+    /* Lower push constants before lower_descriptors */
+    NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_mem_push_const,
+@@ -994,11 +1019,11 @@ kk_lower_nir(struct kk_device *dev, nir_shader *nir, bool emulated_stage,
+     * lowers all image intrinsics to be bindless */
+    if (rs->images ==
+           VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2 &&
+-       !(pdev->settings.disabled_workarounds & BITFIELD64_BIT(16)))
++       !(kk_wa_mask(pdev) & BITFIELD64_BIT(16)))
+       NIR_PASS(_, nir, msl_lower_robustness2_images);
+ 
+    /* KK_WORKAROUND_18 */
+-   if (!(pdev->settings.disabled_workarounds & BITFIELD64_BIT(18)))
++   if (!(kk_wa_mask(pdev) & BITFIELD64_BIT(18)))
+       NIR_PASS(_, nir, kk_nir_add_device_barrier_workaround);
+ 
+    NIR_PASS(_, nir, kk_nir_lower_textures);
+@@ -1208,7 +1233,7 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+ 
+    struct nir_to_msl_options translate_options = {
+       .mem_ctx = NULL,
+-      .disabled_workarounds = pdev->settings.disabled_workarounds,
++      .disabled_workarounds = kk_wa_mask(pdev),
+       .msl_opt = pdev->settings.msl_opt,
+    };
+ 
+@@ -1599,7 +1624,8 @@ kk_mslinject_phase_on(void)
+ /* `hex` = key of `code` (BLAKE3-64 of KK's MSL text); false when overrides
+  * are off or only logged. */
+ static bool
+-kk_mslinject_key(const char *code, char hex[17], const char *kind)
++kk_mslinject_key(const char *code, char hex[17], const char *kind,
++                 const char *canon)
+ {
+    pthread_once(&kk_inj_once, kk_inj_init);
+    if (!kk_inj_dir && !kk_inj_log)
+@@ -1610,7 +1636,8 @@ kk_mslinject_key(const char *code, char hex[17], const char *kind)
+    for (unsigned i = 0; i < 8; i++)
+       snprintf(hex + 2 * i, 3, "%02x", hash[i]);
+    if (kk_inj_log)
+-      fprintf(stderr, "[kk-mslinject] seen %s len=%zu %s\n", hex, len, kind);
++      fprintf(stderr, "[kk-mslinject] seen %s len=%zu %s%s%s\n", hex, len, kind,
++              canon && canon[0] ? " canon=" : "", canon && canon[0] ? canon : "");
+    return kk_inj_dir != NULL;
+ }
+ 
+@@ -1619,11 +1646,23 @@ static char *kk_mslinject_load(const char *name, const char *hex);
+ 
+ /* Replacement text for `code` (malloc'd) or NULL; `hex` gets the key. */
+ static char *
+-kk_mslinject_read(const char *code, char hex[17], const char *kind)
++kk_mslinject_read(const char *code, char hex[17], const char *kind,
++                  const char *canon)
+ {
+-   if (!kk_mslinject_key(code, hex, kind))
++   if (!kk_mslinject_key(code, hex, kind, canon))
+       return NULL;
+-   return kk_mslinject_load(hex, hex);
++   char *text = kk_mslinject_load(hex, hex);
++   /* nps5 oskey: no file under this machine's key; the same file under the
++    * canonical key (the text a macOS 26 / GPU family 9 machine writes). */
++   if (!text && canon && canon[0] && strcmp(canon, hex) != 0) {
++      text = kk_mslinject_load(canon, canon);
++      if (text) {
++         fprintf(stderr, "[kk-mslinject] canon hit %s real=%s canon=%s\n", kind,
++                 hex, canon);
++         memcpy(hex, canon, 17);
++      }
++   }
++   return text;
+ }
+ 
+ static char *
+@@ -1659,10 +1698,10 @@ kk_mslinject_math(const char *mm)
+ 
+ /* Replacement text for `code` (malloc'd) or NULL; fills the header fields. */
+ static char *
+-kk_mslinject_find(const char *code, char hex[17], struct mtl_size *ls,
+-                  char entry[128], enum mtl_math_mode *math)
++kk_mslinject_find(const char *code, const char *canon, char hex[17],
++                  struct mtl_size *ls, char entry[128], enum mtl_math_mode *math)
+ {
+-   char *text = kk_mslinject_read(code, hex, "compute");
++   char *text = kk_mslinject_read(code, hex, "compute", canon);
+    if (!text)
+       return NULL;
+    unsigned x = 0, y = 0, z = 0;
+@@ -1769,7 +1808,7 @@ kk_compile_app_compute_pipeline(struct kk_device *device, struct kk_shader *s)
+    char hex[17] = {0}, entry[128] = {0};
+    struct mtl_size ls = {0};
+    enum mtl_math_mode math = MTL_MATH_MODE_SAFE;
+-   char *text = kk_mslinject_find(code, hex, &ls, entry, &math);
++   char *text = kk_mslinject_find(code, s->canon.hex[MESA_SHADER_COMPUTE], hex, &ls, entry, &math);
+    free(tmp);
+    if (text == NULL)
+       return VK_SUCCESS;
+@@ -2078,12 +2117,28 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+       /* mslrest5: replacements are keyed by the exact (VS key, FS key) PAIR:
+        * <dir>/<vs>_<fs>.vs.metal + .fs.metal, so a VS (or FS) verified in one
+        * pipeline is never combined with another pipeline's replacement. */
+-      if (kk_mslinject_key(vs_code, inj_vs_hex, "vertex") &
+-          kk_mslinject_key(fs_code, inj_fs_hex, "fragment")) {
++      const char *cvs = vs->canon.hex[MESA_SHADER_VERTEX];
++      const char *cfs = vs->canon.hex[MESA_SHADER_FRAGMENT];
++      if (kk_mslinject_key(vs_code, inj_vs_hex, "vertex", cvs) &
++          kk_mslinject_key(fs_code, inj_fs_hex, "fragment", cfs)) {
+          char pair[40];
+          snprintf(pair, sizeof(pair), "%s_%s", inj_vs_hex, inj_fs_hex);
+          inj_vs = kk_mslinject_find_gfx(pair, inj_vs_hex, "vertex", inj_vs_entry, &inj_vs_math);
+          inj_fs = kk_mslinject_find_gfx(pair, inj_fs_hex, "fragment", inj_fs_entry, &inj_fs_math);
++         /* nps5 oskey: no pair under this machine's keys; the pair under the
++          * canonical keys (both stages' canonical keys must be known). */
++         if (!inj_vs && !inj_fs && cvs[0] && cfs[0] &&
++             (strcmp(cvs, inj_vs_hex) != 0 || strcmp(cfs, inj_fs_hex) != 0)) {
++            snprintf(pair, sizeof(pair), "%s_%s", cvs, cfs);
++            inj_vs = kk_mslinject_find_gfx(pair, cvs, "vertex", inj_vs_entry, &inj_vs_math);
++            inj_fs = kk_mslinject_find_gfx(pair, cfs, "fragment", inj_fs_entry, &inj_fs_math);
++            if (inj_vs && inj_fs) {
++               fprintf(stderr, "[kk-mslinject] canon hit pair real=%s/%s canon=%s/%s\n",
++                       inj_vs_hex, inj_fs_hex, cvs, cfs);
++               memcpy(inj_vs_hex, cvs, 17);
++               memcpy(inj_fs_hex, cfs, 17);
++            }
++         }
+       }
+       if ((inj_vs != NULL) != (inj_fs != NULL)) {
+          fprintf(stderr, "[kk-mslinject] gfx pair %s/%s: only the %s has a replacement: KK pair kept\n",
+@@ -2290,13 +2345,32 @@ kk_forward_gs_primitive_id(nir_shader *gs, nir_shader *fs)
+    gs->info.outputs_written |= BITFIELD64_BIT(slot);
+ }
+ 
++/* BLAKE3-64 of an MSL text as 16 hex digits (the nps5 override key). */
++static void
++kk_canon_hex(const char *code, char hex[17])
++{
++   blake3_hash hash;
++   _mesa_blake3_compute(code, strlen(code), hash);
++   for (unsigned i = 0; i < 8; i++)
++      snprintf(hex + 2 * i, 3, "%02x", hash[i]);
++}
++
++enum kk_canon_mode {
++   KK_CANON_NONE,        /* no canonical keys */
++   KK_CANON_SELF,        /* *rec = keys of this pass's own texts, attached */
++   KK_CANON_ONLY,        /* *rec = keys of this pass's texts; stop (no Metal
++                          * pipeline, shaders destroyed): the canonical pass */
++   KK_CANON_ATTACH,      /* attach the given *rec */
++};
++
+ static VkResult
+-kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+-                   struct vk_shader_compile_info *infos,
+-                   const struct vk_graphics_pipeline_state *state,
+-                   const struct vk_features *enabled_features,
+-                   const VkAllocationCallbacks *pAllocator,
+-                   struct vk_shader **shaders_out)
++kk_compile_shaders_impl(struct vk_device *device, uint32_t shader_count,
++                        struct vk_shader_compile_info *infos,
++                        const struct vk_graphics_pipeline_state *state,
++                        const struct vk_features *enabled_features,
++                        const VkAllocationCallbacks *pAllocator,
++                        struct vk_shader **shaders_out,
++                        struct kk_canon_keys *rec, enum kk_canon_mode mode)
+ {
+    VkResult result = VK_SUCCESS;
+    struct kk_device *dev = container_of(device, struct kk_device, vk);
+@@ -2322,7 +2396,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+          info->next_stage_mask & (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                   VK_SHADER_STAGE_GEOMETRY_BIT);
+ 
+-      msl_preprocess_nir_workarounds(nir, pdev->settings.disabled_workarounds);
++      msl_preprocess_nir_workarounds(nir, kk_wa_mask(pdev));
+       kk_lower_nir(dev, nir, emulated_stage, info->robustness,
+                    info->set_layout_count, info->set_layouts, state, features);
+ 
+@@ -2381,7 +2455,7 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+        nir_shaders[total_shaders - 2u]->info.stage == MESA_SHADER_GEOMETRY) {
+       kk_forward_gs_primitive_id(nir_shaders[total_shaders - 2u],
+                                  nir_shaders[total_shaders - 1u]);
+-      apply_wa19 = !(pdev->settings.disabled_workarounds & BITFIELD64_BIT(19));
++      apply_wa19 = !(kk_wa_mask(pdev) & BITFIELD64_BIT(19));
+    }
+ 
+    nir_opt_varyings_bulk(nir_shaders, total_shaders, true, UINT32_MAX,
+@@ -2414,6 +2488,24 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+       }
+    }
+ 
++   if (mode == KK_CANON_SELF || mode == KK_CANON_ONLY) {
++      for (uint32_t i = 0; i < total_shaders; i++) {
++         const mesa_shader_stage st = shaders[i]->info.stage;
++         if (st < MESA_SHADER_MESH_STAGES && shaders[i]->msl_data[st].code)
++            kk_canon_hex(shaders[i]->msl_data[st].code, rec->hex[st]);
++      }
++   }
++   if (mode != KK_CANON_NONE) {
++      if (mode == KK_CANON_ONLY) {
++         for (uint32_t i = 0; i < total_shaders; i++)
++            kk_shader_destroy(&dev->vk, shaders[i], pAllocator);
++         memset(shaders_out, 0, shader_count * sizeof(*shaders_out));
++         return VK_SUCCESS;
++      }
++      for (uint32_t i = 0; i < shader_count; i++)
++         shaders[i]->canon = *rec;
++   }
++
+    /* Compile pipeline:
+     * 1. Compute pipeline
+     * 2. Graphics with all stages (since we don't support GPL nor shader
+@@ -2448,6 +2540,61 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+    return result;
+ }
+ 
++static VkResult
++kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
++                   struct vk_shader_compile_info *infos,
++                   const struct vk_graphics_pipeline_state *state,
++                   const struct vk_features *enabled_features,
++                   const VkAllocationCallbacks *pAllocator,
++                   struct vk_shader **shaders_out)
++{
++   struct kk_device *dev = container_of(device, struct kk_device, vk);
++   struct kk_physical_device *pdev = kk_device_physical(dev);
++   /* Plain pipelines only: stages that become compute passes (tess, GS) and
++    * mesh shaders are never overridden, so they get no second translation. */
++   bool plain = shader_count <= 2;
++   for (uint32_t i = 0; plain && i < shader_count; i++) {
++      const mesa_shader_stage st = infos[i].nir->info.stage;
++      plain = (st == MESA_SHADER_VERTEX || st == MESA_SHADER_FRAGMENT ||
++               st == MESA_SHADER_COMPUTE) &&
++              !(infos[i].next_stage_mask &
++                (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
++                 VK_SHADER_STAGE_GEOMETRY_BIT));
++   }
++   if (!pdev->settings.canon_key || !plain)
++      return kk_compile_shaders_impl(device, shader_count, infos, state,
++                                     enabled_features, pAllocator, shaders_out,
++                                     NULL, KK_CANON_NONE);
++
++   /* nps5 oskey: also key the shaders by the text macOS 26 / GPU family 9
++    * writes. On such a machine that is this machine's text; elsewhere a
++    * second, text-only translation of cloned NIR with the canonical machine's
++    * workaround set, GPU family and OS (kk_tls_canon). */
++   struct kk_canon_keys rec;
++   memset(&rec, 0, sizeof(rec));
++   if (!pdev->settings.canon_differs)
++      return kk_compile_shaders_impl(device, shader_count, infos, state,
++                                     enabled_features, pAllocator, shaders_out,
++                                     &rec, KK_CANON_SELF);
++
++   struct vk_shader_compile_info ci[8];
++   struct vk_shader *dummy[8];
++   memcpy(ci, infos, shader_count * sizeof(*infos));
++   for (uint32_t i = 0; i < shader_count; i++)
++      ci[i].nir = nir_shader_clone(NULL, infos[i].nir);
++   struct vk_features f = *enabled_features;
++   f.minLod = false; /* not available on the canonical machine */
++   kk_tls_canon = true;
++   VkResult r = kk_compile_shaders_impl(device, shader_count, ci, state, &f,
++                                        pAllocator, dummy, &rec, KK_CANON_ONLY);
++   kk_tls_canon = false;
++   if (r != VK_SUCCESS)
++      memset(&rec, 0, sizeof(rec)); /* this machine's keys only */
++   return kk_compile_shaders_impl(device, shader_count, infos, state,
++                                  enabled_features, pAllocator, shaders_out,
++                                  &rec, KK_CANON_ATTACH);
++}
++
+ /* A GS and the VS holding its pipeline also carry the GS compute pass. */
+ static bool
+ kk_has_gs_main(const struct kk_shader_info *info)
+@@ -2494,6 +2641,21 @@ kk_shader_serialize(struct vk_device *vk_dev, const struct vk_shader *vk_shader,
+    if (kk_has_gs_main(&shader->info))
+       kk_msl_serialize(&shader->gs_main, &shader->gs_main_z, blob);
+ 
++   /* nps5 oskey: optional trailer (KK_MSL_CANON_KEY). Readers that do not know
++    * it stop before it, old blobs have none. */
++   {
++      uint32_t mask = 0;
++      for (unsigned st = 0; st < MESA_SHADER_MESH_STAGES; st++)
++         if (shader->canon.hex[st][0])
++            mask |= BITFIELD_BIT(st);
++      if (mask) {
++         blob_write_uint32(blob, KK_CANON_TRAILER_MAGIC);
++         blob_write_uint32(blob, mask);
++         u_foreach_bit(st, mask)
++            blob_write_bytes(blob, shader->canon.hex[st], 16);
++      }
++   }
++
+    return !blob->out_of_memory;
+ }
+ 
+@@ -2576,6 +2738,22 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+          goto fail;
+    }
+ 
++   /* nps5 oskey: optional canonical-key trailer */
++   if (blob->end - blob->current >= 8) {
++      uint32_t magic;
++      memcpy(&magic, blob->current, 4);
++      if (magic == KK_CANON_TRAILER_MAGIC) {
++         blob_skip_bytes(blob, 4);
++         uint32_t mask = blob_read_uint32(blob);
++         u_foreach_bit(st, mask) {
++            if (st >= MESA_SHADER_MESH_STAGES || blob->end - blob->current < 16)
++               break;
++            blob_copy_bytes(blob, shader->canon.hex[st], 16);
++            shader->canon.hex[st][16] = 0;
++         }
++      }
++   }
++
+    if (info.stage == MESA_SHADER_COMPUTE) {
+       result = kk_compile_app_compute_pipeline(dev, shader);
+    } else if (kk_stage_holds_pipeline(info.stage)) {
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index ae9893c..5f52322 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -159,6 +159,14 @@ struct kk_msl_z {
+    uint32_t raw_len; /* strlen(code) + 1 */
+ };
+ 
++/* nps5 oskey (KK_MSL_CANON_KEY): per stage, the 16-hex BLAKE3 key of the MSL
++ * text a macOS 26 / Apple GPU family 9 machine generates for this shader ("" =
++ * unknown). Serialized as an optional trailer (old caches stay readable). */
++#define KK_CANON_TRAILER_MAGIC 0x4b4e4143u /* "CANK" */
++struct kk_canon_keys {
++   char hex[MESA_SHADER_MESH_STAGES][17];
++};
++
+ struct kk_shader {
+    struct vk_shader vk;
+ 
+@@ -184,6 +192,7 @@ struct kk_shader {
+     * queue; dispatches use KK's own kernel until it is ready (no hitch at
+     * pipeline creation). Shader destroy waits for the job. */
+    void *mslinject_group; /* dispatch_group_t or NULL */
++   struct kk_canon_keys canon;
+ };
+ 
+ /* nps5 mslinject: true when this dispatch runs the replacement kernel

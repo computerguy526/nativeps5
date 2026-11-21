@@ -931,6 +931,16 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
     except (metalmod.MetalError, OSError) as e:
         print("%sMetal graphics: skipped (%s); KosmicKrisp's own shaders are used" % (label, e), flush=True)
         st["error"] = str(e)
+    if rd:
+        try:
+            ks = {r["kk"] for r in metalmod.parse_list(open(mlist).read())[1]} if mlist else set()
+            ps = {(r["kk_vs"], r["kk_fs"]) for r in metalmod.parse_gfx_list(open(glist).read())[1]} if glist else set()
+            line = metalmod.key_match_line(run_logs(rd), ks, ps)
+            if line:
+                print("%sMetal shaders: %s" % (label, line), flush=True)
+                st["match"] = line
+        except (metalmod.MetalError, OSError):
+            pass
     return st
 
 

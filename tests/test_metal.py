@@ -154,7 +154,7 @@ class T(unittest.TestCase):
         cdir = os.path.join(self.tmp, "c")
         self.assertEqual(metal.launch_words(cdir, lp, self.env), ([], None))     # nothing generated yet
         metal.generate(lp, self.prog, os.path.join(cdir, "metal-shaders"), self.env, out=io.StringIO())
-        self.assertEqual(metal.launch_words(cdir, lp, self.env)[0], [("KK_MSL_OVERRIDE_DIR", os.path.join(cdir, "metal-shaders"))])
+        self.assertEqual(metal.launch_words(cdir, lp, self.env)[0], [("KK_MSL_OVERRIDE_DIR", os.path.join(cdir, "metal-shaders")), ("KK_MSL_CANON_KEY", "1")])
         self.assertEqual(metal.launch_words(cdir, lp, dict(self.env, NPS5_METAL_SHADERS="0")), ([], None))
         open(lp, "a").write("# edited\n")
         w, warn = metal.launch_words(cdir, lp, self.env)
@@ -168,16 +168,25 @@ class T(unittest.TestCase):
         self.assertEqual(metal.override_counts(log), (1, 1))
         self.assertTrue(metal.enabled({})); self.assertFalse(metal.enabled({"NPS5_METAL_SHADERS": "off"}))
 
-    def test_canon_switch_and_launch_word(self):                 # v1.2.2 oskey: default off, the word only with the switch
-        self.assertFalse(metal.canon_enabled({})); self.assertFalse(metal.canon_enabled({"NPS5_METAL_CANON": "0"}))
-        self.assertTrue(metal.canon_enabled({"NPS5_METAL_CANON": "1"})); self.assertTrue(metal.canon_enabled({"NPS5_METAL_CANON": " On "}))
+    def test_canon_switch_and_launch_word(self):                 # v1.2.2 oskey: default ON, =0 turns it off
+        self.assertTrue(metal.canon_enabled({})); self.assertFalse(metal.canon_enabled({"NPS5_METAL_CANON": "0"}))
+        self.assertTrue(metal.canon_enabled({"NPS5_METAL_CANON": "1"})); self.assertFalse(metal.canon_enabled({"NPS5_METAL_CANON": " Off "}))
         lp = self.write_list([row(DG[0], SP[0], "0" * 16, b_text(0))])
         cdir = os.path.join(self.tmp, "c")
         metal.generate(lp, self.prog, os.path.join(cdir, "metal-shaders"), self.env, out=io.StringIO())
         d = os.path.join(cdir, "metal-shaders")
-        self.assertEqual(metal.launch_words(cdir, lp, self.env)[0], [("KK_MSL_OVERRIDE_DIR", d)])
-        self.assertEqual(metal.launch_words(cdir, lp, dict(self.env, NPS5_METAL_CANON="1"))[0],
-                         [("KK_MSL_OVERRIDE_DIR", d), ("KK_MSL_CANON_KEY", "1")])
+        self.assertEqual(metal.launch_words(cdir, lp, self.env)[0], [("KK_MSL_OVERRIDE_DIR", d), ("KK_MSL_CANON_KEY", "1")])
+        self.assertEqual(metal.launch_words(cdir, lp, dict(self.env, NPS5_METAL_CANON="0"))[0], [("KK_MSL_OVERRIDE_DIR", d)])
+
+    def test_key_match_line(self):
+        log = ("[kk-mslinject] seen 00000000000000a1 len=9 compute canon=00000000000000c1\n"
+               "[kk-mslinject] seen 00000000000000b1 len=7 vertex canon=00000000000000c2\n"
+               "[kk-mslinject] seen 00000000000000b2 len=8 fragment canon=00000000000000c3\n"
+               "[kk-mslinject] seen 00000000000000d1 len=4 compute\n")
+        k = {"00000000000000c1", "00000000000000d1", "00000000000000e1"}; p = {("00000000000000c2", "00000000000000c3"), ("00000000000000c2", "00000000000000ff")}
+        self.assertEqual(metal.key_match_line(log, k, p), "2 of 3 listed kernels and 1 of 2 listed pairs match on this Mac (1 + 0 by this Mac's own key, the rest by the canonical key)")
+        self.assertIn("inactive", metal.key_match_line("[kk-mslinject] seen 00000000000000a1 len=9\n", {"00000000000000c1"}, set()))
+        self.assertEqual(metal.key_match_line("", k, p), "")
 
     def test_canon_log_lines_are_parsed(self):
         # a macOS 27 / M6 Mac: its own key differs, the canonical key (the lists' key) is on the same line
@@ -338,7 +347,7 @@ class Gfx(unittest.TestCase):
         lp = os.path.join(self.tmp, "metal-shaders.tsv"); open(lp, "w").write("")
         self.gen([gfx_row(1, 2, self.kk_vs, "f" * 16, t)])
         w, warn = metal.launch_words(os.path.join(self.tmp, "c"), lp, self.env)
-        self.assertEqual((w, warn), ([("KK_MSL_OVERRIDE_DIR", self.out)], None))
+        self.assertEqual((w, warn), ([("KK_MSL_OVERRIDE_DIR", self.out), ("KK_MSL_CANON_KEY", "1")], None))
         open(os.path.join(self.tmp, "metal-gfx-pairs.tsv"), "a").write("# changed\n")
         w, warn = metal.launch_words(os.path.join(self.tmp, "c"), lp, self.env)
         self.assertEqual(w, []); self.assertIn("metal-gfx-pairs.tsv", warn)
@@ -659,7 +668,7 @@ class Classes(unittest.TestCase):
         st, _, lp, env = self.gen2(self.mock_rows(), "g16@os26")
         cdir = os.path.join(self.tmp, "c")
         self.assertEqual(metal.index_class(os.path.join(cdir, "metal-shaders"), "index.tsv"), "g16@os26")
-        self.assertEqual(metal.launch_words(cdir, lp, env)[0], [("KK_MSL_OVERRIDE_DIR", os.path.join(cdir, "metal-shaders"))])
+        self.assertEqual(metal.launch_words(cdir, lp, env)[0], [("KK_MSL_OVERRIDE_DIR", os.path.join(cdir, "metal-shaders")), ("KK_MSL_CANON_KEY", "1")])
         w, warn = metal.launch_words(cdir, lp, dict(env, NPS5_METAL_CLASS="g16@os27"))   # macOS update: regenerate
         self.assertIn("forced", metal.summary(st))
         self.assertEqual(w, []); self.assertIn("this Mac is g16@os27", warn)

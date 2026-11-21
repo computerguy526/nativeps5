@@ -2027,7 +2027,7 @@ NPS5_LOG_RATE	ps5recomp	first,every: thin repeated periodic log lines (default o
 NPS5_LONG	nativeps5		tests/test_evidence_ab_report.py
 NPS5_LOWERING_ID	ps5recomp		pkg/emitter/lowering.go
 NPS5_METALLIB_STORE	nativeps5	content-addressed store of built Metal libraries; cache prepare sets <cache root>.metallib-store; empty = off	scripts/kk-libcache-build.sh
-NPS5_METAL_CANON	nativeps5	1 = pass KK_MSL_CANON_KEY=1 in prepare and at launch so the shipped Metal shaders match on any macOS / GPU (the lists' keys are canonical: macOS 26 / GPU family 9); default off (v1.2.2 oskey)	scripts/nps5lib/metal.py
+NPS5_METAL_CANON	nativeps5	default ON (v1.2.2): pass KK_MSL_CANON_KEY=1 in prepare and at launch so the shipped Metal shaders match on any macOS / GPU (the lists' keys are canonical: macOS 26 / GPU family 9); 0 = off	scripts/nps5lib/metal.py
 NPS5_METAL_CLASS	nativeps5	override the GPU class of the Metal lists (needs NPS5_DEV=1)	scripts/nps5lib/metal.py
 NPS5_METAL_SHADERS	nativeps5	0 = do not generate or use our Metal compute kernels (v1.1, games/<id>/metal-shaders.tsv); default on	scripts/nps5lib/metal.py
 NPS5_MISS	ps5recomp		pkg/runtime/core/nps5_tier1.c

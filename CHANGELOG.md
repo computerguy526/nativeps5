@@ -3,6 +3,16 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.2.2 (unreleased)
+
+- **Metal shaders now match on every macOS and GPU.** KosmicKrisp's generated MSL, which the override keys hash, differs between
+  macOS 26 and 27 and between GPU families (M4 and M5/M6); v1.2.1's replacements therefore matched only on macOS 26 with an M3/M4.
+  KosmicKrisp patch 0027 (`KK_MSL_CANON_KEY`) also keys every shader by the text a macOS 26 / GPU family 9 Mac writes (the Mac the
+  lists were made on); `nps5` turns it on by default (`NPS5_METAL_CANON=0` = off), and `cache prepare` prints how many listed
+  kernels and pairs match on this Mac. A no-op on a Mac that already writes the canonical text.
+- KosmicKrisp patch 0028 (upstream Mesa 0db4e29): allocations beyond 95 % of the recommended working set fail with
+  `VK_ERROR_OUT_OF_DEVICE_MEMORY` instead of a Metal kernel panic on macOS 26 (workaround 20).
+
 ## v1.2.1 (2026-11-21)
 
 Everything in v1.2. Physics that holds up below 30 fps, banner text, a bounded command-processor lead, faster Metal

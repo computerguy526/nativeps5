@@ -31,7 +31,7 @@ where the text was verified and measured faster on that class (verdict and B/A i
 column: every row is `*` + `base`, i.e. exactly the v1.2 behaviour.
 
 Switches: NPS5_METAL_SHADERS=0 turns the feature off (no generation, no KK_MSL_OVERRIDE_DIR at launch).
-          NPS5_METAL_CANON=1 (default off, v1.2.2 oskey) = KK_MSL_CANON_KEY=1 in prepare and launch: KosmicKrisp's MSL text, so its
+          NPS5_METAL_CANON (default ON since v1.2.2, oskey; =0 turns it off) = KK_MSL_CANON_KEY=1 in prepare and launch: KosmicKrisp's MSL text, so its
           override key, differs between macOS 26 and 27 and between GPU families (workaround sets, texture lowering). With the switch
           KosmicKrisp also keys every shader by the text a macOS 26 / Apple GPU family 9 Mac writes (the Mac the lists' keys come
           from) and looks a replacement up under that key when none exists under this Mac's own key; the keys in the lists are those
@@ -85,8 +85,9 @@ class MetalError(Exception):
 
 
 def canon_enabled(environ):
-    """NPS5_METAL_CANON=1: KosmicKrisp looks replacements up under the canonical (macOS 26 / GPU family 9) key as well."""
-    return (environ.get("NPS5_METAL_CANON") or "").strip().lower() in ("1", "yes", "on", "true")
+    """Default ON (v1.2.2); NPS5_METAL_CANON=0 (off/no/false) turns it off: KosmicKrisp looks replacements up under the canonical
+    (macOS 26 / GPU family 9) key as well as this Mac's own. A no-op on a Mac whose text is the canonical one."""
+    return (environ.get("NPS5_METAL_CANON") or "1").strip().lower() not in ("0", "off", "no", "false")
 
 
 def enabled(environ):
@@ -265,6 +266,24 @@ CANON_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16}) len=\d+ (compute|ve
 def seen_keys(text):
     """Keys KosmicKrisp logged as seen: its own, plus (KK_MSL_CANON_KEY) the canonical key of each."""
     return set(SEEN_RE.findall(text)) | {c for _, _, c in CANON_RE.findall(text)}
+
+
+def key_match_line(log, kernels, pairs):
+    """-> one summary line: how many listed compute keys / (vs, fs) pairs KosmicKrisp produced on this Mac, by its own key or (with
+    KK_MSL_CANON_KEY) by the canonical key. kernels = {kk key}, pairs = {(kk_vs, kk_fs)}; '' when the log has no `seen` lines."""
+    own = set(SEEN_RE.findall(log))
+    anyk = own | {c for _, _, c in CANON_RE.findall(log)}
+    if not anyk:
+        return ""
+    k_all, k_own = len(kernels & anyk), len(kernels & own)
+    p_all = sum(1 for v, f in pairs if v in anyk and f in anyk)
+    p_own = sum(1 for v, f in pairs if v in own and f in own)
+    s = "%d of %d listed kernels and %d of %d listed pairs match on this Mac" % (k_all, len(kernels), p_all, len(pairs))
+    if k_all + p_all:
+        s += " (%d + %d by this Mac's own key, the rest by the canonical key)" % (k_own, p_own)
+    else:
+        s += ": the replacements are inactive here (KosmicKrisp's text differs from the one the lists were made for)"
+    return s
 
 
 def seen_canon_aliases(text):
