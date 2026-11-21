@@ -8,7 +8,7 @@
 # A class is a GPU generation: rows timed on one model (M4 Pro, M6) apply to every Mac of that generation (M4, M4 Max, ...).
 format	nps5-metal-keys	2
 title	PPSA21564	01.007.000
-emitter	7809bb4e4bd9cd66093fe18db16d6d3b3394ef30	v1.2.2-dev
+emitter	b1f43b818fd4a9c08c1c7916e93d0c8cc9fc2e42	v1.2.2-dev
 64b3226f3fb2cb9efe02914fd8a469a9	4e36645574603230	04073ec4ced05a77	04f87f2ba032b29e09a98f5d80ecf6179b039c9c4da1b0d9d860fdfc5b9fc94f	32x1x1	exact	base	*	exact	shipped	-
 a20116d414aaa02ccc0e8e76dd33f879	57f2ca056844a281	089acdc874f061e2	c125435ae05ee12d0afd602ef3ea9c2e0c7ce68d5cced5ff5c15ba1b4fc51115	32x1x1	exact	base	*	exact	shipped	-
 7876f251c9875117966cf254adee3faa	992a3388a19df284	0a73c9054c2ec677	37efeda6287ec6de8645b39d83168bf8f6abcacf9b4ba61c796126aaaa7784b6	64x1x1	exact	base	*	exact	shipped	-
