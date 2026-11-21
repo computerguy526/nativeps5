@@ -1,12 +1,12 @@
 # Record of the no-game-code proof and the reproduction of metal-shaders.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=2778efb4e65af3a05e1126f621e9740945509133fb3f143c21c1620008c68c41
+sha256=66c240d8b939755fea21dfbb43fb270af6973d75d1b28fbbe7adc4a491979ae6
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
 reproduced=71 of 71
 class cs *: 69 of 69
 class cs g18: 2 of 2
-emitter=448ae6508dcb4a78539a20589cba0ba232801977 v1.2.1 (nativeps5-kyty)
+emitter=7809bb4e4bd9cd66093fe18db16d6d3b3394ef30 v1.2.2-dev (nativeps5-kyty)
 evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16)
 date=2026-11-21
