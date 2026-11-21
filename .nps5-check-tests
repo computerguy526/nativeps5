@@ -24,3 +24,5 @@ python3 -I tests/test_metal.py
 python3 -I tests/test_bench.py
 python3 -I tests/test_regress.py
 python3 -I tests/test_share.py
+python3 -I -m py_compile scripts/nps5lib/data.py tests/test_data.py
+python3 -I tests/test_data.py   # the APFS part is skipped off macOS

@@ -9,6 +9,7 @@
   nps5 bench <id> --route NAME [--arm A:... --arm B:...]          benchmark routes of bench.tsv, ABBA, quiet-machine gate
   nps5 regress check|baseline|list [--quick] [--record]            smoke routes, green/red rule, validated.tsv
   nps5 patch <id> --list | --check <native> | <native> <names> [-o COPY]
+  nps5 data status|compress|decompress <folder> [--apply]         store a game folder with APFS transparent compression (about 3x smaller)
 Go binary: $NPS5_GO_NPS5, else <ps5recomp>/bin/nps5 or out/nps5, else `go run ./cmd/nps5` inside ps5recomp."""
 import importlib.util, os, subprocess, sys
 
@@ -45,6 +46,8 @@ def main(argv, environ=None):
     if argv[0] in ("cache", "bench", "regress"):
         sys.path.insert(0, os.path.join(HERE, "nps5lib"))
         return _load(argv[0]).main(argv[1:], environ)
+    if argv[0] == "data":
+        return _load("data").main(argv[1:], environ)
     if argv[0] == "log":
         return _load("logsummary").main(argv[1:], environ)
     if argv[0] in ("bug-report", "bugreport"):
