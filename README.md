@@ -190,8 +190,8 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   `NPS5_FONT_LAYOUT=hhea`.
 - **Command-processor lead bound** (v1.2.1, `KYTY_CP_LEAD_MAX_MS=16`): Kyty's command processor runs at most 16 ms ahead
   of the GPU (the wait is bounded and never fatal). Off: `KYTY_CP_LEAD_MAX_MS=0`.
-- **Faster Metal shaders per GPU class** (v1.2.1, v1.2.2): the Metal lists carry rows for M4-family (`g16`, 72 graphics rows),
-  M5-family (`g17`, 12) and M6-family (`g18`, 111 graphics rows + 2 kernels) GPUs, used only on that class; other Macs keep the
+- **Faster Metal shaders per GPU class** (v1.2.1, v1.2.2): the Metal lists carry rows for M4-family (`g16`, 82 graphics rows),
+  M5-family (`g17`, 34) and M6-family (`g18`, 179 graphics rows + 2 kernels) GPUs, used only on that class; other Macs keep the
   shared rows. Since v1.2.2 the rows match on every macOS and GPU (canonical KosmicKrisp keys, KosmicKrisp patch 0027;
   `NPS5_METAL_CANON=0` = off). `NPS5_METAL_SHADERS=0` turns all of our shaders off.
 - **Ray-tracing load hold and budget guard** (`KYTY_RT_LOAD_HOLD=1`, `KYTY_RT_BUDGET_GUARD=1`): Kyty's software ray tracing
