@@ -24,9 +24,9 @@ Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (ne
   also keys every shader by the text a macOS 26 / GPU family 9 Mac writes (the Mac the lists were made on); `nps5` turns it on by
   default (`NPS5_METAL_CANON=0` = off), and `cache prepare` prints how many listed kernels and pairs match on this Mac. A no-op on
   a Mac that already writes the canonical text.
-- **More and faster Metal rows, per GPU class.** The lists now carry 302 rows, every one regenerated text-exact by the public
-  `kyty_msl_dump` of Kyty v1.2.2 (`nps5 cache metal --reproduce`: 302 of 302): shared rows (`*`) 36 graphics pairs + 69 kernels,
-  M4 family `g16` 72 graphics rows, M5 family `g17` 12 graphics rows (new), M6 family `g18` 111 graphics rows + 2 kernels. New
+- **More and faster Metal rows, per GPU class.** The lists now carry 402 rows, every one regenerated text-exact by the public
+  `kyty_msl_dump` of Kyty v1.2.2 (`nps5 cache metal --reproduce`: 402 of 402): shared rows (`*`) 36 graphics pairs + 69 kernels,
+  M4 family `g16` 82 graphics rows, M5 family `g17` 34 graphics rows (new), M6 family `g18` 179 graphics rows + 2 kernels. New
   are depth-only vertex rows, the foliage rows (vertex-load grouping and constant-load modes), a prepass row and the
   fullscreen-pass rows. A class row is listed only where the text was verified exact on the game's captured inputs and timed
   faster on a Mac of that class. Coverage of Sky Garden's measured GPU time per second (700.7 ms/s of shader time):
