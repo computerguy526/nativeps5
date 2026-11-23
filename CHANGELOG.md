@@ -3,6 +3,15 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.2.3.1 (hotfix, 2026-11-23)
+
+Only `nativeps5-kyty` changes (`v1.2.3` to `v1.2.3.1`); `nativeps5-recomp` stays at `v1.2.3` and anyps5 at `v1.1.1`. Fixes a rare crash at
+startup, before the first frame (`condition (!m_command.IsInvalid())` at `commandScheduler.cpp:623`): the blank frame the vblank thread
+draws before the game opens video out and the loading card thread both recorded on the same command scheduler, and could overlap. The
+blank frame now takes the present lock first. **Update:** check out `v1.2.3.1` in `../kyty` and run `scripts/build.sh kyty`; no translate
+and no cache step (shader caches stay valid). Workaround without updating: `KYTY_LOADCARD=0`. The components lock check now accepts
+four-part release tags.
+
 ## v1.2.3 (2026-11-23)
 
 Everything in v1.2.2. Fixes for the crash when entering Sky Garden (and other level transitions), the yellow/red tint on wet Astro,
