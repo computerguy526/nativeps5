@@ -10,4 +10,4 @@ class cs g16: 2 of 2
 class cs g18: 2 of 2
 emitter=c08648a2221712ace47798a8a74f19c67ff4bcc7 nps5-kyty v1.2.3-dev-msl (local; v1.2.2 5091f4bb + meshpath mesh emission + spill + heavypairs vsmodes 23e30420 + meshspill mode token)
 evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16)
-date=2026-11-22
+date=2026-11-23
