@@ -823,6 +823,7 @@ def cmd_prepare(ctx, o, runner):
             mw = [("KK_MSL_OVERRIDE_DIR", os.path.join(ctx.dir, metalmod.OUT_NAME)), ("KK_MSL_OVERRIDE_ASYNC", "0")]
             if metalmod.canon_enabled(ctx.environ):
                 mw.append(("KK_MSL_CANON_KEY", "1"))
+            mw += metalmod.mesh_words(os.path.join(ctx.dir, metalmod.OUT_NAME))
             cmd2 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + mw)
         rc = one_pass("pass 2 of 2", cmd2); passes = 2
         if rc == 0:

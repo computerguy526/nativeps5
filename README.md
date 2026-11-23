@@ -86,7 +86,7 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
    cp titles/example.env titles/PPSA21564.env      # set BIN (the `native` program nps5 build printed), APP0 (your dump), GPU=kyty
    ```
 
-6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's listed pipelines once (1,608 in the list; 1,259 of 1,260 built in about 90 seconds on an M4 Pro for the earlier, smaller list), so the first visit to a scene does not stutter:
+6. **Prepare the shader cache** from the pipeline list shipped in `games/PPSA21564/` (the list holds keys and hashes only, no game code). It compiles the game's listed pipelines once (2,367 in the list; 1,259 of 1,260 built in about 90 seconds on an M4 Pro for the earlier, smaller list), so the first visit to a scene does not stutter:
 
    ```sh
    scripts/nps5 cache prepare PPSA21564
@@ -159,7 +159,7 @@ at 60 fps for 30-50 s while a level streamed in: the game then ran at about half
 same Sky Garden route. The `[framerate]` line every 5 s shows the estimate and why it is frozen
 (`frozen -|video|phase|vfs[ streaming]`).
 
-### Options on by default (v1.1.2, v1.2, v1.2.1)
+### Options on by default (v1.1.2 - v1.2.3)
 
 The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with
 `nps5 run --env NAME=VALUE` or put it on the `ENV=` line of `titles/<id>.env` (both win over the profile).
@@ -185,14 +185,27 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   depth targets narrower than the request are recreated); `KYTY_ALIAS_REBUILD_PRESERVE_TIGHT` (a partial render-target rebuild
   moves only the blocks it owns; `=verify` compares both moves on the GPU); `KYTY_COMPUTE_IMAGE_COPY` (a guest compute pass proven
   to copy a whole surface becomes a native image copy; `verify-kernel` / `verify` compare against the guest's own result).
+- **Wet Astro without a yellow/red tint or stripes** (v1.2.3, `KYTY_GBCOPY_REMAP=auto`): the game copies its G-buffer into an
+  image allocated at the native render size (1920x1080, or 2432x1368 for the second dynamic-resolution level), while Upscaling
+  720p/900p and the 540p render scale make the G-buffer smaller; the wet decals then read the copy at the wrong place. Kyty now
+  gives that copy the scaled size, taken from the translated program's own Upscaling / Render scale settings (one `[decalfix]`
+  line per size at start). A stopgap until the copy's size is patched in the game profile. Off: `KYTY_GBCOPY_REMAP=0`.
+- **Stuck shader build and close guards** (v1.2.3): a draw waits at most 8 s for a pipeline build that never returns from the
+  driver, then is skipped until the build finishes (`KYTY_PIPELINE_TAKE_TIMEOUT_MS=8000`), and closing the window exits
+  within 5 s even if the pipeline cache save is stuck (`KYTY_CLOSE_SAVE_TIMEOUT_MS=5000`). `0` = wait for ever (the old
+  behaviour). With the flight recorder on, its dumps also backtrace every thread (`KYTY_FLIGHTREC_ALLTHREADS=1`).
+- **Write faults without a GPU wait** (v1.2.3, `KYTY_FAULT_HOST_READBACK=1`): when the CPU writes to bytes the GPU produced and
+  every GPU writer of them has finished, Kyty copies them on the host instead of waiting for the whole GPU backlog. Fewer CPU
+  stalls on these faults; no frame-rate change was measured. Off: `KYTY_FAULT_HOST_READBACK=0`.
 - **Banner text layout** (v1.2.1, ps5recomp libSceFont): `sceFontGetHorizontalLayout` returns the face bounding box, as the
   PS5 font driver does, so banners such as BOT RESCUED no longer lose the tops of their capitals. Old values:
   `NPS5_FONT_LAYOUT=hhea`.
 - **Command-processor lead bound** (v1.2.1, `KYTY_CP_LEAD_MAX_MS=16`): Kyty's command processor runs at most 16 ms ahead
   of the GPU (the wait is bounded and never fatal). Off: `KYTY_CP_LEAD_MAX_MS=0`.
-- **Faster Metal shaders per GPU class** (v1.2.1, v1.2.2): the Metal lists carry rows for M4-family (`g16`, 82 graphics rows),
-  M5-family (`g17`, 34) and M6-family (`g18`, 179 graphics rows + 2 kernels) GPUs, used only on that class; other Macs keep the
-  shared rows. Since v1.2.2 the rows match on every macOS and GPU (canonical KosmicKrisp keys, KosmicKrisp patch 0027;
+- **Faster Metal shaders per GPU class** (v1.2.1 - v1.2.3): the Metal lists carry rows for M4-family (`g16`, 133 graphics rows
+  incl. 5 mesh pipelines + 2 kernels), M5-family (`g17`, 39 incl. 2 mesh) and M6-family (`g18`, 187 incl. 2 mesh + 2 kernels) GPUs,
+  used only on that class; other Macs keep the shared rows (36 graphics pairs + 69 kernels). Mesh rows (v1.2.3) need KosmicKrisp
+  patches 0029/0030; `nps5` sets `KK_MSL_OVERRIDE_MESH=1` only when a mesh row was generated (`NPS5_MESH_ROWS=0` = skip them). Since v1.2.2 the rows match on every macOS and GPU (canonical KosmicKrisp keys, KosmicKrisp patch 0027;
   `NPS5_METAL_CANON=0` = off). `NPS5_METAL_SHADERS=0` turns all of our shaders off.
 - **Ray-tracing load hold and budget guard** (`KYTY_RT_LOAD_HOLD=1`, `KYTY_RT_BUDGET_GUARD=1`): Kyty's software ray tracing
   waits while a level streams in (5 s after a level opens, and while the game reads files fast), and skips its dispatches

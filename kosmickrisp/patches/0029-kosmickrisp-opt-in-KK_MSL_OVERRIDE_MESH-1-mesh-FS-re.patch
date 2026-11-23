@@ -1,0 +1,144 @@
+From 919416d792581d4225789775e4a17f1be2e861c1 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 15:55:43 +0000
+Subject: [PATCH] kosmickrisp: opt-in KK_MSL_OVERRIDE_MESH=1: mesh + FS
+ replacement pairs (nps5 meshpath)
+
+Patch 0026 keys graphics overrides on plain VS+FS pipelines only (!mesh).
+With KK_MSL_OVERRIDE_MESH=1 a mesh pipeline is keyed too: the mesh text
+logs '[kk-mslinject] seen <hex> mesh' under KK_MSL_OVERRIDE_LOG (offline
+keying of mesh pipes, kkoff), and <dir>/<ms>_<fs>.ms.metal + .fs.metal
+(header '// kk-mslinject v1 stage mesh entry N math M threads T') replace
+both functions in KK's mesh descriptor. The draw keeps dispatching KK's
+mesh threadgroup size, so a replacement with another 'threads' is refused.
+Default off: no mesh key, no extra log, no change.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_shader.c | 51 ++++++++++++++++++++++++------
+ 1 file changed, 41 insertions(+), 10 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 04fbc5d..84cec4f 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1580,6 +1580,9 @@ static const char *kk_inj_dir;
+ static bool kk_inj_log;
+ static double kk_inj_period;
+ static bool kk_inj_async = true;
++/* nps5 meshpath: KK_MSL_OVERRIDE_MESH=1 keys mesh pipelines too (mesh + FS
++ * pair, <ms>_<fs>.ms.metal + .fs.metal); default off = no mesh key, no log */
++static bool kk_inj_mesh;
+ static pthread_once_t kk_inj_once = PTHREAD_ONCE_INIT;
+ static uint64_t kk_inj_t0_ns;
+ static atomic_int kk_inj_last_phase = -1;
+@@ -1604,6 +1607,8 @@ kk_inj_init(void)
+    kk_inj_t0_ns = kk_inj_now_ns();
+    const char *as = getenv("KK_MSL_OVERRIDE_ASYNC");
+    kk_inj_async = !(as && as[0] == '0');
++   const char *me = getenv("KK_MSL_OVERRIDE_MESH");
++   kk_inj_mesh = me && me[0] && strcmp(me, "0") != 0;
+    if (kk_inj_dir)
+       fprintf(stderr, "[kk-mslinject] dir %s period %.1f s async %d\n", kk_inj_dir, kk_inj_period, (int)kk_inj_async);
+ }
+@@ -1726,7 +1731,8 @@ kk_mslinject_find_gfx(const char *pair, const char *hex, const char *stage,
+                       char entry[128], enum mtl_math_mode *math)
+ {
+    char name[64];
+-   snprintf(name, sizeof(name), "%s.%s", pair, stage[0] == 'v' ? "vs" : "fs");
++   snprintf(name, sizeof(name), "%s.%s", pair,
++            stage[0] == 'v' ? "vs" : stage[0] == 'm' ? "ms" : "fs");
+    char *text = kk_mslinject_load(name, hex);
+    if (!text)
+       return NULL;
+@@ -2113,24 +2119,27 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    char inj_vs_entry[128] = {0}, inj_fs_entry[128] = {0};
+    enum mtl_math_mode inj_vs_math = MTL_MATH_MODE_SAFE, inj_fs_math = MTL_MATH_MODE_SAFE;
+    char *inj_vs = NULL, *inj_fs = NULL;
+-   if (!mesh && pipe->gfx.pre_render_count == 0) {
++   pthread_once(&kk_inj_once, kk_inj_init);
++   const bool inj_pair = !mesh || kk_inj_mesh;
++   if (inj_pair && pipe->gfx.pre_render_count == 0) {
+       /* mslrest5: replacements are keyed by the exact (VS key, FS key) PAIR:
+        * <dir>/<vs>_<fs>.vs.metal + .fs.metal, so a VS (or FS) verified in one
+        * pipeline is never combined with another pipeline's replacement. */
+-      const char *cvs = vs->canon.hex[MESA_SHADER_VERTEX];
++      const char *first = mesh ? "mesh" : "vertex";
++      const char *cvs = vs->canon.hex[mesh ? MESA_SHADER_MESH : MESA_SHADER_VERTEX];
+       const char *cfs = vs->canon.hex[MESA_SHADER_FRAGMENT];
+-      if (kk_mslinject_key(vs_code, inj_vs_hex, "vertex", cvs) &
++      if (kk_mslinject_key(vs_code, inj_vs_hex, first, cvs) &
+           kk_mslinject_key(fs_code, inj_fs_hex, "fragment", cfs)) {
+          char pair[40];
+          snprintf(pair, sizeof(pair), "%s_%s", inj_vs_hex, inj_fs_hex);
+-         inj_vs = kk_mslinject_find_gfx(pair, inj_vs_hex, "vertex", inj_vs_entry, &inj_vs_math);
++         inj_vs = kk_mslinject_find_gfx(pair, inj_vs_hex, first, inj_vs_entry, &inj_vs_math);
+          inj_fs = kk_mslinject_find_gfx(pair, inj_fs_hex, "fragment", inj_fs_entry, &inj_fs_math);
+          /* nps5 oskey: no pair under this machine's keys; the pair under the
+           * canonical keys (both stages' canonical keys must be known). */
+          if (!inj_vs && !inj_fs && cvs[0] && cfs[0] &&
+              (strcmp(cvs, inj_vs_hex) != 0 || strcmp(cfs, inj_fs_hex) != 0)) {
+             snprintf(pair, sizeof(pair), "%s_%s", cvs, cfs);
+-            inj_vs = kk_mslinject_find_gfx(pair, cvs, "vertex", inj_vs_entry, &inj_vs_math);
++            inj_vs = kk_mslinject_find_gfx(pair, cvs, first, inj_vs_entry, &inj_vs_math);
+             inj_fs = kk_mslinject_find_gfx(pair, cfs, "fragment", inj_fs_entry, &inj_fs_math);
+             if (inj_vs && inj_fs) {
+                fprintf(stderr, "[kk-mslinject] canon hit pair real=%s/%s canon=%s/%s\n",
+@@ -2142,11 +2151,27 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+       }
+       if ((inj_vs != NULL) != (inj_fs != NULL)) {
+          fprintf(stderr, "[kk-mslinject] gfx pair %s/%s: only the %s has a replacement: KK pair kept\n",
+-                 inj_vs_hex, inj_fs_hex, inj_vs ? "vertex" : "fragment");
++                 inj_vs_hex, inj_fs_hex, inj_vs ? first : "fragment");
+          free(inj_vs);
+          free(inj_fs);
+          inj_vs = inj_fs = NULL;
+       }
++      /* meshpath: the draw dispatches KK's mesh threadgroup size, so a mesh
++       * replacement must declare the same one: `threads N` in its header. */
++      if (mesh && inj_vs) {
++         const unsigned want = vs->info.vs.mesh_local_size.x *
++                               vs->info.vs.mesh_local_size.y *
++                               vs->info.vs.mesh_local_size.z;
++         const char *t = strstr(inj_vs, " threads ");
++         unsigned have = 0;
++         if (!t || sscanf(t, " threads %u", &have) != 1 || have != want) {
++            fprintf(stderr, "[kk-mslinject] mesh pair %s/%s: replacement threads %u != KK %u: KK pair kept\n",
++                    inj_vs_hex, inj_fs_hex, have, want);
++            free(inj_vs);
++            free(inj_fs);
++            inj_vs = inj_fs = NULL;
++         }
++      }
+    }
+    /* KK_MESH_DEBUG=2: the output structs of every mesh function (Metal allows
+     * 32 KiB for max_vertices x vertex struct + max_primitives x primitive
+@@ -2254,7 +2279,13 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+       if (vl && fl) {
+          mtl_function_descriptor *vf = mtl_new_library_function_descriptor(vl, inj_vs_entry);
+          mtl_function_descriptor *ff = mtl_new_library_function_descriptor(fl, inj_fs_entry);
+-         mtl_render_pipeline_descriptor_set_vertex_shader(pipeline_descriptor, vf);
++         if (mesh)
++            mtl_render_pipeline_descriptor_set_mesh_shader(
++               pipeline_descriptor, vf,
++               vs->info.vs.mesh_local_size.x * vs->info.vs.mesh_local_size.y *
++                  vs->info.vs.mesh_local_size.z);
++         else
++            mtl_render_pipeline_descriptor_set_vertex_shader(pipeline_descriptor, vf);
+          mtl_render_pipeline_descriptor_set_fragment_shader(pipeline_descriptor, ff);
+          rp = mtl_new_render_pipeline(device->mtl_compiler_handle, pipeline_descriptor);
+          mtl_release(vf);
+@@ -2269,8 +2300,8 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+                  inj_vs_hex, inj_fs_hex);
+       } else {
+          vs->mslinject_render = rp;
+-         fprintf(stderr, "[kk-mslinject] gfx override %s/%s %.1f ms\n", inj_vs_hex,
+-                 inj_fs_hex, (double)(kk_inj_now_ns() - t0) * 1e-6);
++         fprintf(stderr, "[kk-mslinject] gfx override %s%s/%s %.1f ms\n", mesh ? "mesh " : "",
++                 inj_vs_hex, inj_fs_hex, (double)(kk_inj_now_ns() - t0) * 1e-6);
+       }
+    }
+    free(inj_vs);
+-- 
+2.56.0
+

@@ -114,6 +114,12 @@ env	KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1	gpu=kyty	a partial render-target rebuild
 env	KYTY_COMPUTE_IMAGE_COPY=1	gpu=kyty	a guest compute pass proven to copy one whole surface becomes a native image copy (tiler traffic -31 %; bit-exact: 473 kernel + 289 image GPU compares)
 env	KYTY_SUBRES_CONTAINS=1	gpu=kyty	image subresources compared by containment (upstream KytyPS5 #2410)
 env	KYTY_DEPTH_GROW_RECREATE=1	gpu=kyty	a depth target narrower than the request is recreated (upstream KytyPS5 #2417)
+# v1.2.3 defaults (README "Options on by default"; each off with `--env NAME=0`)
+env	KYTY_GBCOPY_REMAP=auto	gpu=kyty	the G-buffer copy the decals read takes the scaled render size (Upscaling 720p/900p, Render scale 540p) instead of the native level size: no yellow/red tint or stripes on wet Astro
+env	KYTY_FAULT_HOST_READBACK=1	gpu=kyty	a write fault on GPU bytes whose writers completed copies them on the host instead of waiting for the GPU backlog (fewer CPU stalls; no frame-rate gain measured)
+env	KYTY_PIPELINE_TAKE_TIMEOUT_MS=8000	gpu=kyty	a draw waits at most 8 s for a pipeline build that never returns, then is skipped until it does (freeze seen once, 2026-11-22)
+env	KYTY_CLOSE_SAVE_TIMEOUT_MS=5000	gpu=kyty	closing the window exits within 5 s even if the pipeline cache save is stuck
+env	KYTY_FLIGHTREC_ALLTHREADS=1	gpu=kyty	flight-recorder dumps (only when KYTY_FLIGHTREC is on) backtrace every thread
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
 env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
 env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling

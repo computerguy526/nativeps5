@@ -952,6 +952,7 @@ KYTY_CLEAN_VERDICT_CACHE	kyty		src/graphics/host_gpu/cleanVerdictCache.h
 KYTY_CLEAR_REGISTER_WIDE	kyty		src/graphics/host_gpu/renderer/image/imageInfo.h
 KYTY_CLEAR_TRACE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_CLIP_GUARD	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_CLOSE_SAVE_TIMEOUT_MS	kyty	ms the close-time pipeline cache save may take on the main thread before the window closes anyway (0 = wait for ever; ASTRO BOT profile 5000)	src/graphics/presentation/window/window.cpp
 KYTY_CMASK_FAST_CLEAR	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_MSAA	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_NATIVE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
@@ -1185,12 +1186,14 @@ KYTY_FAULT_CLASS_PROFILE_OUT	kyty		src/graphics/host_gpu/renderer/cache/bufferCa
 KYTY_FAULT_CLASS_SEEDS	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_CLASS_WINDOW	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_COST_LOG	kyty		src/graphics/host_gpu/faultCost.cpp
+KYTY_FAULT_HOST_READBACK	kyty	1 = a guest write fault on GPU-owned bytes whose writers all completed copies them on the host instead of waiting for the GPU backlog; 2 = count only; 0 = off (ASTRO BOT profile 1)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_MAP	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_MAP_SECONDS	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_PAGE_LIFT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_PROCESS_VEC	kyty	1 = vectorised GPU fault-buffer parser (opt-in, default off)	src/graphics/host_gpu/renderer/cache/faultManager.cpp
 KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
 KYTY_FLIGHTREC	kyty	flight recorder (v1.1; compiled in, OFF unless set): 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); unset or 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
+KYTY_FLIGHTREC_ALLTHREADS	kyty	1 = flight-recorder dumps backtrace every thread and add a 10 s guest-flip-stall dump (only with KYTY_FLIGHTREC; ASTRO BOT profile 1)	src/common/flightRec.cpp
 KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
 KYTY_FLIGHTREC_DIR	kyty	folder of flight-recorder dumps; nps5 run sets <run dir>/flightrec; default ./flightrec	src/common/flightRec.cpp
 KYTY_FLIGHTREC_DIR	nativeps5	set by nps5 run: the flight recorder writes its dumps into the run folder (only when KYTY_FLIGHTREC=1)	scripts/nps5lib/run.py
@@ -1217,6 +1220,7 @@ KYTY_FRAME_TIMES_LOG	kyty		src/common/hangTrace.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	kyty		src/common/u59Preset.cpp
 KYTY_FUNCTION_ARRAY_SHRINK	nativeps5		titles/kyty-preset.env
 KYTY_GAME_PATCH_DISABLE	kyty		src/loader/gamePatchFilter.h
+KYTY_GBCOPY_REMAP	kyty	auto = A2B10G10R10 2D textures of a native render-level size use the scaled size chosen by the patch profile's upscaling/render_scale settings (ASTRO BOT G-buffer copy; profile auto); WxH=wxh,.. = explicit pairs; 0 = off	src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_GC_SETTLE_SELECTIVE	kyty	buffer collector skips buffers under pending readbacks instead of waiting for the GPU (default 1 since v1.1; 0 = wait for all of them, the v1.0.3 default)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SETTLE_SKIP_EMPTY	kyty	1 = buffer collector does not wait for the GPU without work (default 0)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SIDE_SETTLE_LAZY	kyty	`1` buffer collector does not wait for pending side readbacks after every submission; off, not measured; no effect while KYTY_GC_SETTLE_SELECTIVE is on (the v1.1 default)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1571,6 +1575,7 @@ KYTY_PIPELINE_SKIP_THREADS	nativeps5		tests/test_hw.py
 KYTY_PIPELINE_SKIP_WAIT_US	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_STATS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_STATS	nativeps5		scripts/nps5lib/cache.py
+KYTY_PIPELINE_TAKE_TIMEOUT_MS	kyty	ms a draw waits for a pipeline the skip builder is still building before it is skipped (0 = wait for ever; ASTRO BOT profile 8000)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PRECISE_COND_WAITS	kyty		src/kernel/pthread.cpp
 KYTY_PRECISE_WRITE_RANGES	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_PRECISION_DUMP_DIR	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1790,6 +1795,7 @@ KYTY_TEST_COMPARE_LINEAR_USES	kyty		tests/shaderCfgTests.cpp
 KYTY_TEST_COMPARE_LINEAR_USES_DUMP	kyty		tests/shaderCfgTests.cpp
 KYTY_TEST_NO_GUEST_MEMORY	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_RESIZE	kyty		src/graphics/presentation/window/window.cpp
+KYTY_TEST_SKIP_BUILD_STALL_MS	kyty	test only (default off): the first skip build sleeps that many ms, to exercise KYTY_PIPELINE_TAKE_TIMEOUT_MS / KYTY_CLOSE_SAVE_TIMEOUT_MS	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_TEST_SKIP_SPIRV_TEXT	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_VULKAN_VALIDATION	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_TEST_VULKAN_VALIDATION_IGNORE	kyty		tests/ShaderRecompilerComputeTests.cpp

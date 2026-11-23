@@ -54,7 +54,7 @@ GFX_FORMATS = ("1", "2", "3")   # 2 (v1.1.1) adds the blend column before the ev
                                 # 3 (v1.2.1) adds mode, class, rule, verdict and B/A after the evidence column (as keys format 2)
 GFX_COLS = ("vs", "vs_spec", "ps", "ps_spec", "kk_vs", "kk_fs", "b_vs", "b_fs", "variant", "set0", "va", "cmask")
 _GFX_HEAD = (r"^gfx\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{16})\t([0-9a-f]{64})\t([0-9a-f]{64})"
-             r"\t(mipstats|twin)\t([0-9:,]*)\t([0-9:,]*)\t(\d+)")
+             r"\t(mipstats|twin|mesh|mesh-twin)\t([0-9:,]*)\t([0-9:,]*)\t(\d+)")
 # format 2: a spec field may carry the record's push-data cursor, <spec key>:<cursor> (see read_perms)
 _GFX_HEAD2 = _GFX_HEAD.replace(r"\t([0-9a-f]{16})\t([0-9a-f]{32})\t([0-9a-f]{16})\t([0-9a-f]{16})", r"\t([0-9a-f]{16}(?::\d{1,4})?)\t([0-9a-f]{32}|-)\t([0-9a-f]{16}(?::\d{1,4})?|-)\t([0-9a-f]{16})", 1)
 # format 2/3, VS-only pipeline (no fragment shader, e.g. depth-only shadow passes): ps and ps_spec are '-'. KosmicKrisp then adds its own
@@ -797,11 +797,27 @@ def gfx_env(base, r, vs_outs):
     e["KYTY_MSL_KK_VA"] = r["va"]
     e["KYTY_MSL_KK_COLOR_MASK"] = r["cmask"]
     e["KYTY_MSL_KK_VS_OUTS"] = vs_outs
-    if r["variant"] == "twin":
+    if r["variant"] in ("twin", "mesh-twin"):
         e["KYTY_MSL_MIPSTATS_PLAIN"] = "1"
+    if is_mesh(r):                                     # meshpath: the vertex half is Kyty's mesh program ([[mesh]] text)
+        e["KYTY_MSL_MESH"] = "1"
     if r.get("blend"):                                 # KosmicKrisp's in-shader blend + write mask per colour attachment (format 2)
         e["KYTY_MSL_KK_BLEND"] = r["blend"]
     return e
+
+
+MESH_ROWS_ENV = "NPS5_MESH_ROWS"
+
+
+def is_mesh(r):
+    """meshpath: a mesh row (variant 'mesh' / 'mesh-twin'): a KosmicKrisp mesh pipeline, replacement files <ms>_<fs>.ms.metal + .fs.metal
+    (KosmicKrisp needs KK_MSL_OVERRIDE_MESH=1, patch 0029; mode token meshspill also needs patch 0030). On by default since v1.2.3;
+    NPS5_MESH_ROWS=0 skips them."""
+    return r.get("variant", "").startswith("mesh")
+
+
+def first_ext(r):
+    return ".ms.metal" if is_mesh(r) else ".vs.metal"
 
 
 def perm_key(digest, spec):
@@ -818,6 +834,9 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
         def dump(tool, programs, perm, out, env, extra=()):
             return inner(tool, programs, perm, out, env, tuple(mode_args(r["mode"])) + tuple(extra))
     vs_only = r["ps"] == "-"
+    mesh = is_mesh(r)
+    if mesh and os.environ.get(MESH_ROWS_ENV) == "0":
+        return "mesh rows off (%s=0)" % MESH_ROWS_ENV, None
     vi = perms.get(perm_key(r["vs"], r["vs_spec"]))
     pi = None if vs_only else perms.get(perm_key(r["ps"], r["ps_spec"]))
     if vi is None or (pi is None and not vs_only):
@@ -849,7 +868,7 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
             mr = re.search(r"^// kk-bda ps_reads(.*)$", pt, re.M)
             if mr:
                 e["KYTY_MSL_KK_PS_READS"] = ",".join(mr.group(1).split())
-        rc, err = dump(tool, programs, vi, vs_out, e, () if vs_only else ("--link-ps", str(pi)))
+        rc, err = dump(tool, programs, vi, vs_out, e, () if vs_only or mesh else ("--link-ps", str(pi)))
         m = re.search(r"// complete=(\d)", err or "")
         if rc != 0 or not os.path.isfile(vs_out) or (m and m.group(1) != "1"):
             return "vertex translation failed", None
@@ -857,9 +876,9 @@ def gen_pair(r, tool, programs, perms, kk_vs_path, tmp, i, env, dump=run_dump_gf
         return "dump failed: %s" % type(ex).__name__, None
     with open(vs_out, errors="replace") as f:
         vt = f.read()
-    if len(kk_slot_set(kt)) != vt.count("const ulong kk_vb") or slot_types(kt) != slot_types(vt):
+    if not mesh and (len(kk_slot_set(kt)) != vt.count("const ulong kk_vb") or slot_types(kt) != slot_types(vt)):
         return "vertex attribute layout differs from KosmicKrisp's", None
-    if not vt.startswith("// kk-mslinject v1 stage vertex") or not pt.startswith("// kk-mslinject v1 stage fragment"):
+    if not vt.startswith("// kk-mslinject v1 stage mesh" if mesh else "// kk-mslinject v1 stage vertex") or not pt.startswith("// kk-mslinject v1 stage fragment"):
         return "no kk-mslinject header", None
     if file_sha(vs_out) != r["b_vs"] or file_sha(ps_out) != r["b_fs"]:
         return "text differs from the verified pair", None
@@ -906,7 +925,7 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
             kkv[k] = dst
     os.makedirs(out_dir, exist_ok=True)
     for fn in os.listdir(out_dir):                     # a pair set of another list is never left behind
-        if fn.endswith((".vs.metal", ".fs.metal")) or fn in (GFX_INDEX, "skipped-gfx.tsv"):
+        if fn.endswith((".vs.metal", ".ms.metal", ".fs.metal")) or fn in (GFX_INDEX, "skipped-gfx.tsv"):
             os.remove(os.path.join(out_dir, fn))
     tmp = tempfile.mkdtemp(prefix=".metal-gfx-", dir=os.path.dirname(out_dir) or ".")
     pairs = choose(rows, dev, lambda r: (r["kk_vs"], r["kk_fs"]))
@@ -942,7 +961,7 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
                 continue
             fb += 1 if tried else 0
             pair = "%s_%s" % (r["kk_vs"], r["kk_fs"])
-            os.replace(files[0], os.path.join(out_dir, pair + ".vs.metal"))
+            os.replace(files[0], os.path.join(out_dir, pair + first_ext(r)))
             os.replace(files[1], os.path.join(out_dir, pair + ".fs.metal"))
             ok.append(r)
         with open(os.path.join(out_dir, GFX_INDEX), "w") as f:
@@ -999,7 +1018,7 @@ def _generate_gfx_v12(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4,
             kkv[k] = dst
     os.makedirs(out_dir, exist_ok=True)
     for fn in os.listdir(out_dir):                     # a pair set of another list is never left behind
-        if fn.endswith((".vs.metal", ".fs.metal")) or fn in (GFX_INDEX, "skipped-gfx.tsv"):
+        if fn.endswith((".vs.metal", ".ms.metal", ".fs.metal")) or fn in (GFX_INDEX, "skipped-gfx.tsv"):
             os.remove(os.path.join(out_dir, fn))
     tmp = tempfile.mkdtemp(prefix=".metal-gfx-", dir=os.path.dirname(out_dir) or ".")
     prog = Progress(len(rows), label, out, what="Metal graphics")
@@ -1020,7 +1039,7 @@ def _generate_gfx_v12(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4,
                 bad.append((r, why))
                 continue
             pair = "%s_%s" % (r["kk_vs"], r["kk_fs"])
-            os.replace(files[0], os.path.join(out_dir, pair + ".vs.metal"))
+            os.replace(files[0], os.path.join(out_dir, pair + first_ext(r)))
             os.replace(files[1], os.path.join(out_dir, pair + ".fs.metal"))
             ok.append(r)
         with open(os.path.join(out_dir, GFX_INDEX), "w") as f:
@@ -1078,7 +1097,8 @@ def gfx_index_rows(out_dir):
         return None, 0
     sha = next((l[1] for l in lines if l[0] == "list_sha" and len(l) > 1), None)
     n = sum(1 for l in lines if l[0] not in ("list_sha", "class") and len(l) >= 4
-            and os.path.isfile(os.path.join(out_dir, "%s_%s.vs.metal" % (l[0], l[1]))) and os.path.isfile(os.path.join(out_dir, "%s_%s.fs.metal" % (l[0], l[1]))))
+            and any(os.path.isfile(os.path.join(out_dir, "%s_%s%s" % (l[0], l[1], x))) for x in (".vs.metal", ".ms.metal"))
+            and os.path.isfile(os.path.join(out_dir, "%s_%s.fs.metal" % (l[0], l[1]))))
     return sha, n
 
 
@@ -1172,6 +1192,14 @@ def index_rows(out_dir):
     return sha, n
 
 
+def mesh_words(d):
+    """meshpath: KK_MSL_OVERRIDE_MESH=1 (patch 0029) when the generated set holds mesh pairs (<ms>_<fs>.ms.metal), else nothing."""
+    try:
+        return [("KK_MSL_OVERRIDE_MESH", "1")] if any(f.endswith(".ms.metal") for f in os.listdir(d)) else []
+    except OSError:
+        return []
+
+
 def launch_words(cache_dir, list_path, environ):
     """-> ([(key, value)], warning or None): KK_MSL_OVERRIDE_DIR for a normal start when this cache has generated kernels / pairs for
     the current lists and the feature is on. The graphics list sits next to the compute list (games/<id>/metal-gfx-pairs.tsv)."""
@@ -1199,7 +1227,7 @@ def launch_words(cache_dir, list_path, environ):
         if made != {here}:
             return [], ("the Metal shaders of this cache were chosen for GPU class %s, this Mac is %s (another Mac or a macOS update): "
                         "not used; `nps5 cache metal <id>` regenerates them" % ("/".join(sorted(made)), here))
-    return [("KK_MSL_OVERRIDE_DIR", d)] + ([("KK_MSL_CANON_KEY", "1")] if canon_enabled(environ) else []), None
+    return [("KK_MSL_OVERRIDE_DIR", d)] + ([("KK_MSL_CANON_KEY", "1")] if canon_enabled(environ) else []) + mesh_words(d), None
 
 
 def index_class(out_dir, name):

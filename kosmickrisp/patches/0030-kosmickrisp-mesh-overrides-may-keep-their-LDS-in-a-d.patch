@@ -1,0 +1,147 @@
+From 26520513a9b83eb638ce324da674099085370503 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 18:37:25 +0000
+Subject: [PATCH] kosmickrisp: mesh overrides may keep their LDS in a device
+ scratch ('scratch N' header) (nps5 meshpath)
+
+A mesh replacement whose kk-mslinject header says 'scratch N' (N <= 16 KB) gets the
+device's mesh scratch (allocated once: 8 KB head + 1024 x 16 KB slices; the text
+claims and frees a slot itself) bound at argument-table slot 3 for its draws;
+compute's loop state is re-bound after. Without the buffer the KK pair is kept.
+Opt-in by the replacement text only: no header, no change.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_draw.c |  8 +++++++
+ src/kosmickrisp/vulkan/kk_device.h   |  6 +++++
+ src/kosmickrisp/vulkan/kk_shader.c   | 34 ++++++++++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_shader.h   |  9 ++++++++
+ 4 files changed, 57 insertions(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index e28c463..0f0150d 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -2746,6 +2746,14 @@ kk_draw_mesh(struct kk_cmd_buffer *cmd, struct mtl_size groups, uint64_t addr,
+       return;
+ 
+    kk_flush_gfx_state(cmd);
++   /* nps5 meshpath: a mesh override with LDS in device memory reads the device's scratch at slot 3 */
++   if (ms->mslinject_scratch) {
++      struct kk_device *dev = kk_cmd_buffer_device(cmd);
++      if (dev->mesh_scratch) {
++         mtl_set_address(cmd->argument_table, dev->mesh_scratch->gpu, KK_MESH_SCRATCH_SLOT);
++         cmd->loop.bound_gpu = 0; /* compute's loop state must be bound again */
++      }
++   }
+ 
+    const bool cond = cmd->state.cond_render.enabled;
+    if (addr == 0 && cond) {
+diff --git a/src/kosmickrisp/vulkan/kk_device.h b/src/kosmickrisp/vulkan/kk_device.h
+index b3fbcc2..a8cf7af 100644
+--- a/src/kosmickrisp/vulkan/kk_device.h
++++ b/src/kosmickrisp/vulkan/kk_device.h
+@@ -108,6 +108,12 @@ struct kk_device {
+    struct kk_bo *heap;
+    util_once_flag heap_init_once;
+ 
++   /* nps5 meshpath: scratch of mesh overrides that keep their LDS in device memory ('scratch N' in the
++    * kk-mslinject header): KK_MESH_SCRATCH_HEAD bytes (word 0 ticket, word 1 overflow count, words 16..
++    * one owner flag per slot) + KK_MESH_SCRATCH_SLOTS slices of KK_MESH_SCRATCH_STRIDE bytes. */
++   struct kk_bo *mesh_scratch;
++   util_once_flag mesh_scratch_once;
++
+    bool gpu_capture_active;
+ };
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 84cec4f..67e52f0 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -2062,6 +2062,21 @@ gather_graphics_pipeline_create_info(
+       vk_primitive_topology_to_mtl_primitive_topology_class(topology);
+ }
+ 
++/* nps5 meshpath: the device's mesh scratch (kk_device.h), allocated on the first override that asks */
++static void
++kk_init_mesh_scratch(const void *data)
++{
++   struct kk_device *dev = (struct kk_device *)data;
++   const uint64_t size = KK_MESH_SCRATCH_HEAD + (uint64_t)KK_MESH_SCRATCH_SLOTS * KK_MESH_SCRATCH_STRIDE;
++   if (kk_alloc_bo(dev, &dev->vk.base, size, 0, &dev->mesh_scratch, KK_MEM_GEOM_HEAP) != VK_SUCCESS) {
++      dev->mesh_scratch = NULL;
++      return;
++   }
++   memset(dev->mesh_scratch->cpu, 0, KK_MESH_SCRATCH_HEAD); /* ticket, overflow, owner flags */
++   fprintf(stderr, "[kk-mslinject] mesh scratch %llu bytes (%u slots of %u)\n", (unsigned long long)size,
++           KK_MESH_SCRATCH_SLOTS, KK_MESH_SCRATCH_STRIDE);
++}
++
+ static VkResult
+ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+ {
+@@ -2119,6 +2134,7 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+    char inj_vs_entry[128] = {0}, inj_fs_entry[128] = {0};
+    enum mtl_math_mode inj_vs_math = MTL_MATH_MODE_SAFE, inj_fs_math = MTL_MATH_MODE_SAFE;
+    char *inj_vs = NULL, *inj_fs = NULL;
++   unsigned inj_scratch = 0;
+    pthread_once(&kk_inj_once, kk_inj_init);
+    const bool inj_pair = !mesh || kk_inj_mesh;
+    if (inj_pair && pipe->gfx.pre_render_count == 0) {
+@@ -2158,6 +2174,23 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+       }
+       /* meshpath: the draw dispatches KK's mesh threadgroup size, so a mesh
+        * replacement must declare the same one: `threads N` in its header. */
++      if (mesh && inj_vs) {
++         /* nps5 meshpath spill: 'scratch N' = the text keeps N bytes of LDS per group in the device's
++          * mesh scratch (claimed slot, freed by the text); refused above a slice or without the buffer */
++         const char *sc = strstr(inj_vs, " scratch ");
++         unsigned scratch = 0;
++         if (sc && sscanf(sc, " scratch %u", &scratch) == 1 && scratch) {
++            util_call_once_data(&device->mesh_scratch_once, kk_init_mesh_scratch, device);
++            if (scratch > KK_MESH_SCRATCH_STRIDE || !device->mesh_scratch) {
++               fprintf(stderr, "[kk-mslinject] mesh pair %s/%s: scratch %u not available: KK pair kept\n",
++                       inj_vs_hex, inj_fs_hex, scratch);
++               free(inj_vs);
++               free(inj_fs);
++               inj_vs = inj_fs = NULL;
++            }
++         }
++         inj_scratch = scratch;
++      }
+       if (mesh && inj_vs) {
+          const unsigned want = vs->info.vs.mesh_local_size.x *
+                                vs->info.vs.mesh_local_size.y *
+@@ -2300,6 +2333,7 @@ kk_compile_graphics_pipeline(struct kk_device *device, struct kk_shader *vs)
+                  inj_vs_hex, inj_fs_hex);
+       } else {
+          vs->mslinject_render = rp;
++         vs->mslinject_scratch = inj_scratch;
+          fprintf(stderr, "[kk-mslinject] gfx override %s%s/%s %.1f ms\n", mesh ? "mesh " : "",
+                  inj_vs_hex, inj_fs_hex, (double)(kk_inj_now_ns() - t0) * 1e-6);
+       }
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index 5f52322..d2fd742 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -193,8 +193,17 @@ struct kk_shader {
+     * pipeline creation). Shader destroy waits for the job. */
+    void *mslinject_group; /* dispatch_group_t or NULL */
+    struct kk_canon_keys canon;
++   /* nps5 meshpath: the mesh override's LDS slice bytes ('scratch N'), 0 = none; bound at
++    * KK_MESH_SCRATCH_SLOT for its draws */
++   uint32_t mslinject_scratch;
+ };
+ 
++/* nps5 meshpath: mesh override scratch ABI (MslKkBda.cpp KkMeshScratch*) */
++#define KK_MESH_SCRATCH_HEAD   8192u
++#define KK_MESH_SCRATCH_SLOTS  1024u
++#define KK_MESH_SCRATCH_STRIDE 16384u
++#define KK_MESH_SCRATCH_SLOT   3u /* argument table slot (compute uses it for loop state) */
++
+ /* nps5 mslinject: true when this dispatch runs the replacement kernel
+  * (KK_MSL_OVERRIDE_PERIOD=<s> alternates replacement/original phases). */
+ bool kk_mslinject_phase_on(void);
+-- 
+2.56.0
+

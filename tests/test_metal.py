@@ -783,5 +783,31 @@ class GfxClasses(unittest.TestCase):
         self.assertEqual((res["rows"], res["reproduced"]), (3, 3), res)
 
 
+class Mesh(unittest.TestCase):
+    """meshpath (v1.2.3): mesh rows parse, write .ms.metal and turn on KK_MSL_OVERRIDE_MESH only when a mesh pair was generated."""
+    ROW = "\t".join(["gfx", "1" * 32, "a" * 16 + ":7", "2" * 32, "b" * 16 + ":7", "c" * 16, "d" * 16, "e" * 64, "f" * 64, "mesh-twin",
+                      "0:0,3:128", "", "1", "1:1:7:0:0:7:0:15:f:4", "autoval,meshpath-mvalb", "fix6+meshspill", "g16", "exact", "faster", "0.38"])
+
+    def test_parse_and_ext(self):
+        text = "format\tnps5-metal-gfx-pairs\t3\n" + self.ROW + "\n"
+        _, rows = metal.parse_gfx_list(text)
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(metal.is_mesh(rows[0]))
+        self.assertEqual(metal.first_ext(rows[0]), ".ms.metal")
+        self.assertEqual(rows[0]["mode"], "fix6+meshspill")
+
+    def test_mesh_words(self):
+        d = tempfile.mkdtemp()
+        try:
+            self.assertEqual(metal.mesh_words(d), [])
+            open(os.path.join(d, "c_d.vs.metal"), "w").close()
+            self.assertEqual(metal.mesh_words(d), [])
+            open(os.path.join(d, "c_d.ms.metal"), "w").close()
+            self.assertEqual(metal.mesh_words(d), [("KK_MSL_OVERRIDE_MESH", "1")])
+            self.assertEqual(metal.mesh_words(os.path.join(d, "missing")), [])
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

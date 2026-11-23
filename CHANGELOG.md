@@ -3,6 +3,60 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.2.3 (2026-11-23)
+
+Everything in v1.2.2. Fixes for the crash when entering Sky Garden (and other level transitions), the yellow/red tint on wet Astro,
+wood sinking into water, a rare freeze when a shader build never returns, and closing the game hanging; more Metal shader rows, now
+also for mesh pipelines. **Update:** nativeps5-recomp and nativeps5-kyty move to `v1.2.3` (anyps5 stays at v1.1.1): pull, check out
+`v1.2.3` in `../ps5recomp` and `../kyty`, rebuild the recompiler (`scripts/build.sh recomp`), **translate the title again**
+(`nps5 build`: the file-read fix and the physics defaults are in the runtime linked into the translated program), rebuild KosmicKrisp
+(`scripts/build.sh kosmickrisp`: patches 0029 and 0030 are new, 30 patches, `EXPECTED_TREE` 5238cb05) and Kyty (`scripts/build.sh kyty`),
+then run `nps5 cache prepare PPSA21564` once (new Kyty, new Metal rows, bigger pipeline list).
+
+- **Level-transition crash fixed (file reads, nativeps5-recomp, needs `nps5 build` again).** Entering Sky Garden could crash in the
+  level loader (`RoomLoad`), sometimes after a few "texture without a name" lines. The cause was a short file read: the game reloads a
+  160 MB model file into a buffer whose pages Kyty's write watch was still closing, the runtime's file read gave up after 64 retries of
+  the kernel copy, and the game accepted the incomplete buffer and parsed stale bytes. A read now finishes through a 4 MiB host buffer
+  when the retries run out, so the game always gets the whole file (`[kio] ... read through a host buffer` in the log when it happens;
+  `NPS5_KIO_BOUNCE=0` = the old behaviour, for A/B only). Confirmed in play sessions: the Sky Garden entry that crashed before loads.
+  The two earlier guards for the same crash stay as a second line: a model whose texture has no name no longer crashes a level
+  transition, and the Havok world lock is taken again per physics sub-step (fixes `Mutex.cpp:418` asserts).
+- **No more yellow/red tint (or stripes) on wet Astro (Kyty, on by default, `KYTY_GBCOPY_REMAP=auto`).** The game copies its G-buffer
+  into an image allocated at the native render size (1920x1080, or 2432x1368 for the second dynamic-resolution level), while Upscaling
+  720p/900p and the 540p render scale make the G-buffer itself smaller; the wet and other decals then read the copy at the wrong
+  place. Kyty now gives that copy the scaled size, taken from the translated program's own Upscaling / Render scale settings (one
+  `[decalfix]` line per size at start; nothing changes with Upscaling off and Render scale 720p). Checked by eye in play sessions at
+  540p and 720p: no tint, no stripes, the wet darkening and sheen remain. A stopgap until the copy's size is patched in the game
+  profile. Off: `KYTY_GBCOPY_REMAP=0`.
+- **Wood no longer sinks (physics, needs `nps5 build` again):** world sub-steps are at most 1/25 s and the world lock is held across
+  them by default (the "feel the wall" gate stays fixed).
+- **A rare freeze when a shader build never returns is fixed (Kyty, on by default).** A draw now waits at most 8 s for a pipeline
+  build that is stuck in the driver, then is skipped until the build finishes (`KYTY_PIPELINE_TAKE_TIMEOUT_MS=8000`; seen once, in a
+  long session under heavy memory pressure).
+- **Closing the game always exits (Kyty, on by default).** The pipeline cache save at close gives up after 5 s instead of waiting for
+  ever (`KYTY_CLOSE_SAVE_TIMEOUT_MS=5000`). Both guards: `0` = the old behaviour. With the flight recorder on, its dumps now backtrace
+  every thread (`KYTY_FLIGHTREC_ALLTHREADS=1`).
+- **Write faults without a GPU wait (Kyty, on by default, `KYTY_FAULT_HOST_READBACK=1`).** When the CPU writes to bytes the GPU produced
+  and every GPU writer of them has finished, Kyty copies them on the host instead of waiting for the whole GPU backlog. In one Snowy
+  Canyon A/B the time the command processor spent in these drains fell from 7.7-10.9 s to 3.3 s per 10 s, but reads of GPU-written pages
+  waited longer and the frame rate did not change (within run-to-run noise). Fewer CPU stalls on these faults; no frame-rate gain was
+  measured. Off: `KYTY_FAULT_HOST_READBACK=0`.
+- **More Metal rows, now also for mesh pipelines.** The lists carry 468 rows, every one regenerated text-exact by `kyty_msl_dump`
+  of the v1.2.3 Kyty (`nps5 cache metal --reproduce`: 468 of 468): shared rows (`*`, every Mac) 36 graphics pairs + 69 kernels,
+  M4 family `g16` 133 graphics rows (5 of them mesh pipelines) + 2 kernels, M5 family `g17` 39 graphics rows (2 mesh), M6 family
+  `g18` 187 graphics rows (2 mesh) + 2 kernels. New: 50 g16 rows from an overnight M4 Pro timing pass (8 of them faster replacements),
+  the G-buffer pairs 47d07a80 (g16, g18), the forward pair 3742e841/c3e52ec8, the fullscreen / post / foliage-forward pairs 705290fd,
+  8d47e44f, 9b8c69da, 69ca3b3c (per class), two lighting kernels on g16, and 9 mesh-pipeline rows (`mesh-twin`: our mesh-stage text plus
+  the twin fragment shader; KosmicKrisp patch 0029 lets a mesh pipeline be replaced, 0030 gives a replacement the device's mesh
+  scratch for its LDS). As before, a class row is listed only where the text was verified exact (or within a rule the maintainers
+  approved) on captured inputs and timed faster on a Mac of that class. The timings are per shader (microbenchmarks); a title A/B of
+  the mesh rows was within run-to-run noise, so the rows are for coverage, not a frame-rate promise.
+- **Pipeline list: 1,161 permutations / 2,381 pipelines** (v1.2.2: 989 / 1,752), folded from play sessions and level captures on the
+  M4 Pro and an M5 Pro (keys and hashes only, `pipelines.kyplst.verified`): fewer shaders compile while you play after `cache prepare`.
+- **KosmicKrisp: 30 patches** (0029 mesh-pipeline replacement, 0030 mesh scratch for replacements).
+- Known: SAROS is not playable yet. Two shader sets that the maintainers play with (foliage forward rows and Astro's skinned-vertex
+  rewrite) are not in the public lists: their texts are not made by the public Kyty generator yet (planned for v1.2.4).
+
 ## v1.2.2 (2026-11-21)
 
 Everything in v1.2.1. Metal shaders now match on every Mac, a bigger list of faster Metal shaders (M4, M5 and M6 families),
