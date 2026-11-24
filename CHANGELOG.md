@@ -28,6 +28,10 @@ needs no new translation: the recompiler changes are switched on only by the Uni
   fault-livelock verdict for Unity's graphics worker. Kyty gains 37 graphics NIDs in its route table (indexes 101-137; 0-100 are
   unchanged). Known: without a button press the Mega Cat Studios logo holds (Cross skips it); the first seconds of a start show
   1-1.5 s load hitches (guest-side asset loading); audio and a real-controller session are not verified; no shader cache is shipped.
+- **SAROS character materials (opt-in, `KYTY_PS_UINT32_TARGETS=1`, default off).** A pixel export of raw 32-bit dwords to an integer (UINT)
+  colour target was declared as a float output, which is undefined; Unreal Engine 5's virtual-texture page table (R32G32B32A32Uint) received
+  garbage, so every virtual-texture material sampled one texel (the flat "clay" character in SAROS). With the switch such exports use the
+  emitter's existing uint4 output (the first 8 changed draws are logged as `[uint32targets]`). Nothing changes without it, and no profile sets it.
 - **Profiles can build on an engine profile** (`"base": "<name>"`, `profiles/engines/<name>.json`): the title's keys win, env maps merge.
 - Quieter: the per-lookup unwind log line of `sceKernelGetModuleInfoForUnwind` is opt-in (`NPS5_UNWIND_LOG=1`).
 - Tests: `avloop_unit` tolerates two passes in flight on a loaded host (it failed one run in three under load).
