@@ -1,0 +1,35 @@
+#version 450
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer In { uint v[]; } inb;
+layout(std430, set = 0, binding = 1) writeonly buffer Out { uint r[]; } outb;
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  uint x = inb.v[i];
+  uint leaf;
+  if (x < 10u) leaf = 1u;
+  else if (x < 20u) leaf = 2u;
+  else if (x < 30u) leaf = 3u;
+  else if (x < 40u) leaf = 4u;
+  else if (x < 50u) leaf = 5u;
+  else if (x < 60u) leaf = 6u;
+  else if (x < 70u) leaf = 7u;
+  else if (x < 80u) leaf = 8u;
+  else if (x < 90u) leaf = 9u;
+  else if (x < 100u) leaf = 10u;
+  else if (x < 110u) leaf = 11u;
+  else if (x < 120u) leaf = 12u;
+  else if (x < 130u) leaf = 13u;
+  else if (x < 140u) leaf = 14u;
+  else if (x < 150u) leaf = 15u;
+  else if (x < 160u) leaf = 16u;
+  else if (x < 170u) leaf = 17u;
+  else if (x < 180u) leaf = 18u;
+  else if (x < 190u) leaf = 19u;
+  else if (x < 200u) leaf = 20u;
+  else if (x < 210u) leaf = 21u;
+  else if (x < 220u) leaf = 22u;
+  else if (x < 230u) leaf = 23u;
+  else if (x < 240u) leaf = 24u;
+  else leaf = 25u;
+  outb.r[i] = leaf * 1000u + x % 1000u;
+}
