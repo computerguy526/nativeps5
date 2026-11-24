@@ -33,6 +33,9 @@ WORK=""
 SRC=""
 PREFIX=""
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+# The oldest macOS we support. Without it a build on a newer macOS targets that macOS, the compiler drops the
+# `@available(macOS 27, *)` guards (mtl_texture.m minLOD) and the driver crashes on macOS 26.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*"; }
@@ -189,6 +192,9 @@ if otool -L "$LIB" | grep -q '@rpath/libz\.1\.dylib'; then
     install_name_tool -change @rpath/libz.1.dylib /usr/lib/libz.1.dylib "$LIB"
     codesign -f -s - "$LIB"
 fi
+
+# The driver must not require a newer macOS than the deployment target.
+"$HERE/../scripts/check-minos.sh" --max "$MACOSX_DEPLOYMENT_TARGET" "$LIB" || die "$LIB requires a newer macOS than $MACOSX_DEPLOYMENT_TARGET"
 
 log "built KosmicKrisp $COMMIT ($ARCH)"
 echo "driver: $LIB"

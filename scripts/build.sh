@@ -9,6 +9,10 @@
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nps5-env.sh"
 J="$NPS5_BUILD_JOBS"; N="nice -n 5"
+# Every binary targets the oldest macOS we support, whatever macOS/SDK this Mac has (a driver built with the macOS 27 default
+# compiles away its @available(macOS 27) checks and crashes on macOS 26). Checked after each step (scripts/check-minos.sh).
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
+MINOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-minos.sh"
 need() { for t in "$@"; do command -v "$t" >/dev/null || { echo "build: missing tool '$t' (BUILDING.md, Prerequisites)" >&2; exit 2; }; done; }
 
 recomp() {
@@ -19,6 +23,7 @@ recomp() {
   mkdir -p bin
   $N go build -p "$J" -o bin/ps4-recomp ./cmd/ps4-recomp
   $N go build -p "$J" -o bin/nps5 ./cmd/nps5
+  "$MINOS" --max "$MACOSX_DEPLOYMENT_TARGET" bin/ps4-recomp bin/nps5
   echo "built: $NPS5_RECOMP_DIR/bin/ps4-recomp, bin/nps5"
 }
 kosmickrisp() {
@@ -45,6 +50,7 @@ anyps5() {
   for f in libSceAgc.prx libSceAgcDriver.prx libkernel.prx libc.prx libnps5_gpu.dylib; do
     [ -f "$out/$f" ] || { echo "build: $out/$f was not produced" >&2; exit 1; }
   done
+  "$MINOS" --max "$MACOSX_DEPLOYMENT_TARGET" "$out"/libc.prx "$out"/libkernel.prx "$out"/libnps5_gpu.dylib
   echo "built: $out (NPS5_ANYPS5_BUILD defaults to $NPS5_ANYPS5_DIR/build-arm64)"
 }
 kyty() {
@@ -55,6 +61,7 @@ kyty() {
   $N cmake -S . -B build-arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DKYTY_BUILD_LAUNCHER=OFF \
      -DKYTY_GPU_SDL3_DYLIB="$NPS5_BREW_PREFIX/lib/libSDL3.0.dylib"
   $N cmake --build build-arm64 -j "$J" --target kyty_gpu kyty_msl_dump
+  "$MINOS" --max "$MACOSX_DEPLOYMENT_TARGET" build-arm64/kyty_gpu.dylib build-arm64/kyty_msl_dump
   echo "built: $NPS5_KYTY_DIR/build-arm64/kyty_gpu.dylib (set NPS5_KYTY_GPU_LIB to it) and kyty_msl_dump (Metal shader generation)"
 }
 for step in "${@:-help}"; do
