@@ -260,6 +260,19 @@ Opt-in Kyty switches for Macs short on memory; pass them with `nps5 run --env NA
 - `KYTY_DEPTH_FEEDBACK_USAGE=0`: lets KosmicKrisp keep Metal's lossless depth compression (about 2 ms per frame faster in
   ASTRO BOT).
 
+## Save disk space: pack a title
+
+Big game containers can take tens of GB. `scripts/gamepack.py` shrinks them with macOS's transparent (APFS) compression, which cannot handle a single file over 2 GiB, so it stores each big file `<name>` as a folder `<name>.nps5seg/` of 1 GiB compressed pieces plus a `manifest.json`. **No setting is needed to play a packed title:** when a game opens a file that is missing but has a valid `<name>.nps5seg/` next to it, the runtime serves it as the original single file (same size, same bytes). A plain file always wins; `NPS5_VFS_SEGFILES=0` switches the feature off. If the manifest does not match its pieces, the runtime logs it once and treats the file as missing.
+
+```sh
+python3 scripts/gamepack.py pack --dry-run <title folder>   # what would be packed and what it saves; changes nothing
+python3 scripts/gamepack.py pack <title folder>             # pack (quit the game first)
+python3 scripts/gamepack.py verify <title folder>           # re-check every piece against the manifest
+python3 scripts/gamepack.py unpack <title folder>           # get the original files back, bit for bit
+```
+
+Safe by default: `pack` checks free space, byte-compares the packed pieces against the original, and deletes the original only after that passes (`--keep` leaves it in place). It refuses to run while a game is running or the file is open. `python3 scripts/gamepack.py --help` lists every option.
+
 ## For developers
 
 - [BUILDING.md](BUILDING.md): the build, with the table of what was verified from fresh clones.
