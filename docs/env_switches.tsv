@@ -789,6 +789,8 @@ ASTROHYBRID_SHADER_DUMP	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCa
 ASTROHYBRID_SHADER_DUMP_DIR	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 ASTROHYBRID_WATCHDOG_FAST_EVENTS	kyty		src/common/hangWatchdog.cpp
 ASTROHYBRID_WINDOW_TITLE	kyty		src/graphics/presentation/window/window.cpp
+KK_ARCHIVE_STAMP_EPOCH	kosmickrisp	prepfast S3: >0 keys the archive store on this hand-bumped epoch + macOS build + GPU instead of the KosmicKrisp build	bridge/mtl_compiler.m
+KK_ARCHIVE_STAMP_EPOCH	nativeps5	set from kosmickrisp/ARCHIVE_EPOCH by NPS5_PREPARE_STABLE_KEYS	scripts/nps5lib/cache.py
 KK_BARYCENTRIC_EXT	kosmickrisp		vulkan/kk_physical_device.c
 KK_COMPILE_STATS	kosmickrisp		bridge/mtl_compiler.m
 KK_DISPATCH_CLAMP	kosmickrisp	indirect dispatch counts above this many thread groups dispatch nothing; default 4194304, `0` = off	vulkan/kk_safety.c
@@ -797,6 +799,8 @@ KK_GPU_BUSY_LOG	kosmickrisp	diagnostic: GPU busy share and time per commit from 
 KK_GPU_WATCHDOG_S	kosmickrisp	seconds a committed command buffer may stay incomplete before submissions stop, a flight summary is printed and the process exits 70; default 4, `0` = off	vulkan/kk_safety.c
 KK_LIBCACHE_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_LIBCACHE_DIR	nativeps5		scripts/kk-libcache-build.sh
+KK_LIBKEY_CONTENT	kosmickrisp	prepfast S3: 1 = the metallib key hashes MSL + options + macOS major + GPU, not the KosmicKrisp build	bridge/mtl_compiler.m
+KK_LIBKEY_CONTENT	nativeps5	set by NPS5_PREPARE_STABLE_KEYS	scripts/nps5lib/cache.py
 KK_LIB_DEDUPE	kosmickrisp		bridge/mtl_compiler.m
 KK_LOOP_CAP	kosmickrisp	loop-condition checks per compute kernel invocation before the kernel ends itself; default 262144, `0` = off; part of the pipeline cache key (docs/reference/machine-safety.md)	compiler/nir_to_msl.c
 KK_MATH_MODE	kosmickrisp		bridge/mtl_compiler.m
@@ -814,6 +818,8 @@ KK_MSL_CANON_KEY	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_COLLECT_DIR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_MSL_COLLECT_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_MSL_COLLECT_DIR	nativeps5		kosmickrisp/tests/vecload/run.sh
+KK_MSL_COLLECT_ONLY	kosmickrisp	prepfast S2: 1 = a library with no metallib is only collected (MSL written), not compiled; its pipeline fails	bridge/mtl_compiler.m
+KK_MSL_COLLECT_ONLY	nativeps5	set on pass 1 by NPS5_PREPARE_COLLECT_ONLY	scripts/nps5lib/cache.py
 KK_MSL_COMPRESS	kosmickrisp		vulkan/kk_shader.c
 KK_MSL_COMPRESS	nativeps5		kosmickrisp/tests/msldrop/run.sh
 KK_MSL_DUMP_DIR	nativeps5	diagnostic: writes generated MSL per shader hash; output is game data	tools/xray/tests/run_tests.sh
@@ -840,6 +846,7 @@ KK_OOM_WINDOW_S	kosmickrisp	window for KK_OOM_MAX in seconds; default 60	vulkan/
 KK_PIPELINE_ARCHIVE	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_PIPELINE_ARCHIVE	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_COMPACT	kosmickrisp		bridge/mtl_compiler.m
+KK_PIPELINE_ARCHIVE_COMPACT	nativeps5	set on the last prepare pass by NPS5_PREPARE_COMPACT	scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_DEBUG	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_DIR	kosmickrisp	folder of the segmented Metal 4 pipeline archive (flushed periodically, at exit and on SIGTERM); game data, keep under NPS5_SCRATCH	bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_DIR	kyty	KosmicKrisp's pipeline archive folder; a prepare only waits for the archive writer when it is set	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -849,6 +856,8 @@ KK_PIPELINE_ARCHIVE_FLUSH_N	nativeps5		scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_FLUSH_S	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_FLUSH_S	kyty	KosmicKrisp's archive flush period, read by a prepare to wait for the last segment before it ends	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KK_PIPELINE_ARCHIVE_FLUSH_S	nativeps5		scripts/nps5lib/cache.py
+KK_PIPELINE_ARCHIVE_PREFAULT	kosmickrisp	prepfast S5: 1 = every archive segment's absent pages are read in by all cores before the archives are opened	bridge/mtl_compiler.m
+KK_PIPELINE_ARCHIVE_PREFAULT	nativeps5	set by NPS5_PREPARE_PREFAULT	scripts/nps5lib/cache.py
 KK_PIPELINE_ARCHIVE_READAHEAD	kosmickrisp		bridge/mtl_compiler.m
 KK_PIPELINE_ARCHIVE_SIGTERM	kosmickrisp		bridge/mtl_compiler.m
 KK_QUEUE_ERROR_EXIT	kosmickrisp	exit 74 after a Metal queue 'access revoked' error, once every waiter's event has been raised	vulkan/kk_safety.c
@@ -1656,6 +1665,9 @@ KYTY_PRECISE_COND_WAITS	kyty		src/kernel/pthread.cpp
 KYTY_PRECISE_WRITE_RANGES	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_PRECISION_DUMP_DIR	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PREDICATION_NO_DRAIN	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_PREPARE_FLUSH_SYNC	kyty	prepfast S1: 1 = a list prepare calls the driver's nps5_kk_archive_flush instead of sleeping one flush period + 3 s	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_PREPARE_FLUSH_SYNC	nativeps5	set by NPS5_PREPARE_FLUSH_SYNC / NPS5_PREPARE_COMPACT	scripts/nps5lib/cache.py
+KYTY_PREPARE_FLUSH_WAIT_MS	kyty	how long the on-demand flush waits for the compile lock before the old sleep is used (default 60000)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PRESENT_ABS_VBLANK	kyty	`1` (default) presents a frame when it is ready instead of at the present thread's 60 Hz tick: frame-time stdev 6.4-9.7 -> 1.1-3.6 ms	src/graphics/presentation/videoOut.cpp
 KYTY_PRESENT_BOX_DOWNSCALE	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_PRESENT_INTERVAL_LOG	kyty	diagnostic: logs present intervals	src/common/presentInterval.h
@@ -2237,7 +2249,14 @@ NPS5_PPROF	ps5recomp		cmd/ps4-recomp/main.go
 NPS5_PREBUILD	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREBUILD_SCREEN	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREBUILD_SECONDS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
+NPS5_PREPARE_COLLECT_ONLY	nativeps5	prepfast S2: 1 = cache prepare pass 1 only collects the MSL; pass 2 keeps its archive (needs the library builder, off for --single-pass)	scripts/nps5lib/cache.py
+NPS5_PREPARE_COMPACT	nativeps5	prepfast S5: 1 = the last cache prepare pass writes the archive as one segment (implies the sync flush)	scripts/nps5lib/cache.py
+NPS5_PREPARE_FAST	nativeps5	1 = every NPS5_PREPARE_* prepfast switch below on	scripts/nps5lib/cache.py
+NPS5_PREPARE_FLUSH_SYNC	nativeps5	prepfast S1: 1 = a prepare pass ends when KosmicKrisp has written its archive, not after a fixed 13 s sleep	scripts/nps5lib/cache.py
+NPS5_PREPARE_INCREMENTAL	nativeps5	prepfast S4: 1 = the pipeline list is not part of the cache key; a changed list re-prepares the same dir and builds only what is new	scripts/nps5lib/cache.py
 NPS5_PREPARE_KEEP_PASS1	nativeps5	0 = cache prepare always runs a fresh second pass; default: pass 2 is skipped when pass 1 loaded every shader from stored metallibs and there is nothing new to generate	scripts/nps5lib/cache.py
+NPS5_PREPARE_PREFAULT	nativeps5	prepfast S5: 1 = runs on a prepared cache pre-fault the archive segments (KK_PIPELINE_ARCHIVE_PREFAULT)	scripts/nps5lib/cache.py
+NPS5_PREPARE_STABLE_KEYS	nativeps5	prepfast S3: 1 = archive stamp, library key and cache key follow kosmickrisp/ARCHIVE_EPOCH, not the KosmicKrisp commit	scripts/nps5lib/cache.py
 NPS5_PROFILES	ps5recomp		pkg/pack/profile.go
 NPS5_PRX_ENTRY_ARGS	ps5recomp		pkg/runtime/modules/libkernel/ps4_sysmodule.c
 NPS5_PTHREAD_ATTR_REAL	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c

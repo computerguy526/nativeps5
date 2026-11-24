@@ -1,0 +1,474 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 19:46:35 +0000
+Subject: [PATCH] kosmickrisp: prepfast, opt-in prepare speedups (flush export,
+ collect-only, stable keys, segment pre-fault)
+
+Every piece is off unless its variable is set; with none set the driver behaves as before.
+- nps5_kk_archive_flush(wait_ms): exported; writes the pending archive segment (compact mode: the one compacted
+  segment) and returns, so a prepare no longer sleeps a fixed flush period before _Exit.
+- KK_MSL_COLLECT_ONLY=1: a library without a metallib is only collected (MSL written), not compiled; applies once the
+  device's own libraries exist (mtl_compiler_collect_only_arm); the compute "seen" log still runs.
+- KK_ARCHIVE_STAMP_EPOCH=<n> / KK_LIBKEY_CONTENT=1: archive store stamp keyed on a hand-bumped epoch + OS build + GPU,
+  metallib key on MSL text + options + OS major + GPU, so a KK commit that changes neither keeps both stores.
+- KK_PIPELINE_ARCHIVE_PREFAULT=1: every segment's absent pages are read in by all cores before the archives are opened.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/kk_libkey.h          |  50 +++++++++
+ src/kosmickrisp/bridge/kk_prefault.h        | 107 ++++++++++++++++++++
+ src/kosmickrisp/bridge/mtl_compiler.h       |   3 +
+ src/kosmickrisp/bridge/mtl_compiler.m       | 106 ++++++++++++++++++-
+ src/kosmickrisp/bridge/stubs/mtl_compiler.c |   5 +
+ src/kosmickrisp/vulkan/kk_device_lib.c      |   2 +
+ src/kosmickrisp/vulkan/kk_shader.c          |  12 ++-
+ 7 files changed, 278 insertions(+), 7 deletions(-)
+ create mode 100644 src/kosmickrisp/bridge/kk_prefault.h
+
+diff --git a/src/kosmickrisp/bridge/kk_libkey.h b/src/kosmickrisp/bridge/kk_libkey.h
+index e85f511..f1646c5 100644
+--- a/src/kosmickrisp/bridge/kk_libkey.h
++++ b/src/kosmickrisp/bridge/kk_libkey.h
+@@ -6,6 +6,7 @@
+  * so a unit test can include it. */
+ #ifndef KK_LIBKEY_H
+ #define KK_LIBKEY_H
++#include <stdbool.h>
+ #include <stdio.h>
+ #include <string.h>
+ #include <CommonCrypto/CommonDigest.h>
+@@ -34,4 +35,53 @@ kk_libkey_compute(const char *stamp, const char *gpu, const char *src, int msl_v
+    for (int i = 0; i < 16; i++)
+       snprintf(out + i * 2, 3, "%02x", d[i]);
+ }
++
++/* nps5 prepfast S3: stable (content-based) stamps. Default (gate off): the stamp texts are what they always were, i.e. they
++ * carry the KosmicKrisp build (version + git sha), so ANY KK commit, even a script-only one, opens an empty archive store and
++ * orphans every metallib. Gate on (the KK_ARCHIVE_STAMP_EPOCH / KK_LIBKEY_CONTENT environment, see mtl_compiler.m): the build is
++ * replaced by a hand-bumped epoch (archive) or dropped (library), and the OS build by its major number (library). What the
++ * stores really depend on is checked by Metal itself on every lookup (it keys an archive entry on the descriptor + the function
++ * bytes, and a metallib is keyed on the MSL text + options), so a stale entry can only MISS, never give a wrong pipeline. Kept
++ * here, without Metal headers, so a unit test can include it. */
++
++/* Leading digits of kern.osversion ("25F71" -> "25"; no digits: the whole text). */
++static inline void
++kk_os_major(const char *osbuild, char out[16])
++{
++   size_t n = 0;
++   while (osbuild[n] >= '0' && osbuild[n] <= '9' && n < 15)
++      n++;
++   if (n == 0) {
++      snprintf(out, 16, "%s", osbuild);
++      return;
++   }
++   memcpy(out, osbuild, n);
++   out[n] = 0;
++}
++
++/* Text hashed into the archive store's directory name (STAMP.txt holds it). epoch <= 0: the classic text. */
++static inline void
++kk_archive_stamp_text(char *text, size_t size, int epoch, const char *kk_version, const char *kk_sha,
++                      const char *osbuild, const char *gpu)
++{
++   if (epoch > 0)
++      snprintf(text, size, "fmt=2;epoch=%d;os=%s;gpu=%s;", epoch, osbuild, gpu);
++   else
++      snprintf(text, size, "fmt=1;kk=%s%s;os=%s;gpu=%s;", kk_version, kk_sha, osbuild, gpu);
++}
++
++/* Stamp that goes into kk_libkey_compute(). content = false: the classic text (KK build + macOS build). */
++static inline void
++kk_libkey_stamp_text(char *text, size_t size, bool content, const char *kk_version, const char *kk_sha,
++                     const char *osbuild)
++{
++   if (content) {
++      char major[16];
++      kk_os_major(osbuild, major);
++      snprintf(text, size, "lib=2;osmajor=%s;", major);
++   } else {
++      snprintf(text, size, "kk=%s%s;os=%s;", kk_version, kk_sha, osbuild);
++   }
++}
++
+ #endif
+diff --git a/src/kosmickrisp/bridge/kk_prefault.h b/src/kosmickrisp/bridge/kk_prefault.h
+new file mode 100644
+index 0000000..fb671a4
+--- /dev/null
++++ b/src/kosmickrisp/bridge/kk_prefault.h
+@@ -0,0 +1,107 @@
++/* Copyright nativeps5. SPDX-License-Identifier: MIT
++ *
++ * nps5 prepfast S5: pre-fault archive segments in parallel before Metal opens them. newArchiveWithURL hashes / maps a whole
++ * segment on the calling thread; on a cold page cache that is one page fault at a time (a 4.4 GB file took 8-11 s there, 1.5 s
++ * with its pages brought in by every core first). A piece is mapped, only the pages mincore() reports absent are touched, and
++ * the mapping is dropped again, so a warm file costs one mincore() per piece. No Metal headers: a unit test includes this. */
++#ifndef KK_PREFAULT_H
++#define KK_PREFAULT_H
++#include <dispatch/dispatch.h>
++#include <fcntl.h>
++#include <stdatomic.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++struct kk_prefault_stats {
++   _Atomic uint64_t pieces;         /* pieces visited */
++   _Atomic uint64_t pages_touched;  /* pages that were absent and have been read in */
++   _Atomic uint64_t pages_resident; /* pages already in the file cache */
++};
++
++/* One piece [off, off+len) of fd (len > 0, within the file). */
++static inline void
++kk_prefault_piece(int fd, off_t off, size_t len, struct kk_prefault_stats *st)
++{
++   const size_t page = (size_t)getpagesize();
++   void *m = mmap(NULL, len, PROT_READ, MAP_PRIVATE | MAP_FILE, fd, off);
++   if (m == MAP_FAILED)
++      return;
++   const size_t npages = (len + page - 1) / page;
++   char *vec = calloc(npages, 1);
++   if (vec && mincore(m, len, vec) == 0) {
++      size_t absent = 0;
++      for (size_t i = 0; i < npages; i++)
++         absent += !(vec[i] & 1);
++      if (absent) {
++         madvise(m, len, MADV_WILLNEED);
++         volatile char sink = 0;
++         for (size_t i = 0; i < npages; i++)
++            if (!(vec[i] & 1))
++               sink ^= ((volatile char *)m)[i * page];
++         (void)sink;
++      }
++      if (st) {
++         atomic_fetch_add(&st->pages_touched, absent);
++         atomic_fetch_add(&st->pages_resident, npages - absent);
++      }
++   }
++   free(vec);
++   munmap(m, len);
++   if (st)
++      atomic_fetch_add(&st->pieces, 1);
++}
++
++/* Every piece (default 8 MiB: a multiple of every page size) of every file in `paths`, spread over all cores. A path that
++ * cannot be opened or is empty / shorter than a piece is handled (short last piece; nothing for an empty file).
++ * Returns the number of pieces scheduled. */
++static inline uint64_t
++kk_prefault_files(const char *const *paths, size_t npaths, size_t piece_bytes, struct kk_prefault_stats *st)
++{
++   if (piece_bytes < 65536)
++      piece_bytes = (size_t)8 << 20;
++   struct task {
++      int fd;
++      off_t off;
++      size_t len;
++   };
++   size_t cap = 64, n = 0;
++   struct task *tasks = malloc(cap * sizeof(*tasks));
++   int *fds = calloc(npaths ? npaths : 1, sizeof(int));
++   if (!tasks || !fds) {
++      free(tasks);
++      free(fds);
++      return 0;
++   }
++   for (size_t i = 0; i < npaths; i++) {
++      fds[i] = open(paths[i], O_RDONLY);
++      struct stat sb;
++      if (fds[i] < 0 || fstat(fds[i], &sb) != 0 || sb.st_size <= 0)
++         continue;
++      for (off_t off = 0; off < sb.st_size; off += (off_t)piece_bytes) {
++         if (n == cap) {
++            cap *= 2;
++            struct task *t = realloc(tasks, cap * sizeof(*tasks));
++            if (!t)
++               goto run;
++            tasks = t;
++         }
++         size_t left = (size_t)(sb.st_size - off);
++         tasks[n++] = (struct task){fds[i], off, left < piece_bytes ? left : piece_bytes};
++      }
++   }
++run:;
++   struct task *tp = tasks;
++   dispatch_apply(n, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t k) {
++      kk_prefault_piece(tp[k].fd, tp[k].off, tp[k].len, st);
++   });
++   for (size_t i = 0; i < npaths; i++)
++      if (fds[i] >= 0)
++         close(fds[i]);
++   free(tasks);
++   free(fds);
++   return n;
++}
++#endif
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.h b/src/kosmickrisp/bridge/mtl_compiler.h
+index c036fed..4ad332e 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.h
++++ b/src/kosmickrisp/bridge/mtl_compiler.h
+@@ -21,6 +21,9 @@ mtl_compiler *mtl_new_compiler(mtl_device *device);
+ /* Write the KK_PIPELINE_ARCHIVE file if new pipelines were compiled. */
+ void mtl_compiler_flush_archive(void);
+ 
++/* nps5 prepfast S2: from now on KK_MSL_COLLECT_ONLY (if set) skips library compiles; called once the device's own libraries exist. */
++void mtl_compiler_collect_only_arm(void);
++
+ /* Library */
+ mtl_library *
+ mtl_new_library(mtl_compiler *compiler, const char *src,
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index e90969a..f50ce2a 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -25,6 +25,7 @@
+ #include <CommonCrypto/CommonDigest.h>
+ #include "git_sha1.h"
+ #include "kk_libkey.h"
++#include "kk_prefault.h"
+ 
+ /* Persistent compiled pipelines (nativeps5).
+  *
+@@ -68,6 +69,16 @@
+  *    which persists the MSL -> AIR libraries too (archives hold only the
+  *    AIR -> GPU step). Done in a constructor, before any Metal device exists.
+  *
++ * nps5 prepfast (all opt-in; with none of them set the behaviour is unchanged):
++ *   KK_ARCHIVE_STAMP_EPOCH=<n>, n > 0: the archive store's <stamp> hashes (format, epoch n, macOS build, GPU) and no longer
++ *     the KosmicKrisp build, so a KK commit that only touches scripts / unrelated code keeps the store. Bump n when a KK change
++ *     alters pipelines in a way the MSL text and Metal's descriptor key do not show.
++ *   KK_LIBKEY_CONTENT=1: the metallib key hashes (MSL text, options, macOS MAJOR, GPU) and no longer the KK build / full OS build.
++ *   KK_MSL_COLLECT_ONLY=1 (needs KK_MSL_COLLECT_DIR / KK_LIBCACHE_DIR): a library with no metallib is only COLLECTED (MSL written)
++ *     and not compiled; its pipeline fails. For the first pass of a prepare, whose own libraries and archive would be thrown away.
++ *   nps5_kk_archive_flush(wait_ms): exported; writes the pending segment and returns, so a prepare ends without a fixed sleep.
++ *   KK_PIPELINE_ARCHIVE_PREFAULT=1: segments are pre-faulted by every core before they are opened (KK_PIPELINE_ARCHIVE_READAHEAD=0
++ *     turns this and the read-ahead off).
+  * KK_COMPILE_STATS=<seconds>: one "[kk-archive] stats" line per period while
+  * the counters change, and at exit. KK_PIPELINE_ARCHIVE_DEBUG=1: per-call
+  * lines. */
+@@ -232,8 +243,10 @@ kk_readahead(const char *path)
+ 
+ /* Segment mode: writes what the serializer holds as one new segment. */
+ static bool
+-kk_flush_segment(const char *why, bool wait)
++kk_flush_segment_n(const char *why, bool wait, uint64_t *out_written)
+ {
++   if (out_written)
++      *out_written = 0;
+    if (!kk_serializer || !kk_seg_mode)
+       return true;
+    if (wait)
+@@ -271,6 +284,8 @@ kk_flush_segment(const char *why, bool wait)
+             uint64_t size = stat(path, &st) == 0 ? (uint64_t)st.st_size : 0;
+             kk_st_segments++;
+             kk_st_seg_bytes += size;
++            if (out_written)
++               *out_written = pending;
+             double t1 = kk_now_ms();
+             if (kk_compact && strcmp(why, "sigterm")) {
+                /* The new segment holds every pipeline of this run. */
+@@ -304,6 +319,39 @@ kk_flush_segment(const char *why, bool wait)
+    return true;
+ }
+ 
++static bool
++kk_flush_segment(const char *why, bool wait)
++{
++   return kk_flush_segment_n(why, wait, NULL);
++}
++
++/* nps5 prepfast S1: the host's replacement for "sleep one flush period, then _Exit". Writes what the serializer holds as a
++ * segment (compact mode: the one segment that replaces the loaded ones) and returns once it is on disk and renamed.
++ * wait_ms 0 = wait for the compile lock without limit, else give up after wait_ms (compiles in flight keep it).
++ * Returns the number of pipelines this call wrote (0 = nothing was pending), -1 = could not take the lock in time,
++ * -2 = no segment archive in this process (the caller keeps whatever it did before). */
++static void kk_archive_init(void);
++
++__attribute__((visibility("default"))) int64_t
++nps5_kk_archive_flush(uint32_t wait_ms)
++{
++   pthread_once(&kk_archive_once, kk_archive_init);
++   if (!kk_seg_mode || !kk_serializer)
++      return -2;
++   uint64_t written = 0;
++   if (wait_ms == 0)
++      kk_flush_segment_n("sync", true, &written);
++   else {
++      const double deadline = kk_now_ms() + (double)wait_ms;
++      while (!kk_flush_segment_n("sync", false, &written)) {
++         if (kk_now_ms() >= deadline)
++            return -1;
++         usleep(5000);
++      }
++   }
++   return (int64_t)written;
++}
++
+ void
+ mtl_compiler_flush_archive(void)
+ {
+@@ -414,8 +462,10 @@ kk_archive_stamp(id<MTLDevice> dev, char hex[17], char *text, size_t text_size)
+    char osbuild[64] = "?";
+    size_t len = sizeof(osbuild);
+    sysctlbyname("kern.osversion", osbuild, &len, NULL, 0);
+-   snprintf(text, text_size, "fmt=1;kk=%s%s;os=%s;gpu=%s;", PACKAGE_VERSION, MESA_GIT_SHA1, osbuild,
+-            [[dev name] UTF8String]);
++   /* prepfast S3: KK_ARCHIVE_STAMP_EPOCH=<n> keys the store on a hand-bumped epoch instead of the KK build. */
++   const char *ep = getenv("KK_ARCHIVE_STAMP_EPOCH");
++   kk_archive_stamp_text(text, text_size, ep ? atoi(ep) : 0, PACKAGE_VERSION, MESA_GIT_SHA1, osbuild,
++                         [[dev name] UTF8String]);
+    unsigned char d[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(text, (CC_LONG)strlen(text), d);
+    for (int i = 0; i < 8; i++)
+@@ -468,6 +518,30 @@ kk_archive_init(void)
+          double t0 = kk_now_ms();
+          uint32_t loaded = 0, rejected = 0;
+          NSMutableArray<id<MTL4Archive>> *set = [NSMutableArray array];
++         bool prefault = (e = getenv("KK_PIPELINE_ARCHIVE_PREFAULT")) && atoi(e) != 0 &&
++                         !((e = getenv("KK_PIPELINE_ARCHIVE_READAHEAD")) && atoi(e) == 0);
++         if (prefault) {
++            /* S5: every segment's pages are brought in by every core first (see kk_prefault.h). */
++            NSMutableArray<NSString *> *names = [NSMutableArray array];
++            DIR *pd = opendir(kk_seg_dir);
++            struct dirent *pe;
++            while (pd && (pe = readdir(pd))) {
++               size_t pn = strlen(pe->d_name);
++               if (pn >= 7 && !strcmp(pe->d_name + pn - 6, ".mtl4a"))
++                  [names addObject:[NSString stringWithFormat:@"%s/%s", kk_seg_dir, pe->d_name]];
++            }
++            if (pd)
++               closedir(pd);
++            const char **cpaths = calloc(names.count + 1, sizeof(char *));
++            for (NSUInteger i = 0; cpaths && i < names.count; i++)
++               cpaths[i] = [names[i] UTF8String];
++            struct kk_prefault_stats pst = {0};
++            uint64_t pieces = cpaths ? kk_prefault_files(cpaths, names.count, 0, &pst) : 0;
++            free(cpaths);
++            fprintf(stderr, "[kk-archive] prefault: %llu pieces, %llu pages read in, %llu already cached, %.1f ms\n",
++                    (unsigned long long)pieces, (unsigned long long)atomic_load(&pst.pages_touched),
++                    (unsigned long long)atomic_load(&pst.pages_resident), kk_now_ms() - t0);
++         }
+          DIR *d = opendir(kk_seg_dir);
+          struct dirent *ent;
+          while (d && (ent = readdir(d))) {
+@@ -507,7 +581,7 @@ kk_archive_init(void)
+             kk_task_options = [MTL4CompilerTaskOptions new];
+             kk_task_options.lookupArchives = kk_archives;
+          }
+-         if ((e = getenv("KK_PIPELINE_ARCHIVE_READAHEAD")) && atoi(e) == 0) {
++         if (prefault || ((e = getenv("KK_PIPELINE_ARCHIVE_READAHEAD")) && atoi(e) == 0)) {
+             [readahead release];
+             readahead = nil;
+          }
+@@ -613,6 +687,17 @@ static bool kk_metallib_debug;
+ static char kk_stamp[256];
+ static pthread_once_t kk_metallib_once = PTHREAD_ONCE_INIT;
+ static uint32_t kk_ml_hits, kk_ml_misses;
++/* prepfast S2: KK_MSL_COLLECT_ONLY=1 takes effect once the device's own libraries exist (mtl_compiler_collect_only_arm()),
++ * they must compile or the device is not created. */
++static bool kk_collect_only;
++static _Atomic bool kk_collect_only_armed;
++static _Atomic uint64_t kk_st_collect_only;
++
++void
++mtl_compiler_collect_only_arm(void)
++{
++   atomic_store(&kk_collect_only_armed, true);
++}
+ 
+ static void
+ kk_metallib_init(void)
+@@ -642,7 +727,11 @@ kk_metallib_init(void)
+    char osbuild[64] = "?";
+    size_t len = sizeof(osbuild);
+    sysctlbyname("kern.osversion", osbuild, &len, NULL, 0);
+-   snprintf(kk_stamp, sizeof(kk_stamp), "kk=%s%s;os=%s;", PACKAGE_VERSION, MESA_GIT_SHA1, osbuild);
++   const char *content = getenv("KK_LIBKEY_CONTENT");
++   kk_libkey_stamp_text(kk_stamp, sizeof(kk_stamp), content && content[0] && content[0] != '0', PACKAGE_VERSION,
++                        MESA_GIT_SHA1, osbuild);
++   const char *co = getenv("KK_MSL_COLLECT_ONLY");
++   kk_collect_only = co && co[0] && co[0] != '0';
+ }
+ 
+ static void
+@@ -825,6 +914,13 @@ mtl_new_library(mtl_compiler *compiler, const char *src,
+             fprintf(stderr, "[kk-metallib] miss %s (%zu B msl)\n", key, strlen(src));
+          if (kk_collect_dir)
+             kk_collect_msl(key, src, (int)msl_version, (int)math_mode, (int)math_fp_fns);
++         if (kk_collect_only && kk_collect_dir && atomic_load(&kk_collect_only_armed)) {
++            uint64_t n = atomic_fetch_add(&kk_st_collect_only, 1) + 1;
++            if (n == 1 || n % 500 == 0)
++               fprintf(stderr, "[kk-metallib] collect-only: %llu libraries collected, not compiled (KK_MSL_COLLECT_ONLY)\n",
++                       (unsigned long long)n);
++            return NULL;
++         }
+       }
+       NSString *ns_src = [NSString stringWithCString:src encoding:NSASCIIStringEncoding];
+       /* Benchmark aid: a unique trailing comment defeats the OS Metal
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_compiler.c b/src/kosmickrisp/bridge/stubs/mtl_compiler.c
+index 11af4e7..2735838 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_compiler.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_compiler.c
+@@ -15,6 +15,11 @@ mtl_new_compiler(mtl_device *device)
+    return NULL;
+ }
+ 
++void
++mtl_compiler_collect_only_arm(void)
++{
++}
++
+ /* Library */
+ mtl_library *
+ mtl_new_library(mtl_compiler *compiler, const char *src,
+diff --git a/src/kosmickrisp/vulkan/kk_device_lib.c b/src/kosmickrisp/vulkan/kk_device_lib.c
+index 8651af3..5760c8e 100644
+--- a/src/kosmickrisp/vulkan/kk_device_lib.c
++++ b/src/kosmickrisp/vulkan/kk_device_lib.c
+@@ -53,6 +53,8 @@ build_precompiled_shaders(struct kk_device *dev)
+       memcpy(&shader->info, info, sizeof(*info));
+    }
+ 
++   /* nps5 prepfast S2: the device's own libraries are compiled; KK_MSL_COLLECT_ONLY applies to everything after this. */
++   mtl_compiler_collect_only_arm();
+    return VK_SUCCESS;
+ 
+ fail:
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index f4aa3c8..e1b571e 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1807,19 +1807,27 @@ kk_compile_app_compute_pipeline(struct kk_device *device, struct kk_shader *s)
+    VkResult result = kk_compile_compute_pipeline(
+       device, &s->msl_data[MESA_SHADER_COMPUTE], &s->msl_z[MESA_SHADER_COMPUTE],
+       local_size_threads, &s->pipeline.cs);
+-   if (result != VK_SUCCESS)
++   /* nps5 prepfast S2: a collect-only pass compiles nothing, so the build failed on purpose; the kernel is still
++    * LOGGED below (KK_MSL_OVERRIDE_LOG "seen" lines feed the Metal-shader step of a prepare) and its failure returned. */
++   const bool collect_only = result != VK_SUCCESS && getenv("KK_MSL_COLLECT_ONLY") &&
++                             getenv("KK_MSL_COLLECT_ONLY")[0] > '0';
++   if (result != VK_SUCCESS && !collect_only)
+       return result;
+ 
+    char *tmp;
+    const char *code = kk_msl_text(&s->msl_data[MESA_SHADER_COMPUTE],
+                                   &s->msl_z[MESA_SHADER_COMPUTE], &tmp);
+    if (code == NULL)
+-      return VK_SUCCESS;
++      return result;
+    char hex[17] = {0}, entry[128] = {0};
+    struct mtl_size ls = {0};
+    enum mtl_math_mode math = MTL_MATH_MODE_SAFE;
+    char *text = kk_mslinject_find(code, s->canon.hex[MESA_SHADER_COMPUTE], hex, &ls, entry, &math);
+    free(tmp);
++   if (collect_only) {
++      free(text);
++      return result;
++   }
+    if (text == NULL)
+       return VK_SUCCESS;
+    if (s->mslinject_group || __atomic_load_n(&s->mslinject_cs, __ATOMIC_ACQUIRE)) {
+-- 
+2.56.0
+

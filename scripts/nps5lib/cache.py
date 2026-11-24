@@ -42,6 +42,30 @@ import metal as metalmod  # noqa: E402
 STALL_MS = 250.0
 PREPARE_SECS = 1800
 KEY_FIELDS = ("list", "kyty", "kk", "ps5recomp", "hw")
+# nxprep / prepfast (v1.4): every switch is off by default. NPS5_PREPARE_<NAME>=1 turns one on, NPS5_PREPARE_FAST=1 all of them.
+#   FLUSH_SYNC    a prepare pass ends when KosmicKrisp has written its archive (nps5_kk_archive_flush), not after a fixed 13 s sleep
+#   COLLECT_ONLY  pass 1 only collects the MSL (KK_MSL_COLLECT_ONLY): no throwaway library / archive builds; pass 2 keeps its archive
+#   STABLE_KEYS   archive stamp + library key + cache key do not follow the KK commit (a hand-bumped kosmickrisp/ARCHIVE_EPOCH instead)
+#   INCREMENTAL   the pipeline list is not part of the cache key: a changed list re-prepares the SAME dir and builds only what is new
+#   PREFAULT      KK pre-faults the archive segments with every core before opening them (cold page cache)
+#   COMPACT       the last prepare pass writes ONE archive segment instead of the dozens a cold prepare produces
+PREPARE_GATES = ("FLUSH_SYNC", "COLLECT_ONLY", "STABLE_KEYS", "INCREMENTAL", "PREFAULT", "COMPACT")
+ARCHIVE_EPOCH_FILE = os.path.join(REPO, "kosmickrisp", "ARCHIVE_EPOCH")
+
+
+def gate(environ, name):
+    return environ.get("NPS5_PREPARE_" + name) == "1" or environ.get("NPS5_PREPARE_FAST") == "1"
+
+
+def archive_epoch(path=None):
+    """The hand-bumped archive epoch (kosmickrisp/ARCHIVE_EPOCH): bump it when a KK change alters pipelines in a way neither the MSL
+    text nor Metal's own descriptor key shows. A missing / unreadable file is epoch 1."""
+    try:
+        with open(path or ARCHIVE_EPOCH_FILE) as f:
+            n = int(f.read().split()[0])
+        return n if n > 0 else 1
+    except (OSError, ValueError, IndexError):
+        return 1
 
 
 class CacheError(Exception):
@@ -50,9 +74,13 @@ class CacheError(Exception):
 
 
 # ---------------------------------------------------------------- identity (pure)
-def stack_key(list_sha, kyty, kk, recomp, hw):
-    """8 hex of the stack identity. Every input is a string; a missing commit is spelled 'unknown' by the caller."""
-    s = "\n".join("%s=%s" % (k, v) for k, v in zip(KEY_FIELDS, (list_sha, kyty, kk, recomp, hw)))
+def stack_key(list_sha, kyty, kk, recomp, hw, with_list=True):
+    """8 hex of the stack identity. Every input is a string; a missing commit is spelled 'unknown' by the caller. with_list=False
+    (NPS5_PREPARE_INCREMENTAL) leaves the pipeline list out: a list update keeps the cache dir and the key."""
+    pairs = list(zip(KEY_FIELDS, (list_sha, kyty, kk, recomp, hw)))
+    if not with_list:
+        pairs = [kv for kv in pairs if kv[0] != "list"]
+    s = "\n".join("%s=%s" % (k, v) for k, v in pairs)
     return hashlib.sha256(s.encode()).hexdigest()[:8]
 
 
@@ -74,13 +102,16 @@ class Ctx:
         self.tid, self.environ, self.p, self.gpu, self.list_path = tid, environ, p, gpu, list_path
         self.commits, self.hw, self.scratch, self.titles = commits, hw, scratch, titles
         self.list_sha = file_sha(list_path) if os.path.isfile(list_path) else "none"
-        self.key = stack_key(self.list_sha, commits["kyty"], commits["kk"], commits["ps5recomp"], hw)
+        self.stable, self.incremental = gate(environ, "STABLE_KEYS"), gate(environ, "INCREMENTAL")
+        # stable keys: the KK commit is replaced by the archive epoch (a KK build-script-only commit no longer opens an empty cache)
+        self.kk_id = "epoch%d" % archive_epoch() if self.stable else commits["kk"]
+        self.key = stack_key(self.list_sha, commits["kyty"], self.kk_id, commits["ps5recomp"], hw, with_list=not self.incremental)
         self.root = os.path.join(scratch, "cache", tid)
         self.dir = os.path.join(self.root, "%s-%s" % (gpu, self.key))
         self.metal = metal_id(gpu, tid, self.key)
 
     def identity(self):
-        return dict(list=self.list_sha, kyty=self.commits["kyty"], kk=self.commits["kk"], ps5recomp=self.commits["ps5recomp"], hw=self.hw)
+        return dict(list=self.list_sha, kyty=self.commits["kyty"], kk=self.kk_id, ps5recomp=self.commits["ps5recomp"], hw=self.hw)
 
 
 def hw_key(environ):
@@ -135,14 +166,20 @@ def cache_opts(p):
 
 
 # ---------------------------------------------------------------- environment words of a cache arm
-def cache_env(tid, cdir, mid, with_libcache=True):
-    """The words that point one run at cache dir `cdir` (file names are <title id>.*, as the Kyty runner always used)."""
+def cache_env(tid, cdir, mid, with_libcache=True, environ=None):
+    """The words that point one run at cache dir `cdir` (file names are <title id>.*, as the Kyty runner always used).
+    `environ` carries the prepfast switches: stable keys and the segment pre-fault must be on for EVERY run that uses the cache."""
     e = [("KYTY_PROGRAM_CACHE_PATH", "%s/%s.programs.bin" % (cdir, tid)), ("KYTY_PIPELINE_JOURNAL_PATH", "%s/%s.pipelines.journal" % (cdir, tid)),
          ("KYTY_PIPELINE_KNOWN_PATH", "%s/%s.pipelines.known" % (cdir, tid)), ("KYTY_PIPELINE_CACHE_PATH", "%s/%s.bin" % (cdir, tid)),
          ("KYTY_SHADER_PRECOMPILE_PATH", "%s/%s.shaders.journal" % (cdir, tid)), ("KK_PIPELINE_ARCHIVE_DIR", "%s/kk-archive" % cdir),
          ("KK_METAL_CACHE_ID", mid)]
     if with_libcache:
         e.append(("KK_LIBCACHE_DIR", "%s/kk-libcache" % cdir))
+    if environ is not None:
+        if gate(environ, "STABLE_KEYS"):
+            e += [("KK_ARCHIVE_STAMP_EPOCH", str(archive_epoch())), ("KK_LIBKEY_CONTENT", "1")]
+        if gate(environ, "PREFAULT"):
+            e.append(("KK_PIPELINE_ARCHIVE_PREFAULT", "1"))
     return e
 
 
@@ -163,7 +200,8 @@ def prepare_words(ctx, app0):
             ("KYTY_HELPER_PREWARM", "1"),   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
             # v1.1.2: the profile defers KosmicKrisp's archive flush to exit for play; a prepare waits one flush period before it ends
             # (Kyty, pipelineCache.cpp), so it keeps KosmicKrisp's own 32 pipelines / 10 s.
-            ("KK_PIPELINE_ARCHIVE_FLUSH_N", "32"), ("KK_PIPELINE_ARCHIVE_FLUSH_S", "10")]
+            ("KK_PIPELINE_ARCHIVE_FLUSH_N", "32"), ("KK_PIPELINE_ARCHIVE_FLUSH_S", "10")] + \
+        ([("KYTY_PREPARE_FLUSH_SYNC", "1")] if gate(ctx.environ, "FLUSH_SYNC") or gate(ctx.environ, "COMPACT") else [])   # compaction is written by that flush
 
 
 def launch_words(ctx, app0):
@@ -256,6 +294,9 @@ def status(ctx):
     if ctx.list_sha == "none":
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
+    if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0" and ctx.incremental and prep.get("list") not in (None, ctx.list_sha):
+        return "stale", lines + ["  STALE: the pipeline list changed since this cache was prepared (%s -> %s); an incremental prepare builds only what is new: "
+                                 "nps5 cache prepare %s" % (prep["list"][:12], ctx.list_sha[:12], ctx.tid)]
     if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0":      # no rc line = a torn or foreign file, not a pass
         ms = metalmod.index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
         gs = metalmod.gfx_index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
@@ -703,7 +744,7 @@ def cmd_prepare(ctx, o, runner):
     app0 = app0_of(ctx, o["dry"])
     if not os.path.isfile(ctx.list_path):
         raise CacheError("no %s" % ctx.list_path, 2)
-    words = cache_env(ctx.tid, ctx.dir, ctx.metal) + prepare_words(ctx, app0)
+    words = cache_env(ctx.tid, ctx.dir, ctx.metal, environ=ctx.environ) + prepare_words(ctx, app0)
     mlist = metal_list(ctx) or metal_gfx_list(ctx)
     if mlist:
         words.append(("KK_MSL_OVERRIDE_LOG", "1"))     # pass 1: KK names every compute kernel it builds (how many listed keys it sees)
@@ -719,8 +760,11 @@ def cmd_prepare(ctx, o, runner):
     om = os_metal_dir(ctx.metal)
     lcdir = os.path.join(ctx.dir, "kk-libcache")
 
-    def fresh_dir(keep_libcache=False):
+    def fresh_dir(keep_libcache=False, keep_archive=False):
         keep = ctx.dir + ".libkeep"
+        adir, akeep = os.path.join(ctx.dir, "kk-archive"), ctx.dir + ".archivekeep"
+        if keep_archive and os.path.isdir(adir):
+            shutil.rmtree(akeep, ignore_errors=True); os.replace(adir, akeep)
         mdir, mkeep = os.path.join(ctx.dir, metalmod.OUT_NAME), ctx.dir + ".metalkeep"
         if keep_libcache and os.path.isdir(lcdir):
             shutil.rmtree(keep, ignore_errors=True); os.replace(lcdir, keep)
@@ -731,6 +775,8 @@ def cmd_prepare(ctx, o, runner):
             os.replace(keep, lcdir)
         if os.path.isdir(mkeep):
             os.replace(mkeep, mdir)
+        if os.path.isdir(akeep):
+            os.replace(akeep, adir)
         if om and os.path.isdir(om):
             shutil.rmtree(om, ignore_errors=True)
 
@@ -793,11 +839,26 @@ def cmd_prepare(ctx, o, runner):
         finally:
             tail.done()
 
-    fresh_dir()
+    # prepfast S4: with NPS5_PREPARE_INCREMENTAL a dir that was prepared for this codegen stack (the key leaves the list out) is KEPT: the
+    # archive, the metallibs and Kyty's own caches stay, and only what the new list adds is built. A dir that was never prepared, or
+    # whose prepare failed, starts fresh as before.
+    prev = read_kv(os.path.join(ctx.dir, "prepared.tsv")) if ctx.incremental else None
+    reuse = bool(prev and prev.get("key") == ctx.key and prev.get("rc") == "0" and os.path.isdir(ctx.dir))
+    # prepfast S2: pass 1 only COLLECTS the MSL (no library or pipeline compile whose result pass 2 would throw away). A reused dir is
+    # always collected-only: its archive is final and pass 1 must not add entries built from source libraries.
+    collect = (gate(ctx.environ, "COLLECT_ONLY") or reuse) and not o.get("single") and bool(libcache_builder(ctx))   # no builder / one pass: nothing would ever be compiled
+    compact = gate(ctx.environ, "COMPACT")
+    cmd1 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + [("KK_MSL_COLLECT_ONLY", "1")]) if collect else cmd
+    # prepfast S5: the LAST prepare pass writes one archive segment (KK compact mode) instead of dozens; the sync flush above writes it
+    cwords = [("KK_PIPELINE_ARCHIVE_COMPACT", "1")] if compact and not o.get("single") else []
+    if reuse:
+        print("prepare: incremental: %s is kept (list %s -> %s); only new pipelines are built" % (ctx.dir, (prev.get("list") or "?")[:12], ctx.list_sha[:12]), flush=True)
+    else:
+        fresh_dir()
     nseed = seed_libs()
     if nseed:
         print("prepare: %d metallibs from earlier prepares are reused (only new shaders are compiled)" % nseed, flush=True)
-    rc = one_pass("pass 1 of 2" if not o.get("single") else "pass 1")
+    rc = one_pass("pass 1 of 2" if not o.get("single") else "pass 1", cmd1)
     if rc == 0:
         print("prepare: building Metal libraries from the collected shaders (no window; this takes a few minutes on a first prepare)", flush=True)
     newlibs = pending_libs() if rc == 0 else 0           # MSL KK had to compile from source in pass 1 (no metallib for its key yet)
@@ -811,12 +872,15 @@ def cmd_prepare(ctx, o, runner):
     keep1 = rc == 0 and nlib > 0 and newlibs == 0 and not o.get("single") and ctx.environ.get("NPS5_PREPARE_KEEP_PASS1") != "0"
     if keep1 and not (mst and mst.get("written")):
         print("prepare: pass 1 loaded all %d shaders from metallibs (nothing new to compile): its cache is final, pass 2 skipped" % nlib)
+        if cwords:
+            print("prepare: compaction pass: every pipeline is an archive hit, the archive is rewritten as one segment", flush=True)
+            rc = one_pass("compaction pass", run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + cwords)); passes = 2
     elif rc == 0 and nlib > 0 and not o.get("single"):
         if keep1:
             print("prepare: pass 1 loaded all %d shaders from metallibs; pass 2 only adds the generated kernels to the same cache" % nlib)
         else:
             print("prepare: pass 1 done (%d metallibs); pass 2 re-prepares with them" % nlib)
-            fresh_dir(keep_libcache=True)
+            fresh_dir(keep_libcache=True, keep_archive=collect)      # collect-only pass 1 built nothing from source: its archive is valid and stays
         cmd2 = cmd
         if mst and mst.get("written"):
             # pass 2 compiles every generated kernel once, synchronously, under the progress card; KK collects its MSL, so the
@@ -825,7 +889,9 @@ def cmd_prepare(ctx, o, runner):
             if metalmod.canon_enabled(ctx.environ):
                 mw.append(("KK_MSL_CANON_KEY", "1"))
             mw += metalmod.mesh_words(os.path.join(ctx.dir, metalmod.OUT_NAME))
-            cmd2 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + mw)
+            cmd2 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + mw + cwords)
+        elif cwords:
+            cmd2 = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words + cwords)
         rc = one_pass("pass 2 of 2", cmd2); passes = 2
         if rc == 0:
             nlib = build_libs()
@@ -1000,7 +1066,7 @@ def warm_starts(ctx, app0, o, runner, build_libs):
     -> number of warm starts that ended rc 0."""
     scenes = scene_names(ctx, [])
     scene = scenes[0] if scenes else None
-    words = cache_env(ctx.tid, ctx.dir, ctx.metal) + launch_words(ctx, app0)
+    words = cache_env(ctx.tid, ctx.dir, ctx.metal, environ=ctx.environ) + launch_words(ctx, app0)
     ok = 0
     for i in (1, 2):
         print("prepare: warm start %d of 2: a short normal start builds the window's own helper pipelines (%s)" % (i, scene or "title"), flush=True)
@@ -1039,7 +1105,7 @@ def cmd_check(ctx, o, runner):
     bad = 0
     for s in scene_names(ctx, o["scene"]):
         d = os.path.join(ctx.root, "verify", ctx.key, s); mid = ctx.metal + ".v." + s
-        words = cache_env(ctx.tid, d, mid) + launch_words(ctx, app0) + [("KYTY_PROGRESS_TITLE_LOG", "1"), ("KYTY_PIPELINE_STATS", "1")]
+        words = cache_env(ctx.tid, d, mid, environ=ctx.environ) + launch_words(ctx, app0) + [("KYTY_PROGRESS_TITLE_LOG", "1"), ("KYTY_PIPELINE_STATS", "1")]
         tag = "cache-check-" + s
         cmd = run_cmd(ctx.tid, tag, s, o["secs"] or 180, words)
         if o["dry"]:

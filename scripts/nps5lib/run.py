@@ -494,7 +494,7 @@ def shader_cache_words(tid, environ, app0):
         cx = cachemod.context(tid, environ)
         if not os.path.isfile(cx.list_path):
             return []
-        words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")))
+        words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")), environ=environ)
         out = [(k, v, None) for k, v in words + cachemod.launch_words(cx, app0)]
         mwarn = cachemod.metalmod.launch_words(cx.dir, os.path.join(cx.p.dir, cachemod.metalmod.LIST_NAME), environ)[1]
         if mwarn:

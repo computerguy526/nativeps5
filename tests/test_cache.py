@@ -229,6 +229,125 @@ class T(unittest.TestCase):
         self.run_main(["prepare", "PPSA00001", "--no-warm"], runner2)
         self.assertEqual(runs, ["cache-prepare", "cache-prepare"])
 
+    # ---- prepfast (nxprep S1-S5): every switch off by default
+    def prepfast_runner(self, c, log, msl_new=True):
+        lcd = os.path.join(c.dir, "kk-libcache")
+        def runner(cmd, env=None, capture=False):
+            if capture: return 0, "  shaders 1\n  permutations 2, pipelines 3\n"
+            if cmd[0] == "bash":
+                os.makedirs(lcd + "/lib", exist_ok=True); open(lcd + "/lib/k1.metallib", "w").write("m"); return 0
+            words = " ".join(cmd)
+            log.append((cmd[cmd.index("--tag") + 1], words, os.path.isdir(os.path.join(c.dir, "kk-archive")), os.path.exists(os.path.join(c.dir, "marker"))))
+            if msl_new:
+                os.makedirs(lcd + "/msl", exist_ok=True); open(lcd + "/msl/k1.metal", "w").write("src")
+            os.makedirs(os.path.join(c.dir, "kk-archive"), exist_ok=True); open(os.path.join(c.dir, "kk-archive", "seg-%d" % len(log)), "w").write("s")
+            return 0
+        return runner
+
+    def test_prepfast_defaults_change_nothing(self):
+        c = self.ctx(); log = []
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))[0], 0)
+        for tag, words, _, _ in log:
+            for w in ("KK_MSL_COLLECT_ONLY", "KYTY_PREPARE_FLUSH_SYNC", "KK_PIPELINE_ARCHIVE_COMPACT", "KK_ARCHIVE_STAMP_EPOCH", "KK_LIBKEY_CONTENT", "KK_PIPELINE_ARCHIVE_PREFAULT"):
+                self.assertNotIn(w, words)
+        self.assertFalse(c.stable or c.incremental)
+        self.assertEqual(c.kk_id, COMMITS["kk"])
+
+    def test_stable_keys_ignore_the_kk_commit_and_set_the_kk_words(self):
+        a = self.ctx(commits=dict(COMMITS, kk="sha-A"))
+        b = self.ctx(commits=dict(COMMITS, kk="sha-B"))
+        self.assertNotEqual(a.key, b.key)                                    # gate off: a KK commit is a new cache
+        self.env["NPS5_PREPARE_STABLE_KEYS"] = "1"
+        a = self.ctx(commits=dict(COMMITS, kk="sha-A")); b = self.ctx(commits=dict(COMMITS, kk="sha-B"))
+        self.assertEqual(a.key, b.key)                                       # gate on: build-script-only / sha changes keep the cache
+        self.assertEqual(a.identity()["kk"], "epoch1")
+        k = dict(cache.cache_env("PPSA00001", "/c", "mid", environ=self.env))
+        self.assertEqual((k["KK_ARCHIVE_STAMP_EPOCH"], k["KK_LIBKEY_CONTENT"]), ("1", "1"))
+        self.assertNotIn("KK_LIBKEY_CONTENT", dict(cache.cache_env("PPSA00001", "/c", "mid", environ={})))
+        self.assertNotEqual(self.ctx(commits=dict(COMMITS, kyty="other")).key, a.key)    # the codegen inputs still count
+        epoch = os.path.join(self.tmp, "EPOCH")
+        open(epoch, "w").write("7\n"); self.assertEqual(cache.archive_epoch(epoch), 7)
+        open(epoch, "w").write("junk"); self.assertEqual(cache.archive_epoch(epoch), 1)
+        self.assertEqual(cache.archive_epoch(os.path.join(self.tmp, "none")), 1)
+
+    def test_fast_switch_turns_every_gate_on(self):
+        self.env["NPS5_PREPARE_FAST"] = "1"
+        for g in cache.PREPARE_GATES:
+            self.assertTrue(cache.gate(self.env, g), g)
+        self.assertFalse(cache.gate({}, "FLUSH_SYNC"))
+        k = dict(cache.cache_env("PPSA00001", "/c", "mid", environ=self.env))
+        self.assertEqual(k["KK_PIPELINE_ARCHIVE_PREFAULT"], "1")
+
+    def test_collect_only_pass_1_only_and_pass_2_keeps_the_archive(self):
+        c = self.ctx(); os.makedirs(c.dir); log = []
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        self.env["NPS5_PREPARE_COLLECT_ONLY"] = "1"
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))[0], 0)
+        self.assertEqual(len(log), 2)
+        self.assertIn("KK_MSL_COLLECT_ONLY=1", log[0][1]); self.assertNotIn("KK_MSL_COLLECT_ONLY", log[1][1])
+        self.assertTrue(log[1][2])                                           # pass 2 started with pass 1's archive in place
+        # without the gate the archive is thrown away between the passes (as before)
+        del self.env["NPS5_PREPARE_COLLECT_ONLY"]; log.clear()
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))[0], 0)
+        self.assertFalse(log[1][2])
+        # single pass / no builder: collect-only would compile nothing at all, so it is not applied
+        self.env["NPS5_PREPARE_COLLECT_ONLY"] = "1"; log.clear()
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm", "--single-pass"], self.prepfast_runner(c, log))[0], 0)
+        self.assertNotIn("KK_MSL_COLLECT_ONLY", log[0][1])
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = "/nonexistent/b.sh"; log.clear()
+        self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))[0], 0)
+        self.assertNotIn("KK_MSL_COLLECT_ONLY", log[0][1])
+
+    def test_flush_sync_and_compaction_words(self):
+        c = self.ctx(); log = []
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        self.env["NPS5_PREPARE_FLUSH_SYNC"] = "1"
+        self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))
+        self.assertTrue(all("KYTY_PREPARE_FLUSH_SYNC=1" in w for _, w, _, _ in log)); self.assertTrue(all("COMPACT" not in w for _, w, _, _ in log))
+        del self.env["NPS5_PREPARE_FLUSH_SYNC"]; self.env["NPS5_PREPARE_COMPACT"] = "1"; log.clear()
+        self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))
+        self.assertNotIn("KK_PIPELINE_ARCHIVE_COMPACT", log[0][1]); self.assertIn("KK_PIPELINE_ARCHIVE_COMPACT=1", log[1][1])   # the LAST pass compacts
+        self.assertIn("KYTY_PREPARE_FLUSH_SYNC=1", log[1][1])                 # ... and the sync flush is what writes it
+        # pass 1 was final (all libraries came from the store): an extra compaction pass runs
+        store = c.root + ".metallib-store"; os.makedirs(store); open(store + "/k1.metallib", "w").write("m"); log.clear()
+        self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log, msl_new=False))
+        self.assertEqual(len(log), 2); self.assertIn("KK_PIPELINE_ARCHIVE_COMPACT=1", log[1][1]); self.assertNotIn("COMPACT", log[0][1])
+
+    def test_incremental_key_ignores_the_list_and_reuses_the_dir(self):
+        self.env["NPS5_PREPARE_INCREMENTAL"] = "1"
+        a = self.ctx()
+        open(os.path.join(self.tmp, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"1 2 4 more\n")
+        b = self.ctx()
+        self.assertNotEqual(a.list_sha, b.list_sha); self.assertEqual(a.key, b.key); self.assertEqual(a.dir, b.dir); self.assertEqual(a.metal, b.metal)
+        del self.env["NPS5_PREPARE_INCREMENTAL"]
+        self.assertNotEqual(self.ctx().key, a.key)                              # gate off: the list is part of the key again
+        self.env["NPS5_PREPARE_INCREMENTAL"] = "1"
+        self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
+        c = a                                                                   # prepare list A (fresh), then list B into the same dir
+        open(os.path.join(self.tmp, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"1 2 3\n")
+        log = []
+        c = self.ctx(); self.assertEqual(self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(c, log))[0], 0)
+        self.assertEqual(cache.status(self.ctx())[0], "prepared")
+        open(os.path.join(c.dir, "marker"), "w").write("kept")
+        open(os.path.join(self.tmp, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"1 2 4 more\n")
+        st, lines = cache.status(self.ctx())
+        self.assertEqual(st, "stale"); self.assertIn("list changed", " ".join(lines))
+        log.clear()
+        rc, out, err = self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(self.ctx(), log, msl_new=False))
+        self.assertEqual(rc, 0, err); self.assertIn("incremental", out)
+        self.assertTrue(os.path.exists(os.path.join(c.dir, "marker")))        # the dir was not wiped
+        self.assertIn("KK_MSL_COLLECT_ONLY=1", log[0][1]); self.assertTrue(log[0][2] and log[0][3])   # archive and marker present when pass 1 started
+        self.assertEqual(cache.status(self.ctx())[0], "prepared")
+        kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv")); self.assertEqual(kv["list"], self.ctx().list_sha)
+        # a codegen change (Kyty commit) is a new key = a fresh dir, never an incremental one
+        d = self.ctx(commits=dict(COMMITS, kyty="other"))
+        self.assertNotEqual(d.dir, c.dir)
+        # a prepare that failed is not reused
+        open(os.path.join(c.dir, "prepared.tsv"), "w").write("key=%s\nrc=1\n" % c.key); log.clear()
+        self.run_main(["prepare", "PPSA00001", "--no-warm"], self.prepfast_runner(self.ctx(), log))
+        self.assertFalse(os.path.exists(os.path.join(c.dir, "marker")))
+
     def test_prepare_warm_starts_are_normal_starts_and_optional(self):
         c = self.ctx(); os.makedirs(c.dir)
         self.env["NPS5_KK_LIBCACHE_BUILD"] = os.path.abspath(__file__)
