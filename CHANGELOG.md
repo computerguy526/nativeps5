@@ -3,7 +3,7 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.3.0 (unreleased; version number proposed, not decided)
+## v1.3.0 (2026-11-24)
 
 One line for every title. The development branches that ran SAROS (`PPSA07631`, Unreal Engine 5.5) are now part of the release line, so
 Astro Bot, God of War Sons of Sparta and SAROS build from the same four repositories and the same KosmicKrisp. Everything in the v1.2.5
@@ -27,7 +27,9 @@ program cache and the pipeline cache of every title get a new key); run `nps5 ca
   upscaler slot; `KYTY_METALFX_PASS=<hash>:blit` uses MetalFX spatial at a full-screen upscale draw. Off by default.
 - **Astro Bot: flower jitter fixed (physics).** The world step is clamped instead of split, and the per-object dt clamp covers plants, springs,
   ropes and soft bodies. On by default for `PPSA21564` (profile `env`: `NPS5_PHYS_SUBSTEP_WORLD_CLAMP=1`, `NPS5_PHYS_DTCLAMP_OBJ=all`); the code
-  stays off for every other title.
+  stays off for every other title. The clamp table (`profiles/funcrepl/PPSA21564-physsub.json` in `nativeps5-recomp`) wraps six verified
+  physics functions (BigLeafPlant, SpringBone, ApRope, ApRopeB, ApSoftBody, ApSoftBodyBall) and a test keeps table and runtime slots in step;
+  programs must be translated again (`nps5 build`) to get it.
 - **gamepack: pack a title to save disk space.** `scripts/gamepack.py` packs a title's large files; packed titles are detected automatically
   by the runtime (`NPS5_VFS_SEGFILES=0` forces it off). See the README, "Save disk space: pack a title".
 - **SAROS profile completed.** `profiles/PPSA07631.json` now sets `KYTY_SAROS_HANDSHADERS`, `KYTY_SAROS_NANITE_RAW` and `KYTY_BUNDLE_COMPACT` (the test
@@ -49,7 +51,14 @@ program cache and the pipeline cache of every title get a new key); run `nps5 ca
 - Diagnostics (all off by default): compute and draw probes, bind logs, raw target and BC dumps, the guest-write journal, the input
   profile capture, `NPS5_CRASH_REGDUMP`, `NPS5_TRACE_JOIN`, `NPS5_VFS_RANGELOG`, `NPS5_VFS_HOLE_CHECK`.
 
-## v1.2.5 (unreleased)
+**Known issues**
+- A fully cold shader cache can crash inside Apple's Metal compiler service while thousands of pipelines build at once (ASTRO BOT, seen at
+  about 30 s and 140 s on a fresh cache). Relaunch the title; it was not seen with a warm cache.
+- SAROS is experimental and slow (about 19 fps), and stutters while a cold shader cache fills.
+- Cronos: The New Dawn (`PPSA24096`) is in bring-up and not supported.
+- No online features, no trophies.
+
+## v1.2.5 (not released; part of v1.3.0)
 
 Everything in v1.2.4. Small, switched-off-by-default additions for Unreal Engine 5 titles (SAROS, `PPSA07631`, still experimental), one
 Astro Bot crash fix and one display-buffer fix. **Update:** `nativeps5-recomp`, `nativeps5-kyty` and `nativeps5-anyps5` move to the new tags (see
