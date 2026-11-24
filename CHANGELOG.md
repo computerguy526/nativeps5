@@ -3,6 +3,35 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.2.4 (release candidate, not tagged)
+
+Everything in v1.2.3.1. More Metal shader rows for Astro Bot (the skinned-vertex "bone" shaders and two foliage pairs) and a first
+bring-up of a second kind of title: God of War Sons of Sparta (`PPSA28997`, a Unity IL2CPP player). **Update:** `nativeps5-recomp` and
+`nativeps5-kyty` move to `v1.2.4` (anyps5 stays at `v1.1.1`): pull, check out `v1.2.4` in `../ps5recomp` and `../kyty`, rebuild the recompiler
+(`scripts/build.sh recomp`) and Kyty (`scripts/build.sh kyty`), then run `nps5 cache prepare PPSA21564` once (new Metal rows). Astro Bot
+needs no new translation: the recompiler changes are switched on only by the Unity profile, and Astro Bot's output is unchanged without it.
+
+- **More Metal rows (Astro Bot, `PPSA21564`).** The graphics list grows from 395 to 455 rows (64 added, 4 replaced by faster ones), every
+  row regenerated text-exact by `kyty_msl_dump` of the v1.2.4 Kyty (`nps5 cache metal --reproduce`: 528 of 528 over both lists: shared `*`
+  36 graphics pairs + 69 kernels, M4 family `g16` 176 graphics + 2 kernels, M5 family `g17` 44, M6 family `g18` 199 + 2 kernels). New by group:
+  17 skinned-vertex ("bone") rows for `g17` (5) and `g18` (12) with the emitter modes `fix6+vsperf` (+`lsel`); 4 `g18` rows replaced by the
+  faster `fix6+vsperf` mode (B/A 0.93 -> 0.86-0.88); 19 `g16` bone rows within the approved edge-word rule (at most 32 differing words
+  per large render target; vertex outputs within 1e-3); 8 + 14 `g16` exact bone rows; 2 `g16` foliage forward rows (`fix6+lsel`). A row is
+  listed only where the text was verified and timed faster at least twice (cloud M6 for `g18`, M5 Pro for `g17`, laptop M4 Pro for `g16`);
+  the per-shader B/A (microbenchmark) of the new rows is 0.66-0.99, median about 0.9 (one edge-word row has no recorded B/A, 0.000; its two M4 runs measured its vertex stage 167 -> 92 us). These are per-shader timings, not a frame-rate promise.
+- **God of War Sons of Sparta (`PPSA28997`, experimental).** With `nativeps5-recomp` v1.2.4 and Kyty v1.2.4 the title boots, plays the intro
+  (press Cross to skip it), reaches the title menu, a new game and the first level (the Cyclops fight); 5-minute scripted runs on an M5 Pro were
+  clean at about 90 fps uncapped. Everything the Unity player needed is behind the new engine profile `profiles/engines/unity-ps5.json`
+  (`"base": "unity-ps5"` in `profiles/PPSA28997.json`), so other titles are unaffected: reservation-aware `VirtualQuery`, a PRX entry
+  that gets `(argc, argv, NULL)`, `_umtx_op` WAIT/WAKE, real thread stack bounds for the garbage collector, the PS5 `AvPlayer` stream-info,
+  seek and looping-back warning, offline `sce::Np::CppWebApi`/save-data/audio-context answers, a socket-option map for FMOD, and a
+  fault-livelock verdict for Unity's graphics worker. Kyty gains 37 graphics NIDs in its route table (indexes 101-137; 0-100 are
+  unchanged). Known: without a button press the Mega Cat Studios logo holds (Cross skips it); the first seconds of a start show
+  1-1.5 s load hitches (guest-side asset loading); audio and a real-controller session are not verified; no shader cache is shipped.
+- **Profiles can build on an engine profile** (`"base": "<name>"`, `profiles/engines/<name>.json`): the title's keys win, env maps merge.
+- Quieter: the per-lookup unwind log line of `sceKernelGetModuleInfoForUnwind` is opt-in (`NPS5_UNWIND_LOG=1`).
+- Tests: `avloop_unit` tolerates two passes in flight on a loaded host (it failed one run in three under load).
+
 ## v1.2.3.1 (hotfix, 2026-11-23)
 
 Only `nativeps5-kyty` changes (`v1.2.3` to `v1.2.3.1`); `nativeps5-recomp` stays at `v1.2.3` and anyps5 at `v1.1.1`. Fixes a rare crash at

@@ -31,6 +31,7 @@ Each game's note records the tested version and Mac, frame rates, settings and k
 | Game | Title ID | Version | Status |
 |---|---|---|---|
 | [ASTRO BOT](games/PPSA21564/README.md) | `PPSA21564` | 01.007 | Boots; the title screen, the world map and every level tried show a picture, and the controller works. v1.0.3 (MetalFX 720p default): about 30 fps on the world map and 38 fps at the crash site on an M4 Pro; v1.0 at native 1080p: 20-26 fps on the world map and early levels, 12-16 fps in the heaviest levels. Early preview: see [Status and limitations](#status-and-limitations). |
+| God of War Sons of Sparta | `PPSA28997` | 01.008 | Bring-up (Unity IL2CPP player, `nativeps5-recomp` v1.2.4, Kyty back end): boots, plays the intro (press Cross to skip it), the title menu, a new game and the first level (the Cyclops fight) in 5-minute scripted runs on an M5 Pro. Audio and a real-controller session are not verified. Experimental; no game profile folder yet. See the v1.2.4 entry of [CHANGELOG.md](CHANGELOG.md). |
 | [A Game About Digging A Hole](games/PPSA30552/README.md) | `PPSA30552` | not recorded | Second bring-up target, on the AnyPS5 back end; boots, and the menu, intro cutscene and gameplay run. Not finished; see its note. |
 
 Frame rates are below the console's in most scenes. A 16 GB Mac will not run an ASTRO BOT level. [games/README.md](games/README.md) explains the per-game profiles.
@@ -159,7 +160,7 @@ at 60 fps for 30-50 s while a level streamed in: the game then ran at about half
 same Sky Garden route. The `[framerate]` line every 5 s shows the estimate and why it is frozen
 (`frozen -|video|phase|vfs[ streaming]`).
 
-### Options on by default (v1.1.2 - v1.2.3)
+### Options on by default (v1.1.2 - v1.2.4)
 
 The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an off switch: pass it with
 `nps5 run --env NAME=VALUE` or put it on the `ENV=` line of `titles/<id>.env` (both win over the profile).
@@ -202,8 +203,8 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   `NPS5_FONT_LAYOUT=hhea`.
 - **Command-processor lead bound** (v1.2.1, `KYTY_CP_LEAD_MAX_MS=16`): Kyty's command processor runs at most 16 ms ahead
   of the GPU (the wait is bounded and never fatal). Off: `KYTY_CP_LEAD_MAX_MS=0`.
-- **Faster Metal shaders per GPU class** (v1.2.1 - v1.2.3): the Metal lists carry rows for M4-family (`g16`, 133 graphics rows
-  incl. 5 mesh pipelines + 2 kernels), M5-family (`g17`, 39 incl. 2 mesh) and M6-family (`g18`, 187 incl. 2 mesh + 2 kernels) GPUs,
+- **Faster Metal shaders per GPU class** (v1.2.1 - v1.2.4): the Metal lists carry rows for M4-family (`g16`, 176 graphics rows
+  incl. 5 mesh pipelines + 2 kernels), M5-family (`g17`, 44 incl. 2 mesh) and M6-family (`g18`, 199 incl. 2 mesh + 2 kernels) GPUs,
   used only on that class; other Macs keep the shared rows (36 graphics pairs + 69 kernels). Mesh rows (v1.2.3) need KosmicKrisp
   patches 0029/0030; `nps5` sets `KK_MSL_OVERRIDE_MESH=1` only when a mesh row was generated (`NPS5_MESH_ROWS=0` = skip them). Since v1.2.2 the rows match on every macOS and GPU (canonical KosmicKrisp keys, KosmicKrisp patch 0027;
   `NPS5_METAL_CANON=0` = off). `NPS5_METAL_SHADERS=0` turns all of our shaders off.
