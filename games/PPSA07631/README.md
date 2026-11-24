@@ -1,21 +1,19 @@
 # SAROS (`PPSA07631`)
 
 Game note. No game data is here and none is accepted; you need your own dump ([CONTRIBUTING.md](../../CONTRIBUTING.md)).
-Experimental: SAROS is supported from v1.3.0, on the same release line as ASTRO BOT.
+**Status for v1.3.x: not playable.** With the SAROS hand shaders (`KYTY_SAROS_HANDSHADERS`, `KYTY_SAROS_NANITE_RAW`, `KYTY_BUNDLE_COMPACT`) on, the title stalls at about 1 fps; with them off the background is missing. No switch combination on the v1.3.0 Kyty gives a correct picture at a playable frame rate. Support is coming in v1.4. The rest of this note describes the bring-up configuration and is kept as the starting point for v1.4; do not expect a playable game from it on v1.3.x.
 
 - **Version:** 01.005.002 (SDK 11.00), eboot Build ID `6d383b3837ff06b8`.
 - **Engine and graphics:** Unreal Engine 5.5 line (Nanite, Lumen, virtual shadow maps, TSR, MegaLights and Substrate present); AGC; the
   title outputs 3840x2160 from a scene rendered at about 720p.
 - **Back end:** `kyty` (KytyPS5's renderer on KosmicKrisp), with the KosmicKrisp patches 0031-0040 (64-bit image and buffer atomics,
   the switch tree, the residency lock).
-- **Status as of 2026-11-24** on an M5 Pro, 24 GB, macOS 27 (and the M4 Pro line it is built from): boots, plays intro and gameplay with a
-  controller. Frame time on the release line, gameplay window 80-145 s, 720p scene (`r.ScreenPercentage=33.34`): p50 51.4 ms, p99 59.4 ms
-  (about 19 fps), footprint 15-16 GB. It is slower than the console; do not expect a smooth 30. A 16 GB Mac cannot run it. Not tested on
-  the M4 Pro with the release line yet.
+- **Status (v1.3.x):** not playable (see the top of this note). Earlier development builds booted, played the intro and gameplay with a controller at
+  about 19 fps at a 720p scene on an M5 Pro with a 15-16 GB footprint; the v1.3.0 release line does not reproduce that. A 16 GB Mac cannot run it.
 - **Profile files:** [game.tsv](game.tsv). The title's runtime switches live in the translator profile `profiles/PPSA07631.json` of
   `nativeps5-recomp` (they are baked into the translated program). No `patches.py`, no pipeline list (see "Shader cache").
 
-## Set it up
+## Set it up (bring-up only: not playable on v1.3.x; this recipe is for v1.4)
 
 1. **Pack the dump first** (79 GB instead of 153 GB; the largest `.ucas` is 64 GB and APFS cannot compress a file over 2 GiB by
    itself): [disk-space](../../docs/reference/disk-space.md). The runtime reads the packed copy with no setting
@@ -83,6 +81,8 @@ cache compression: [disk-space](../../docs/reference/disk-space.md).
 - The first minutes of a cold cache stutter (several runs warm it; keep using the same cache folder).
 - The engine path that indexes past a direct-memory base occasionally aborts early in a run (a guest data abort at engine init, seen
   a few times on development builds, not reproduced on demand). Run again.
+- A rare crash at startup in the game's own static initialisation (`fn_64ed360`, a null-guard fault in its logging setup; also seen on builds
+  before v1.3.0, trigger unknown). Relaunch: it does not repeat on the next start.
 - The clay-like flat look of the main character (empty streaming-virtual-texture page table) is fixed by `KYTY_PS_UINT32_TARGETS=1`,
   which the profile sets; if the character is flat grey the switch is not reaching the game.
 - Frame dump and probe tools exist for development only and are off.
