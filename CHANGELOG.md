@@ -25,6 +25,11 @@ program cache and the pipeline cache of every title get a new key); run `nps5 ca
   the `PPSA07631` profile).
 - **MetalFX for Unreal titles (opt-in, experimental).** `KYTY_METALFX_UE=log|fsr3` places MetalFX temporal in the engine's third-party
   upscaler slot; `KYTY_METALFX_PASS=<hash>:blit` uses MetalFX spatial at a full-screen upscale draw. Off by default.
+- **Astro Bot: flower jitter fixed (physics).** The world step is clamped instead of split, and the per-object dt clamp covers plants, springs,
+  ropes and soft bodies. On by default for `PPSA21564` (profile `env`: `NPS5_PHYS_SUBSTEP_WORLD_CLAMP=1`, `NPS5_PHYS_DTCLAMP_OBJ=all`); the code
+  stays off for every other title.
+- **gamepack: pack a title to save disk space.** `scripts/gamepack.py` packs a title's large files; packed titles are detected automatically
+  by the runtime (`NPS5_VFS_SEGFILES=0` forces it off). See the README, "Save disk space: pack a title".
 - **AnyPS5: upstream fixes** (13 shader-recompiler fixes for the legacy AnyPS5 GPU path, and the macOS libc arena hint placement, which
   every title uses). The AnyPS5-path pipeline journal is rebuilt once.
 - Diagnostics (all off by default): compute and draw probes, bind logs, raw target and BC dumps, the guest-write journal, the input
