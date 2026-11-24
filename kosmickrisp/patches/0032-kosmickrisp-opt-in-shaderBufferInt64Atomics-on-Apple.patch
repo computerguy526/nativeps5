@@ -1,0 +1,164 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 03:43:35 +0000
+Subject: [PATCH] kosmickrisp: opt-in shaderBufferInt64Atomics on Apple9+
+ (NPS5_KK_BUFFER_INT64=1), exact forms only
+
+nps5 int64img. Metal has one 64-bit device-memory RMW: result-less atomic_max/atomic_min on
+atomic_ulong (MSL 2.4+, Apple9). nir_to_msl emits it for 64-bit global umax/umin with an unused
+result, an aligned 64-bit store for an exchange with an unused result and an aligned 64-bit load
+for add/or/xor of a constant 0 (iand of ~0). Every other 64-bit buffer atomic (add/and/or/xor
+with data, cmpswap, any used RMW result) prints 'KosmicKrisp: unsupported 64-bit buffer atomic'
+and fails the compile. No lock emulation (docs/nps5-atomics64.md section 4: hangs, torn words).
+shaderSharedInt64Atomics stays false. Without the env var nothing changes (same pinned
+pipelineCacheUUID). Test: work/int64img/vktest/vkbufatom.c.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/nir_to_msl.c       | 57 +++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_physical_device.c | 23 ++++++++-
+ src/kosmickrisp/vulkan/kk_physical_device.h |  1 +
+ 3 files changed, 80 insertions(+), 1 deletion(-)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index bb12b9d..fdecde3 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -1024,6 +1024,53 @@ atomic_op_to_msl(nir_atomic_op op)
+    }
+ }
+ 
++/* nps5 int64img: 64-bit device-memory atomics (shaderBufferInt64Atomics,
++ * opt-in). The caller already printed "tN = ". Exact forms only:
++ *  - umax/umin, result unused: Metal's atomic_max/atomic_min on atomic_ulong
++ *    (MSL 2.4+, Apple9);
++ *  - exchange, result unused: one aligned 64-bit store (single-copy atomic on
++ *    Apple GPUs, AnyPS5 mesa/tests/atomics);
++ *  - iadd/ior/ixor of a constant 0, iand of ~0: the memory is unchanged and the
++ *    result is the old value: one aligned 64-bit load.
++ * Anything else prints an error and fails the compile (no lock emulation:
++ * docs/nps5-atomics64.md section 4). */
++static void
++global_atomic64_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
++{
++   nir_atomic_op aop = nir_intrinsic_atomic_op(instr);
++   bool unused = nir_def_is_unused(&instr->def);
++   bool is_const = nir_src_is_const(instr->src[1]);
++   uint64_t c = is_const ? nir_src_as_uint(instr->src[1]) : 1;
++   if ((aop == nir_atomic_op_umax || aop == nir_atomic_op_umin) && unused) {
++      P(ctx, "0ul; %s_explicit((device atomic_ulong*)",
++        aop == nir_atomic_op_umax ? "atomic_max" : "atomic_min");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, ", ");
++      src_to_msl(ctx, &instr->src[1]);
++      P(ctx, ", memory_order_relaxed);\n");
++   } else if (aop == nir_atomic_op_xchg && unused) {
++      P(ctx, "0ul; *(volatile device ulong*)");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, " = ");
++      src_to_msl(ctx, &instr->src[1]);
++      P(ctx, ";\n");
++   } else if (is_const && ((c == 0 && (aop == nir_atomic_op_iadd ||
++                                       aop == nir_atomic_op_ior ||
++                                       aop == nir_atomic_op_ixor)) ||
++                           (c == UINT64_MAX && aop == nir_atomic_op_iand))) {
++      P(ctx, "*(volatile device ulong*)");
++      src_to_msl(ctx, &instr->src[0]);
++      P(ctx, ";\n");
++   } else {
++      fprintf(stderr, "KosmicKrisp: unsupported 64-bit buffer atomic (op %d, "
++                      "result %s, operand %s): Metal has only result-less "
++                      "unsigned 64-bit min/max\n",
++              (int)aop, unused ? "unused" : "used",
++              is_const ? "constant" : "variable");
++      P(ctx, "0ul; static_assert(false, \"unsupported 64-bit buffer atomic\");\n");
++   }
++}
++
+ static void
+ atomic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr,
+               const char *scope, bool shared)
+@@ -1503,9 +1550,19 @@ intrinsic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+       break;
+    }
+    case nir_intrinsic_global_atomic:
++      if (instr->def.bit_size == 64) {
++         global_atomic64_to_msl(ctx, instr);
++         break;
++      }
+       atomic_to_msl(ctx, instr, "device", false);
+       break;
+    case nir_intrinsic_global_atomic_swap:
++      if (instr->def.bit_size == 64) {
++         fprintf(stderr, "KosmicKrisp: unsupported 64-bit buffer atomic "
++                         "(compare-exchange): Metal has no 64-bit CAS\n");
++         P(ctx, "0ul; static_assert(false, \"unsupported 64-bit buffer atomic\");\n");
++         break;
++      }
+       atomic_swap_to_msl(ctx, instr, "device", false);
+       break;
+    case nir_intrinsic_shared_atomic:
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 9f9c154..927ae7b 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -56,6 +56,23 @@ kk_image_int64_atomics_supported(const struct kk_device_info *info)
+    return env && info->gpu_apple_family >= 9;
+ }
+ 
++/* nps5 int64img: shaderBufferInt64Atomics on Apple9+ for the one 64-bit buffer
++ * RMW Metal has (result-less atomic_max/atomic_min on device atomic_ulong), plus
++ * the two exact non-RMW forms (exchange with an unused result = aligned 64-bit
++ * store, add/or/xor of zero = aligned 64-bit load). Everything else fails the
++ * MSL compile loudly. Opt-in with NPS5_KK_BUFFER_INT64=1. Shared (threadgroup)
++ * 64-bit atomics stay unsupported. */
++bool
++kk_buffer_int64_atomics_supported(const struct kk_device_info *info)
++{
++   static int env = -1;
++   if (env < 0) {
++      const char *v = getenv("NPS5_KK_BUFFER_INT64");
++      env = v != NULL && v[0] == '1';
++   }
++   return env && info->gpu_apple_family >= 9;
++}
++
+ static void
+ kk_get_device_extensions(const struct kk_instance *instance,
+                          const struct kk_physical_device *pdev,
+@@ -93,7 +110,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
+       .KHR_imageless_framebuffer = true,
+       .KHR_sampler_mirror_clamp_to_edge = true,
+       .KHR_separate_depth_stencil_layouts = true,
+-      .KHR_shader_atomic_int64 = false,
++      .KHR_shader_atomic_int64 = kk_buffer_int64_atomics_supported(&pdev->info),
+       .KHR_shader_float_controls = true,
+       .KHR_shader_float16_int8 = true,
+       .KHR_shader_subgroup_extended_types = true,
+@@ -546,6 +563,10 @@ kk_get_device_features(
+       .shaderImageInt64Atomics = kk_image_int64_atomics_supported(info),
+       .sparseImageInt64Atomics = false,
+ 
++      /* VK_KHR_shader_atomic_int64 (nps5 int64img, opt-in, see above) */
++      .shaderBufferInt64Atomics = kk_buffer_int64_atomics_supported(info),
++      .shaderSharedInt64Atomics = false,
++
+       /* VK_EXT_shader_atomic_float */
+       .shaderBufferFloat32Atomics = true,
+       .shaderBufferFloat32AtomicAdd = true,
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.h b/src/kosmickrisp/vulkan/kk_physical_device.h
+index f7f58ab..d0f6605 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.h
++++ b/src/kosmickrisp/vulkan/kk_physical_device.h
+@@ -112,6 +112,7 @@ VkResult kk_enumerate_physical_devices(struct vk_instance *_instance);
+ void kk_physical_device_destroy(struct vk_physical_device *vk_device);
+ 
+ bool kk_image_int64_atomics_supported(const struct kk_device_info *info);
++bool kk_buffer_int64_atomics_supported(const struct kk_device_info *info);
+ 
+ static inline bool
+ kk_gpu_supports_depth_bounds(const struct kk_device_info *info)
+-- 
+2.56.0
+

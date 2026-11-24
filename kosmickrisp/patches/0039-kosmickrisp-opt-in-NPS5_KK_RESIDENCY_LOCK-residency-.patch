@@ -1,0 +1,220 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 12:47:43 +0000
+Subject: [PATCH] kosmickrisp: opt-in NPS5_KK_RESIDENCY_LOCK (residency-set
+ lock across the queue commit) and NPS5_KK_RESIDENCY_AUDIT (attachment
+ residency classes) (nps5 devlost)
+
+Metal API validation in SAROS dlB: 'residency sets do not support concurrent
+write operations' at queue commit (the set is added to/committed on other
+threads under its mutex, the queue commit reads it without) and 30898x
+'Attachment texture ... is not added to any residency set'. Both default off.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_residency_set.h    |  6 ++
+ src/kosmickrisp/bridge/mtl_residency_set.m    | 40 +++++++++++++
+ .../bridge/stubs/mtl_residency_set.c          |  8 +++
+ src/kosmickrisp/vulkan/kk_cmd_draw.c          | 56 +++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_queue.c             | 14 +++++
+ 5 files changed, 124 insertions(+)
+
+diff --git a/src/kosmickrisp/bridge/mtl_residency_set.h b/src/kosmickrisp/bridge/mtl_residency_set.h
+index 8e9daa5..979e66c 100644
+--- a/src/kosmickrisp/bridge/mtl_residency_set.h
++++ b/src/kosmickrisp/bridge/mtl_residency_set.h
+@@ -21,4 +21,10 @@ void mtl_residency_set_end_residency(mtl_residency_set *residency_set);
+ uint64_t mtl_residency_set_allocated_size(mtl_residency_set *residency_set);
+ uint64_t mtl_residency_set_allocation_count(mtl_residency_set *residency_set);
+ 
++/* nps5 devlost (NPS5_KK_RESIDENCY_AUDIT): how `texture` (a view is followed to its parent)
++ * is covered by `set`. Returns 0 heap in the set, 1 heap NOT in the set, 2 buffer in the set,
++ * 3 buffer NOT in the set, 4 no heap and no buffer (a drawable or device texture). Writes a
++ * one-line description into out. Diagnostic only. */
++int mtl_texture_residency_audit(void *texture, mtl_residency_set *set, char *out, unsigned cap);
++
+ #endif /* MTL_RESIDENCY_SET_H */
+\ No newline at end of file
+diff --git a/src/kosmickrisp/bridge/mtl_residency_set.m b/src/kosmickrisp/bridge/mtl_residency_set.m
+index 185c615..90e88e1 100644
+--- a/src/kosmickrisp/bridge/mtl_residency_set.m
++++ b/src/kosmickrisp/bridge/mtl_residency_set.m
+@@ -94,3 +94,43 @@ mtl_residency_set_allocation_count(mtl_residency_set *residency_set)
+       return set.allocationCount;
+    }
+ }
++
++int
++mtl_texture_residency_audit(void *texture, mtl_residency_set *residency_set, char *out, unsigned cap)
++{
++   @autoreleasepool {
++      id<MTLTexture> t = (id<MTLTexture>)texture;
++      id<MTLResidencySet> set = (id<MTLResidencySet>)residency_set;
++      if (!t) {
++         snprintf(out, cap, "null texture");
++         return 4;
++      }
++      unsigned depth = 0;
++      id<MTLTexture> root = t;
++      while (root.parentTexture && depth < 8) {
++         root = root.parentTexture;
++         depth++;
++      }
++      int cls;
++      const char *what;
++      if (root.heap) {
++         cls = [set containsAllocation:root.heap] ? 0 : 1;
++         what = "heap";
++      } else if (root.buffer) {
++         cls = [set containsAllocation:root.buffer] ? 2 : 3;
++         what = "buffer";
++      } else {
++         cls = 4;
++         what = "none";
++      }
++      snprintf(out, cap,
++               "tex %p root %p (view depth %u) %lux%lu fmt %lu type %lu usage 0x%lx storage %lu backing %s%s, "
++               "view heap %s, framebufferOnly %d",
++               (void *)t, (void *)root, depth, (unsigned long)root.width, (unsigned long)root.height,
++               (unsigned long)root.pixelFormat, (unsigned long)root.textureType, (unsigned long)root.usage,
++               (unsigned long)root.storageMode, what,
++               cls == 0 || cls == 2 ? " (in set)" : (cls == 4 ? "" : " (NOT in set)"),
++               t.heap ? "yes" : "no", (int)root.framebufferOnly);
++      return cls;
++   }
++}
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_residency_set.c b/src/kosmickrisp/bridge/stubs/mtl_residency_set.c
+index 20fd9ae..fff31bf 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_residency_set.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_residency_set.c
+@@ -50,3 +50,11 @@ mtl_residency_set_allocation_count(mtl_residency_set *residency_set)
+ {
+    return 0u;
+ }
++
++int
++mtl_texture_residency_audit(void *texture, mtl_residency_set *set, char *out, unsigned cap)
++{
++   if (cap)
++      out[0] = 0;
++   return 0;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 0f0150d..fd5e8a6 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -18,6 +18,9 @@ void kk_prof_render(void *cmd, uint32_t w, uint32_t h, uint32_t cfmt, uint32_t n
+ #include "kk_image_view.h"
+ #include "kk_physical_device.h"
+ #include "kk_query_pool.h"
++#include "kk_device.h"
++#include "util/simple_mtx.h"
++#include "util/u_debug.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ #include "kosmickrisp/bridge/vk_to_mtl_map.h"
+@@ -120,6 +123,58 @@ kk_clear_common_attachment_description(
+    mtl_render_pass_attachment_descriptor_set_resolve_texture(descriptor, NULL);
+ }
+ 
++/* nps5 devlost: NPS5_KK_RESIDENCY_AUDIT=1 classifies each render-pass attachment texture by how
++ * the device residency set covers it (Metal API validation in SAROS dlB: 30898x "Attachment
++ * texture ... is not added to any residency set"). Prints the first 32 distinct uncovered textures
++ * and the first 4 covered ones, plus a class count every 4096 attachments. Diagnostic only. */
++static void
++kk_residency_audit_attachment(const struct kk_image_view *iview, void *tex)
++{
++   static int on = -1;
++   if (on < 0)
++      on = debug_get_bool_option("NPS5_KK_RESIDENCY_AUDIT", false);
++   if (!on || !tex)
++      return;
++   struct kk_device *dev = container_of(iview->vk.base.device, struct kk_device, vk);
++   static simple_mtx_t lock = SIMPLE_MTX_INITIALIZER;
++   static void *seen[64];
++   static unsigned n_seen, n_ok_shown;
++   static uint64_t counts[5], total;
++   char desc[384];
++   simple_mtx_lock(&dev->residency_set.mutex);
++   int cls = mtl_texture_residency_audit(tex, dev->residency_set.handle, desc, sizeof(desc));
++   simple_mtx_unlock(&dev->residency_set.mutex);
++   simple_mtx_lock(&lock);
++   counts[cls < 0 || cls > 4 ? 4 : cls]++;
++   total++;
++   bool show = false;
++   if (cls != 0 && cls != 2) {
++      bool known = false;
++      for (unsigned i = 0; i < n_seen; i++)
++         known |= seen[i] == tex;
++      if (!known && n_seen < 32) {
++         seen[n_seen++] = tex;
++         show = true;
++      }
++   } else if (n_ok_shown < 4) {
++      n_ok_shown++;
++      show = true;
++   }
++   bool summary = (total & 4095) == 0;
++   uint64_t c0 = counts[0], c1 = counts[1], c2 = counts[2], c3 = counts[3], c4 = counts[4], tt = total;
++   simple_mtx_unlock(&lock);
++   if (show)
++      fprintf(stderr, "[kk-resaudit] class %d: image %ux%u vkfmt %u mips %u layers %u usage 0x%llx: %s\n", cls,
++              iview->vk.image->extent.width, iview->vk.image->extent.height, iview->vk.image->format,
++              iview->vk.image->mip_levels, iview->vk.image->array_layers, (unsigned long long)iview->vk.image->usage, desc);
++   if (summary)
++      fprintf(stderr,
++              "[kk-resaudit] %llu attachments: heap in set %llu, heap NOT in set %llu, buffer in set %llu, buffer NOT "
++              "in set %llu, no backing %llu\n",
++              (unsigned long long)tt, (unsigned long long)c0, (unsigned long long)c1, (unsigned long long)c2,
++              (unsigned long long)c3, (unsigned long long)c4);
++}
++
+ static void
+ kk_fill_common_attachment_description(
+    mtl_render_pass_attachment_descriptor *descriptor,
+@@ -131,6 +186,7 @@ kk_fill_common_attachment_description(
+           1); /* TODO_KOSMICKRISP Handle multiplanar images? */
+    mtl_render_pass_attachment_descriptor_set_texture(
+       descriptor, iview->planes[0].mtl_handle_render);
++   kk_residency_audit_attachment(iview, iview->planes[0].mtl_handle_render);
+    /* If a view is being used e.g. for format change, it already points to the
+     * required slice and level */
+    if (!iview->planes[0].render_is_view) {
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index 84fdd3a..a5b6f82 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -13,6 +13,8 @@
+ #include "kk_entrypoints.h"
+ #include "kk_physical_device.h"
+ #include "kk_sync.h"
++#include "util/simple_mtx.h"
++#include "util/u_debug.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ #include "kosmickrisp/bridge/vk_to_mtl_map.h"
+@@ -325,8 +327,20 @@ kk_queue_commit(struct kk_queue *queue, struct kk_cmd_buffer *cmd,
+    }
+    mtl_commit_options_add_feedback_handler(options, callback, user_data);
+ 
++   /* nps5 devlost: NPS5_KK_RESIDENCY_LOCK=1 holds the device residency-set lock across the Metal
++    * queue commit, so no add/remove/commit of the set (BO create/destroy on another thread) can
++    * overlap the commit reading it. Metal API validation in SAROS dlB: "residency sets do not
++    * support concurrent write operations" at queue commit. Default off. */
++   static int res_lock = -1;
++   if (res_lock < 0)
++      res_lock = debug_get_bool_option("NPS5_KK_RESIDENCY_LOCK", false);
++   struct kk_device *rdev = kk_queue_device(queue);
++   if (res_lock)
++      simple_mtx_lock(&rdev->residency_set.mutex);
+    mtl_command_queue_commit(queue->mtl_handle, &cmd->metal.cmd_buf, 1u,
+                             options);
++   if (res_lock)
++      simple_mtx_unlock(&rdev->residency_set.mutex);
+    mtl_release(options);
+ }
+ 
+-- 
+2.56.0
+

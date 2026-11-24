@@ -1,0 +1,208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 01:45:12 +0000
+Subject: [PATCH] kosmickrisp: opt-in VK_EXT_shader_image_atomic_int64 on
+ Apple9+ (NPS5_KK_IMAGE_INT64=1)
+
+nps5 int64img. UE5 Nanite (PPSA07631 SAROS) rasterises its visibility buffer with
+result-less 64-bit InterlockedMax on an R64 storage image. Metal (MSL 3.1, Apple9+)
+has exactly that: texture<ulong>::atomic_max/atomic_min (void) on an RG32Uint
+texture with MTLTextureUsageShaderAtomic.
+
+- shaderImageInt64Atomics / EXT_shader_image_atomic_int64 only with
+  NPS5_KK_IMAGE_INT64=1 on Apple family >= 9 (partial: other 64-bit image
+  atomics and used results are not representable in Metal).
+- R64_UINT format entry: storage + atomic view of an RG32Uint texture (family 9,
+  reported only with the opt-in).
+- RG32 UINT/SINT mutable storage images (and R64) get SHADER_ATOMIC usage only on
+  devices created with shaderImageInt64Atomics.
+- nir_to_msl: texture<ulong>; 64-bit umax/umin with an unused result emit the
+  void atomic_max/atomic_min; anything else prints an error and fails the MSL
+  compile.
+
+Without the env var nothing changes (features, formats, usage, MSL), so the
+pinned LC_UUID / MESA_GIT_SHA1 keep ASTRO's caches warm.
+Test: work/int64img/vktest (random max/min sequences vs CPU reference).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/nir_to_msl.c       | 26 +++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_format.c          | 10 ++++++++
+ src/kosmickrisp/vulkan/kk_image.c           |  5 ++++
+ src/kosmickrisp/vulkan/kk_image_layout.c    | 10 ++++++++
+ src/kosmickrisp/vulkan/kk_physical_device.c | 21 +++++++++++++++++
+ src/kosmickrisp/vulkan/kk_physical_device.h |  2 ++
+ 6 files changed, 74 insertions(+)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 3000ad9..bb12b9d 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -778,6 +778,8 @@ tex_type_name(nir_alu_type ty)
+       return "ushort";
+    case nir_type_uint32:
+       return "uint";
++   case nir_type_uint64: /* nps5 int64img: texture<ulong> (64-bit image atomics) */
++      return "ulong";
+    case nir_type_float16:
+       return "half";
+    case nir_type_float32:
+@@ -1730,6 +1732,30 @@ intrinsic_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+       P(ctx, ");\n");
+       break;
+    case nir_intrinsic_bindless_image_atomic:
++      if (instr->def.bit_size == 64) {
++         /* nps5 int64img: Metal's only 64-bit texture atomics are the
++          * result-less unsigned atomic_max/atomic_min on texture<ulong>
++          * (MSL 3.1, Apple9). The "def" this case's caller already printed
++          * becomes a dummy; any other op or a used result is a compile error. */
++         nir_atomic_op aop = nir_intrinsic_atomic_op(instr);
++         if ((aop != nir_atomic_op_umax && aop != nir_atomic_op_umin) ||
++             !nir_def_is_unused(&instr->def)) {
++            fprintf(stderr, "KosmicKrisp: unsupported 64-bit image atomic "
++                            "(op %d, result %s): Metal has only result-less "
++                            "unsigned 64-bit texture min/max\n",
++                    (int)aop, nir_def_is_unused(&instr->def) ? "unused" : "used");
++            P(ctx, "0ul; static_assert(false, \"unsupported 64-bit image atomic\");\n");
++            break;
++         }
++         P(ctx, "0ul; ");
++         src_to_msl(ctx, &instr->src[0]);
++         P(ctx, ".%s(", aop == nir_atomic_op_umax ? "atomic_max" : "atomic_min");
++         image_coord_swizzle(ctx, instr);
++         P(ctx, ", ulong4(");
++         src_to_msl(ctx, &instr->src[3]);
++         P(ctx, "));\n");
++         break;
++      }
+       src_to_msl(ctx, &instr->src[0]);
+       P(ctx, ".%s(", atomic_op_to_msl(nir_intrinsic_atomic_op(instr)));
+       image_coord_swizzle(ctx, instr);
+diff --git a/src/kosmickrisp/vulkan/kk_format.c b/src/kosmickrisp/vulkan/kk_format.c
+index a48c1e1..30d6777 100644
+--- a/src/kosmickrisp/vulkan/kk_format.c
++++ b/src/kosmickrisp/vulkan/kk_format.c
+@@ -76,6 +76,11 @@
+    .bit_widths = width, .filter = 0u, .write = 0u, .color = 0u, .blend = 0u,   \
+    .msaa = 1u, .resolve = 0u, .sparse = 0u, .atomic = 0u
+ 
++// Write, Atomic (nps5 int64img: R64 storage views)
++#define MTL_FMT_WA(width)                                                      \
++   .bit_widths = width, .filter = 0u, .write = 1u, .color = 0u, .blend = 0u,   \
++   .msaa = 0u, .resolve = 0u, .sparse = 0u, .atomic = 1u
++
+ // None
+ #define MTL_FMT_NONE(width)                                                    \
+    .bit_widths = width, .filter = 0u, .write = 0u, .color = 0u, .blend = 0u,   \
+@@ -234,6 +239,11 @@ static const struct kk_va_format kk_vf_formats[] = {
+ 
+    // 64-bit formats
+    MTL_FMT_NATIVE(R32G32_UINT, MTL_FMT_WCMS(64), MTL_FMT_TB_WR),
++   /* nps5 int64img: R64 storage views of RG32Uint textures for 64-bit image
++    * atomics (texture<ulong>), Apple9+, only with NPS5_KK_IMAGE_INT64=1
++    * (kk_get_image_plane_format_features). */
++   MTL_FMT(R64_UINT, R32G32_UINT, MTL_SWIZZLE_IDENTITY,
++           MTL_FMT_WA(64), MTL_FMT_TB_NONE, false, 9),
+    MTL_FMT_NATIVE(R32G32_SINT, MTL_FMT_WCMS(64), MTL_FMT_TB_WR),
+    MTL_FMT_NATIVE(R32G32_FLOAT, MTL_FMT_ALL_NO_ATOMIC(64), MTL_FMT_TB_WR),
+    MTL_FMT_NATIVE(R16G16B16A16_UNORM, MTL_FMT_ALL_NO_ATOMIC(64), MTL_FMT_TB_WR),
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index a7afa26..30a7842 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -90,6 +90,11 @@ kk_get_image_plane_format_features(struct kk_physical_device *pdev,
+        va_format->image_feats == 0)
+       return 0;
+ 
++   /* nps5 int64img: R64 exists only for 64-bit image atomics (opt-in) */
++   if (p_format == PIPE_FORMAT_R64_UINT &&
++       !kk_image_int64_atomics_supported(&pdev->info))
++      return 0;
++
+    // Textures can at least be sampled
+    features |= VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT;
+    features |= VK_FORMAT_FEATURE_2_BLIT_SRC_BIT;
+diff --git a/src/kosmickrisp/vulkan/kk_image_layout.c b/src/kosmickrisp/vulkan/kk_image_layout.c
+index e31bd92..cfb57cf 100644
+--- a/src/kosmickrisp/vulkan/kk_image_layout.c
++++ b/src/kosmickrisp/vulkan/kk_image_layout.c
+@@ -276,6 +276,16 @@ kk_image_layout_init(const struct kk_device *dev, const struct vk_image *image,
+       pdev, usage, image->tiling, image->create_flags, format);
+    layout->usage = vk_image_usage_flags_to_mtl_texture_usage(
+       usage, image->create_flags, supported_format->atomic);
++   /* nps5 int64img: a 64-bit image atomic goes through an R64 view of an
++    * RG32 texture; Metal needs MTLTextureUsageShaderAtomic on the texture
++    * itself, which Vulkan does not tell us (MUTABLE_FORMAT without a format
++    * list). Only on devices created with shaderImageInt64Atomics. */
++   if (dev->vk.enabled_features.shaderImageInt64Atomics &&
++       (usage & VK_IMAGE_USAGE_STORAGE_BIT) &&
++       (format == PIPE_FORMAT_R64_UINT ||
++        ((format == PIPE_FORMAT_R32G32_UINT || format == PIPE_FORMAT_R32G32_SINT) &&
++         (image->create_flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT))))
++      layout->usage |= MTL_TEXTURE_USAGE_SHADER_ATOMIC;
+    layout->create_flags = image->create_flags;
+    layout->format.pipe = format;
+    layout->format.mtl = supported_format->mtl_pixel_format;
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index cb3cfb8..9f9c154 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -40,6 +40,22 @@ kk_get_vk_version()
+    return VK_MAKE_VERSION(1, 4, VK_HEADER_VERSION);
+ }
+ 
++/* nps5 int64img: VK_EXT_shader_image_atomic_int64 on Apple9+ (MSL 3.1+ texture<ulong>
++ * atomic_max/atomic_min on an RG32Uint texture with MTLTextureUsageShaderAtomic).
++ * Metal has only the result-less 64-bit unsigned min/max, so this is a partial
++ * implementation (nir_to_msl fails any other 64-bit image atomic or a used result):
++ * opt-in with NPS5_KK_IMAGE_INT64=1 (UE5 Nanite's visibility buffer, PPSA07631). */
++bool
++kk_image_int64_atomics_supported(const struct kk_device_info *info)
++{
++   static int env = -1;
++   if (env < 0) {
++      const char *v = getenv("NPS5_KK_IMAGE_INT64");
++      env = v != NULL && v[0] == '1';
++   }
++   return env && info->gpu_apple_family >= 9;
++}
++
+ static void
+ kk_get_device_extensions(const struct kk_instance *instance,
+                          const struct kk_physical_device *pdev,
+@@ -205,6 +221,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
+       .EXT_robustness2 = true,
+       .EXT_sample_locations = true,
+       .EXT_shader_atomic_float = true,
++      .EXT_shader_image_atomic_int64 = kk_image_int64_atomics_supported(&pdev->info),
+       .EXT_shader_replicated_composites = true,
+       .EXT_shader_subgroup_ballot = true,
+       .EXT_shader_subgroup_vote = true,
+@@ -525,6 +542,10 @@ kk_get_device_features(
+       /* VK_KHR_shader_subgroup_uniform_control_flow */
+       .shaderSubgroupUniformControlFlow = true,
+ 
++      /* VK_EXT_shader_image_atomic_int64 (nps5 int64img, opt-in, see above) */
++      .shaderImageInt64Atomics = kk_image_int64_atomics_supported(info),
++      .sparseImageInt64Atomics = false,
++
+       /* VK_EXT_shader_atomic_float */
+       .shaderBufferFloat32Atomics = true,
+       .shaderBufferFloat32AtomicAdd = true,
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.h b/src/kosmickrisp/vulkan/kk_physical_device.h
+index e919fa8..f7f58ab 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.h
++++ b/src/kosmickrisp/vulkan/kk_physical_device.h
+@@ -111,6 +111,8 @@ kk_physical_device_instance(struct kk_physical_device *pdev)
+ VkResult kk_enumerate_physical_devices(struct vk_instance *_instance);
+ void kk_physical_device_destroy(struct vk_physical_device *vk_device);
+ 
++bool kk_image_int64_atomics_supported(const struct kk_device_info *info);
++
+ static inline bool
+ kk_gpu_supports_depth_bounds(const struct kk_device_info *info)
+ {
+-- 
+2.56.0
+

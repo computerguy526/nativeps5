@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 16:46:33 +0000
+Subject: [PATCH] kosmickrisp: NPS5_KK_SWITCH_TREE labels every value of each
+ bounded leaf range
+
+r84 in game: the switch ran e1b5f15e at 165 ms against the tree's 70: a leaf that NIR had
+rewritten into a further test (x < 1 -> x == 0) got only its lower bound as a case, so its other
+values fell to default and the dispatcher went to the wrong blocks. Each leaf of [lo, hi) now gets
+case lo..hi-1 (the rightmost, unbounded leaf is default), so the switch equals the tree for every
+value; conversion is refused above 1024 labels.
+
+Generated-by: LLM
+---
+ src/kosmickrisp/compiler/nir_to_msl.c | 59 +++++++++++++++++++++++----
+ 1 file changed, 51 insertions(+), 8 deletions(-)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index efe9d87..e295019 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -2667,30 +2667,70 @@ struct switch_tree_path {
+    unsigned depth;
+ };
+ 
++/* A leaf covers the values [lo, hi) of the switched value (unsigned: the leftmost starts at
++ * 0; hi == UINT64_MAX: unbounded, the rightmost leaf, printed as `default`). Every value of a
++ * bounded leaf gets its own case label, so a leaf whose code is itself a further if-tree (one NIR
++ * rewrote, e.g. `x < 1` into `x == 0`) still sees all of its values: the switch equals the tree
++ * for every value. */
++#define SWITCH_TREE_MAX_LABELS 1024
++
++static bool
++switch_tree_ranges_ok(nir_if *ifnode, struct switch_tree_key *key, uint64_t lo, uint64_t hi,
++                      unsigned *labels)
++{
++   uint32_t bound;
++   switch_tree_cond(ifnode, key, &bound);
++   struct exec_list *lists[2] = {&ifnode->then_list, &ifnode->else_list};
++   for (unsigned side = 0; side < 2; side++) {
++      const uint64_t l = side == 0 ? lo : MAX2(lo, bound);
++      const uint64_t h = side == 0 ? MIN2(hi, bound) : hi;
++      uint32_t child_bound;
++      nir_if *child = switch_tree_child(lists[side], key, &child_bound);
++      if (child) {
++         if (!switch_tree_ranges_ok(child, key, l, h, labels))
++            return false;
++         continue;
++      }
++      if (h == UINT64_MAX)
++         continue;
++      if (h <= l)
++         continue; /* an empty range: unreachable leaf */
++      *labels += (unsigned)(h - l);
++      if (*labels > SWITCH_TREE_MAX_LABELS)
++         return false;
++   }
++   return true;
++}
++
+ static void
+ switch_tree_emit(struct nir_to_msl_ctx *ctx, nir_if *ifnode, struct switch_tree_key *key,
+-                 struct switch_tree_path *path, bool has_lower, uint32_t lower)
++                 struct switch_tree_path *path, uint64_t lo, uint64_t hi)
+ {
+    uint32_t bound;
+    switch_tree_cond(ifnode, key, &bound);
+    struct exec_list *lists[2] = {&ifnode->then_list, &ifnode->else_list};
+    for (unsigned side = 0; side < 2; side++) {
+-      const bool leaf_lower = side == 1 ? true : has_lower;
+-      const uint32_t leaf_bound = side == 1 ? bound : lower;
++      const uint64_t l = side == 0 ? lo : MAX2(lo, bound);
++      const uint64_t h = side == 0 ? MIN2(hi, bound) : hi;
+       uint32_t child_bound;
+       nir_if *child = path->depth < 63 ? switch_tree_child(lists[side], key, &child_bound) : NULL;
+       if (child) {
+          path->lists[path->depth] = lists[side];
+          path->nested[path->depth] = child;
+          path->depth++;
+-         switch_tree_emit(ctx, child, key, path, leaf_lower, leaf_bound);
++         switch_tree_emit(ctx, child, key, path, l, h);
+          path->depth--;
+          continue;
+       }
+-      if (leaf_lower) {
+-         P_IND(ctx, "case %uu: {\n", leaf_bound);
+-      } else {
++      if (h != UINT64_MAX && h <= l)
++         continue;
++      if (h == UINT64_MAX) {
+          P_IND(ctx, "default: {\n");
++      } else {
++         for (uint64_t v = l; v < h; v++) {
++            P_IND(ctx, "case %uu:\n", (unsigned)v);
++         }
++         P_IND(ctx, "{\n");
+       }
+       ctx->indentlevel++;
+       for (unsigned d = 0; d < path->depth; d++) {
+@@ -2730,12 +2770,15 @@ switch_tree_try(struct nir_to_msl_ctx *ctx, nir_if *ifnode)
+    bool jump = false;
+    if (switch_tree_count(ifnode, &key, &jump) < 16 || jump)
+       return false;
++   unsigned labels = 0;
++   if (!switch_tree_ranges_ok(ifnode, &key, 0, UINT64_MAX, &labels))
++      return false;
+    P_IND(ctx, "switch (");
+    src_to_msl(ctx, key.value);
+    P(ctx, ") {\n");
+    ctx->indentlevel++;
+    struct switch_tree_path path = {.depth = 0};
+-   switch_tree_emit(ctx, ifnode, &key, &path, false, 0);
++   switch_tree_emit(ctx, ifnode, &key, &path, 0, UINT64_MAX);
+    ctx->indentlevel--;
+    P_IND(ctx, "}\n");
+    return true;
+-- 
+2.56.0
+

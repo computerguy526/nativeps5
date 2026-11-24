@@ -1,0 +1,177 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 04:10:01 +0000
+Subject: [PATCH] kosmickrisp: 64-bit buffer or/xor/and (result unused) as
+ 32-bit atomics: exact one-half constants, opt-in split
+
+nps5 int64img. SAROS (r41) needs a result-less 64-bit ior with a constant operand.
+- A constant whose bits all sit in one 32-bit half (other half 0 for or/xor, ~0 for and) touches
+  one dword only: one 32-bit atomic_fetch_{or,xor,and} on it, exact.
+- Both halves (or a variable operand): two 32-bit atomics, exact final value but a concurrent
+  64-bit reader can see one half applied: only with NPS5_KK_BUFFER_INT64_SPLIT=1 (one-time note).
+- Every lowered 64-bit bitwise atomic logs its op and constant once ('KosmicKrisp: 64-bit buffer
+  atomic op N constant 0x... -> ...'); the unsupported message now prints the constant.
+Behind NPS5_KK_BUFFER_INT64=1; nothing changes without it (pinned pipelineCacheUUID).
+Test: work/int64img/vktest/vkbufatom.c (bufatom.comp modes 7-12, bufsplit.comp).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/compiler/nir_to_msl.c | 123 +++++++++++++++++++++++++-
+ 1 file changed, 121 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index fdecde3..5dddb41 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -4,6 +4,8 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <inttypes.h>
++#include "util/simple_mtx.h"
+ #include <stdlib.h>
+ #include "nir_to_msl.h"
+ #include "msl_private.h"
+@@ -1024,6 +1026,114 @@ atomic_op_to_msl(nir_atomic_op op)
+    }
+ }
+ 
++/* nps5 int64img: result-less 64-bit or/xor/and as 32-bit atomics on the
++ * dwords (little endian: low dword at the address, high at +4).
++ *  - A constant whose bits all sit in one half (the other half is 0 for
++ *    or/xor, ~0 for and) touches only that dword: ONE 32-bit atomic, exact.
++ *  - Otherwise (both halves, or a variable operand) two 32-bit atomics give the
++ *    exact final value, but a concurrent 64-bit reader can see one half
++ *    applied: only with NPS5_KK_BUFFER_INT64_SPLIT=1 (one-time note).
++ * Every lowered constant is logged once per (op, value). Returns false when
++ * the form is not taken (the caller reports it). */
++static bool
++kk_buffer_int64_split_enabled(void)
++{
++   static int env = -1;
++   if (env < 0) {
++      const char *v = getenv("NPS5_KK_BUFFER_INT64_SPLIT");
++      env = v != NULL && v[0] == '1';
++   }
++   return env;
++}
++
++static void
++bitwise64_log_once(nir_atomic_op aop, bool is_const, uint64_t c, const char *how)
++{
++   static simple_mtx_t lock = SIMPLE_MTX_INITIALIZER;
++   struct seen_op { int op; bool k; uint64_t c; };
++   static struct seen_op seen[64];
++   static unsigned nseen;
++   simple_mtx_lock(&lock);
++   for (unsigned i = 0; i < nseen; i++) {
++      if (seen[i].op == (int)aop && seen[i].k == is_const && seen[i].c == c) {
++         simple_mtx_unlock(&lock);
++         return;
++      }
++   }
++   if (nseen < ARRAY_SIZE(seen))
++      seen[nseen++] = (struct seen_op){(int)aop, is_const, c};
++   simple_mtx_unlock(&lock);
++   if (is_const)
++      fprintf(stderr, "KosmicKrisp: 64-bit buffer atomic op %d constant 0x%016" PRIx64 " -> %s\n",
++              (int)aop, c, how);
++   else
++      fprintf(stderr, "KosmicKrisp: 64-bit buffer atomic op %d variable operand -> %s\n",
++              (int)aop, how);
++}
++
++static void
++bitwise64_half_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr,
++                      const char *fn, bool high, const char *value)
++{
++   P(ctx, "%s_explicit((device atomic_uint*)(", fn);
++   src_to_msl(ctx, &instr->src[0]);
++   P(ctx, "%s), %s, memory_order_relaxed);", high ? " + 4ul" : "", value);
++}
++
++static bool
++bitwise64_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr,
++                 nir_atomic_op aop, bool is_const, uint64_t c)
++{
++   const char *fn = aop == nir_atomic_op_ior    ? "atomic_fetch_or"
++                    : aop == nir_atomic_op_ixor ? "atomic_fetch_xor"
++                                                : "atomic_fetch_and";
++   const uint32_t neutral = aop == nir_atomic_op_iand ? UINT32_MAX : 0u;
++   char v[64];
++   if (is_const) {
++      uint32_t lo = (uint32_t)c, hi = (uint32_t)(c >> 32);
++      if (hi == neutral || lo == neutral) {
++         bool high = lo == neutral;
++         bitwise64_log_once(aop, true, c, high ? "one 32-bit atomic on the high dword (exact)"
++                                               : "one 32-bit atomic on the low dword (exact)");
++         snprintf(v, sizeof(v), "%uu", high ? hi : lo);
++         P(ctx, "0ul; ");
++         bitwise64_half_to_msl(ctx, instr, fn, high, v);
++         P(ctx, "\n");
++         return true;
++      }
++   }
++   if (!kk_buffer_int64_split_enabled())
++      return false;
++   static bool noted;
++   if (!noted) {
++      noted = true;
++      fprintf(stderr, "KosmicKrisp: NPS5_KK_BUFFER_INT64_SPLIT=1: 64-bit or/xor/and "
++                      "with both halves become two 32-bit atomics (final value "
++                      "exact; a concurrent 64-bit reader can see one half applied)\n");
++   }
++   bitwise64_log_once(aop, is_const, c, "two 32-bit atomics (NPS5_KK_BUFFER_INT64_SPLIT)");
++   P(ctx, "0ul; ");
++   if (is_const) {
++      snprintf(v, sizeof(v), "%uu", (uint32_t)c);
++      bitwise64_half_to_msl(ctx, instr, fn, false, v);
++      P(ctx, " ");
++      snprintf(v, sizeof(v), "%uu", (uint32_t)(c >> 32));
++      bitwise64_half_to_msl(ctx, instr, fn, true, v);
++   } else {
++      P(ctx, "{ ulong kkv%d = ", instr->def.index);
++      src_to_msl(ctx, &instr->src[1]);
++      P(ctx, "; ");
++      snprintf(v, sizeof(v), "uint(kkv%d)", instr->def.index);
++      bitwise64_half_to_msl(ctx, instr, fn, false, v);
++      P(ctx, " ");
++      snprintf(v, sizeof(v), "uint(kkv%d >> 32)", instr->def.index);
++      bitwise64_half_to_msl(ctx, instr, fn, true, v);
++      P(ctx, " }");
++   }
++   P(ctx, "\n");
++   return true;
++}
++
+ /* nps5 int64img: 64-bit device-memory atomics (shaderBufferInt64Atomics,
+  * opt-in). The caller already printed "tN = ". Exact forms only:
+  *  - umax/umin, result unused: Metal's atomic_max/atomic_min on atomic_ulong
+@@ -1061,12 +1171,21 @@ global_atomic64_to_msl(struct nir_to_msl_ctx *ctx, nir_intrinsic_instr *instr)
+       P(ctx, "*(volatile device ulong*)");
+       src_to_msl(ctx, &instr->src[0]);
+       P(ctx, ";\n");
++   } else if (unused && (aop == nir_atomic_op_ior || aop == nir_atomic_op_ixor ||
++                         aop == nir_atomic_op_iand) &&
++              bitwise64_to_msl(ctx, instr, aop, is_const, c)) {
++      /* emitted */
+    } else {
+       fprintf(stderr, "KosmicKrisp: unsupported 64-bit buffer atomic (op %d, "
+-                      "result %s, operand %s): Metal has only result-less "
+-                      "unsigned 64-bit min/max\n",
++                      "result %s, operand %s",
+               (int)aop, unused ? "unused" : "used",
+               is_const ? "constant" : "variable");
++      if (is_const)
++         fprintf(stderr, " 0x%016" PRIx64, c);
++      fprintf(stderr, "): Metal has only result-less unsigned 64-bit min/max%s\n",
++              unused && (aop == nir_atomic_op_ior || aop == nir_atomic_op_ixor ||
++                                      aop == nir_atomic_op_iand)
++                 ? " (NPS5_KK_BUFFER_INT64_SPLIT=1 splits it into 32-bit halves)" : "");
+       P(ctx, "0ul; static_assert(false, \"unsupported 64-bit buffer atomic\");\n");
+    }
+ }
+-- 
+2.56.0
+

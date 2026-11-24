@@ -1,0 +1,261 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 15:04:44 +0000
+Subject: [PATCH] kosmickrisp: opt-in NPS5_KK_SWITCH_TREE prints a 16+-leaf if
+ (x < K) tree as one MSL switch
+
+Kyty's KYTY_DISPATCHER_TREE block dispatcher reaches nir_to_msl as nested ifs; a switch halves
+SAROS CS e1b5f15e again (real-input replay, M4 Pro: tree 154 ms, switch 77 ms). Leaves become
+case <lower bound> (the leftmost default); enclosing branch code is replayed per leaf; trees with a
+break/continue in a leaf are left as ifs. msl_opt bit 12: UUID and MSL unchanged when off.
+
+Generated-by: LLM
+---
+ src/kosmickrisp/compiler/nir_to_msl.c       | 189 ++++++++++++++++++++
+ src/kosmickrisp/compiler/nir_to_msl.h       |   9 +
+ src/kosmickrisp/vulkan/kk_physical_device.c |   2 +
+ 3 files changed, 200 insertions(+)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index be91778..efe9d87 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -2554,6 +2554,193 @@ instr_to_msl(struct nir_to_msl_ctx *ctx, nir_instr *instr)
+    }
+ }
+ 
++/* nps5 memtrk: KK_MSL_OPT_SWITCH_TREE (see nir_to_msl.h). */
++struct switch_tree_key {
++   const void *base; /* the reg decl (load_reg) or the SSA def compared */
++   nir_src *value;   /* the compared source, printed as the switch value */
++};
++
++static bool
++switch_tree_cond(nir_if *ifnode, struct switch_tree_key *key, uint32_t *bound)
++{
++   nir_def *cond = ifnode->condition.ssa;
++   if (!nir_def_is_alu(cond))
++      return false;
++   nir_alu_instr *alu = nir_def_as_alu(cond);
++   if (alu->op != nir_op_ult || alu->def.num_components != 1 ||
++       !nir_src_is_const(alu->src[1].src) || alu->src[0].src.ssa->bit_size != 32 ||
++       alu->src[0].swizzle[0] != 0)
++      return false;
++   nir_def *x = alu->src[0].src.ssa;
++   const void *base = x;
++   if (is_register(x))
++      base = nir_def_as_intrinsic(x)->src[0].ssa;
++   if (key->base && key->base != base)
++      return false;
++   key->base = base;
++   if (!key->value)
++      key->value = &alu->src[0].src;
++   *bound = nir_src_comp_as_uint(alu->src[1].src, alu->src[1].swizzle[0]);
++   return true;
++}
++
++/* The single nested tree node of a branch list: [block] if [block]. */
++static nir_if *
++switch_tree_child(struct exec_list *list, struct switch_tree_key *key, uint32_t *bound)
++{
++   nir_if *found = NULL;
++   unsigned blocks = 0;
++   foreach_list_typed(nir_cf_node, node, node, list) {
++      if (node->type == nir_cf_node_if) {
++         if (found)
++            return NULL;
++         found = nir_cf_node_as_if(node);
++      } else if (node->type == nir_cf_node_block) {
++         blocks++;
++      } else {
++         return NULL;
++      }
++   }
++   if (!found || blocks > 2)
++      return NULL;
++   struct switch_tree_key probe = *key;
++   if (!switch_tree_cond(found, &probe, bound))
++      return NULL;
++   return found;
++}
++
++static bool
++switch_tree_list_has_outer_jump(struct exec_list *list)
++{
++   foreach_list_typed(nir_cf_node, node, node, list) {
++      switch (node->type) {
++      case nir_cf_node_block:
++         nir_foreach_instr(instr, nir_cf_node_as_block(node)) {
++            if (instr->type == nir_instr_type_jump) {
++               nir_jump_type t = nir_instr_as_jump(instr)->type;
++               if (t == nir_jump_break || t == nir_jump_continue)
++                  return true;
++            }
++         }
++         break;
++      case nir_cf_node_if: {
++         nir_if *i = nir_cf_node_as_if(node);
++         if (switch_tree_list_has_outer_jump(&i->then_list) ||
++             switch_tree_list_has_outer_jump(&i->else_list))
++            return true;
++         break;
++      }
++      default: /* jumps inside an inner loop stay inside it */
++         break;
++      }
++   }
++   return false;
++}
++
++static unsigned
++switch_tree_count(nir_if *ifnode, struct switch_tree_key *key, bool *jump)
++{
++   unsigned leaves = 0;
++   struct exec_list *lists[2] = {&ifnode->then_list, &ifnode->else_list};
++   for (unsigned i = 0; i < 2; i++) {
++      uint32_t bound;
++      nir_if *child = switch_tree_child(lists[i], key, &bound);
++      if (child) {
++         leaves += switch_tree_count(child, key, jump);
++      } else {
++         leaves++;
++         if (switch_tree_list_has_outer_jump(lists[i]))
++            *jump = true;
++      }
++   }
++   return leaves;
++}
++
++static void cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node);
++
++/* Prints one leaf: the code of every enclosing branch list before its nested
++ * node (outermost first), the leaf list, then the code after each nested node
++ * (innermost first). */
++struct switch_tree_path {
++   struct exec_list *lists[64];
++   nir_if *nested[64];
++   unsigned depth;
++};
++
++static void
++switch_tree_emit(struct nir_to_msl_ctx *ctx, nir_if *ifnode, struct switch_tree_key *key,
++                 struct switch_tree_path *path, bool has_lower, uint32_t lower)
++{
++   uint32_t bound;
++   switch_tree_cond(ifnode, key, &bound);
++   struct exec_list *lists[2] = {&ifnode->then_list, &ifnode->else_list};
++   for (unsigned side = 0; side < 2; side++) {
++      const bool leaf_lower = side == 1 ? true : has_lower;
++      const uint32_t leaf_bound = side == 1 ? bound : lower;
++      uint32_t child_bound;
++      nir_if *child = path->depth < 63 ? switch_tree_child(lists[side], key, &child_bound) : NULL;
++      if (child) {
++         path->lists[path->depth] = lists[side];
++         path->nested[path->depth] = child;
++         path->depth++;
++         switch_tree_emit(ctx, child, key, path, leaf_lower, leaf_bound);
++         path->depth--;
++         continue;
++      }
++      if (leaf_lower) {
++         P_IND(ctx, "case %uu: {\n", leaf_bound);
++      } else {
++         P_IND(ctx, "default: {\n");
++      }
++      ctx->indentlevel++;
++      for (unsigned d = 0; d < path->depth; d++) {
++         foreach_list_typed(nir_cf_node, node, node, path->lists[d]) {
++            if (node == &path->nested[d]->cf_node)
++               break;
++            cf_node_to_metal(ctx, node);
++         }
++      }
++      foreach_list_typed(nir_cf_node, node, node, lists[side]) {
++         cf_node_to_metal(ctx, node);
++      }
++      for (unsigned d = path->depth; d-- > 0;) {
++         bool after = false;
++         foreach_list_typed(nir_cf_node, node, node, path->lists[d]) {
++            if (after)
++               cf_node_to_metal(ctx, node);
++            if (node == &path->nested[d]->cf_node)
++               after = true;
++         }
++      }
++      P_IND(ctx, "break;\n");
++      ctx->indentlevel--;
++      P_IND(ctx, "}\n");
++   }
++}
++
++static bool
++switch_tree_try(struct nir_to_msl_ctx *ctx, nir_if *ifnode)
++{
++   if (!(ctx->msl_opt & KK_MSL_OPT_SWITCH_TREE))
++      return false;
++   struct switch_tree_key key = {0};
++   uint32_t bound;
++   if (!switch_tree_cond(ifnode, &key, &bound))
++      return false;
++   bool jump = false;
++   if (switch_tree_count(ifnode, &key, &jump) < 16 || jump)
++      return false;
++   P_IND(ctx, "switch (");
++   src_to_msl(ctx, key.value);
++   P(ctx, ") {\n");
++   ctx->indentlevel++;
++   struct switch_tree_path path = {.depth = 0};
++   switch_tree_emit(ctx, ifnode, &key, &path, false, 0);
++   ctx->indentlevel--;
++   P_IND(ctx, "}\n");
++   return true;
++}
++
+ static void
+ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+ {
+@@ -2568,6 +2755,8 @@ cf_node_to_metal(struct nir_to_msl_ctx *ctx, nir_cf_node *node)
+    }
+    case nir_cf_node_if: {
+       nir_if *ifnode = nir_cf_node_as_if(node);
++      if (switch_tree_try(ctx, ifnode))
++         break;
+       P_IND(ctx, "if (");
+       src_to_msl(ctx, &ifnode->condition);
+       P(ctx, ") {\n");
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index 0782701..9b725c4 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -68,6 +68,15 @@ struct vk_color_attachment_location_state;
+  * as plain "volatile device", which is not device-coherent on AGX: a spin on
+  * a flag another threadgroup sets may never see it (SAROS, 2026-11-22). */
+ #define KK_MSL_OPT_VOLATILE_COHERENT (1u << 11)
++/* nps5 memtrk: NPS5_KK_SWITCH_TREE=1 (off by default). A binary tree of nested
++ * `if (x < K)` on one value with at least 16 leaves (Kyty's KYTY_DISPATCHER_TREE
++ * block dispatcher) prints as one MSL `switch (x)`: each leaf becomes `case L:`
++ * with L the lower bound of its range, the leftmost leaf `default:`. Equal to
++ * the tree for every x equal to a leaf's lower bound (the dispatcher only holds
++ * block ids); trees whose leaves contain a break/continue of an enclosing loop
++ * are left alone. SAROS CS e1b5f15e (real inputs, M4 Pro): tree 154 ms, switch
++ * 77 ms per dispatch. */
++#define KK_MSL_OPT_SWITCH_TREE (1u << 12)
+ /* The bits that keep the shader's results and are the default. */
+ /* nps5 loopcap: KK_LOOP_CAP = loop-condition checks per compute kernel
+  * invocation (unset = 2^18, 0 = off). See msl_loop_cap.h. */
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 451b345..477bc8d 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1263,6 +1263,8 @@ kk_parse_environment_options(struct kk_physical_device *pdev)
+    /* nps5 memtrk: opt-in, see KK_MSL_OPT_VOLATILE_COHERENT. */
+    if (debug_get_bool_option("NPS5_KK_KEEP_COHERENT", false))
+       settings->msl_opt |= KK_MSL_OPT_VOLATILE_COHERENT;
++   if (debug_get_bool_option("NPS5_KK_SWITCH_TREE", false))
++      settings->msl_opt |= KK_MSL_OPT_SWITCH_TREE;
+ 
+    const char *list = debug_get_option("MESA_KK_DISABLE_WORKAROUNDS", "");
+    const char *all_workarounds = "all";
+-- 
+2.56.0
+

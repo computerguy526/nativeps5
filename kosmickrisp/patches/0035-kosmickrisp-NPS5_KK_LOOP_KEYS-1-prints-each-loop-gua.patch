@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 10:17:26 +0000
+Subject: [PATCH] kosmickrisp: NPS5_KK_LOOP_KEYS=1 prints each loop-guarded
+ kernel's loop-cap key with the application's nps5_kk_tag
+
+Diagnostic (memtrk): pairs [RED] loop cap keys with the guest program that created the shader.
+
+Generated-by: LLM
+---
+ src/kosmickrisp/vulkan/kk_shader.c | 44 ++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 67e52f0..f4aa3c8 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -6,6 +6,9 @@
+  */
+ 
+ #include "kk_shader.h"
++#include "util/simple_mtx.h"
++#include "util/u_debug.h"
++static void nps5_kk_note_loop_key(const struct kk_shader_info *info, const char *how);
+ 
+ #include "kk_cmd_buffer.h"
+ #include "kk_debug.h"
+@@ -1279,6 +1282,7 @@ kk_compile_msl(struct kk_physical_device *pdev, nir_shader *nir,
+       loop_info->cs.loop_barrier_sites = translate_options.loop_barrier_sites;
+       loop_info->cs.loop_msl_len = (uint32_t)len;
+       loop_info->cs.loop_key = key;
++      nps5_kk_note_loop_key(loop_info, "compiled");
+    }
+    const char *entrypoint_name = nir_shader_get_entrypoint(nir)->function->name;
+ 
+@@ -2763,6 +2767,45 @@ kk_msl_deserialize(struct blob_reader *blob, struct msl_compile_data *data,
+    return VK_SUCCESS;
+ }
+ 
++
++/* nps5 memtrk: NPS5_KK_LOOP_KEYS=1 prints, once per loop-guarded compute kernel, its loop-cap key
++ * (the one the [RED] loop cap line names) with the tag the application set on the creating thread
++ * through nps5_kk_tag() (Kyty: the guest program hash, KYTY_KK_TAG=1). Diagnostic only. */
++static __thread uint64_t nps5_kk_tag_value;
++__attribute__((visibility("default"))) void nps5_kk_tag(uint64_t tag);
++__attribute__((visibility("default"))) void
++nps5_kk_tag(uint64_t tag)
++{
++   nps5_kk_tag_value = tag;
++}
++static void
++nps5_kk_note_loop_key(const struct kk_shader_info *info, const char *how)
++{
++   static int on = -1;
++   if (on < 0)
++      on = debug_get_bool_option("NPS5_KK_LOOP_KEYS", false);
++   if (!on || info->stage != MESA_SHADER_COMPUTE || !info->cs.loop_sites)
++      return;
++   static simple_mtx_t lock = SIMPLE_MTX_INITIALIZER;
++   static uint64_t seen[8192];
++   static unsigned seen_count;
++   simple_mtx_lock(&lock);
++   bool first = true;
++   for (unsigned i = 0; i < seen_count; i++) {
++      if (seen[i] == info->cs.loop_key) {
++         first = false;
++         break;
++      }
++   }
++   if (first && seen_count < ARRAY_SIZE(seen))
++      seen[seen_count++] = info->cs.loop_key;
++   simple_mtx_unlock(&lock);
++   if (first)
++      fprintf(stderr, "[kk-loopkey] key %016llx tag %016llx msl %u bytes, %u loop sites (%u with a barrier), %s\n",
++              (unsigned long long)info->cs.loop_key, (unsigned long long)nps5_kk_tag_value,
++              info->cs.loop_msl_len, info->cs.loop_sites, info->cs.loop_barrier_sites, how);
++}
++
+ static VkResult
+ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+                       uint32_t binary_version,
+@@ -2775,6 +2818,7 @@ kk_deserialize_shader(struct vk_device *vk_dev, struct blob_reader *blob,
+    blob_copy_bytes(blob, &info, sizeof(info));
+    if (blob->overrun)
+       return vk_error(dev, VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT);
++   nps5_kk_note_loop_key(&info, "from the cache");
+ 
+    struct kk_shader *shader = vk_shader_zalloc(
+       &dev->vk, &kk_shader_ops, info.stage, pAllocator, sizeof(*shader));
+-- 
+2.56.0
+

@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 09:13:09 +0000
+Subject: [PATCH] kosmickrisp: nps5_kk_cmd_metalfx: temporal scaler for content
+ smaller than its textures (input content properties), HDR spatial mode for
+ R11G11B10 float (nps5 mfxlayer; not built yet)
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_fx.m | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_fx.m b/src/kosmickrisp/bridge/mtl_fx.m
+index ea94567..3950d47 100644
+--- a/src/kosmickrisp/bridge/mtl_fx.m
++++ b/src/kosmickrisp/bridge/mtl_fx.m
+@@ -298,7 +298,10 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+          (NSUInteger)info->mode, color.pixelFormat,
+          temporal ? depth.pixelFormat : 0, temporal ? motion_in.pixelFormat : 0,
+          out.pixelFormat, color.width, color.height, out.width, out.height,
+-         (NSUInteger)info->auto_exposure, 0};
++         (NSUInteger)info->auto_exposure,
++         /* nps5 mfxlayer: content smaller than the texture (a UE view rect inside a
++          * maximum-size target under dynamic resolution) needs a scaler made for it */
++         (NSUInteger)(temporal && (info->in_w < color.width || info->in_h < color.height))};
+       struct fx_entry *e = fx_find(key);
+       if (e == NULL) {
+          os_unfair_lock_unlock(&fx_lock);
+@@ -318,6 +321,13 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+                d.outputWidth = out.width;
+                d.outputHeight = out.height;
+                d.autoExposureEnabled = info->auto_exposure;
++               if (key[10] != 0) {
++                  d.inputContentPropertiesEnabled = YES;
++                  d.inputContentMinScale =
++                     [MTLFXTemporalScalerDescriptor supportedInputContentMinScaleForDevice:dev];
++                  d.inputContentMaxScale =
++                     [MTLFXTemporalScalerDescriptor supportedInputContentMaxScaleForDevice:dev];
++               }
+                d.requiresSynchronousInitialization = YES;
+                e->scaler = [d newTemporalScalerWithDevice:dev compiler:comp];
+             }
+@@ -329,7 +339,9 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+             d.outputHeight = out.height;
+             d.colorTextureFormat = color.pixelFormat;
+             d.outputTextureFormat = out.pixelFormat;
+-            d.colorProcessingMode = color.pixelFormat == MTLPixelFormatRGBA16Float
++            /* nps5 mfxlayer: R11G11B10 float scene colour (UE) is linear HDR as well */
++            d.colorProcessingMode = (color.pixelFormat == MTLPixelFormatRGBA16Float ||
++                                     color.pixelFormat == MTLPixelFormatRG11B10Float)
+                                        ? MTLFXSpatialScalerColorProcessingModeHDR
+                                        : MTLFXSpatialScalerColorProcessingModePerceptual;
+             e->scaler = [d newSpatialScalerWithDevice:dev compiler:comp];
+-- 
+2.56.0
+

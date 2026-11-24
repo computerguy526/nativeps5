@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 09:45:09 +0000
+Subject: [PATCH] kosmickrisp: opt-in NPS5_KK_KEEP_COHERENT prints volatile
+ global accesses as volatile coherent device
+
+Kyty marks GLC/coherent guest loads only Volatile; with KK_WORKAROUND_6 resolved (macOS 27) they
+print as plain 'volatile device', not device-coherent on AGX, so a spin on a flag another
+threadgroup sets may never see it (SAROS persistent-culling kernels hit the loop cap). Default
+off: msl_opt, MSL and pipelineCacheUUID unchanged unless the variable is set.
+
+Generated-by: LLM
+---
+ src/kosmickrisp/compiler/nir_to_msl.c       | 2 ++
+ src/kosmickrisp/compiler/nir_to_msl.h       | 6 ++++++
+ src/kosmickrisp/vulkan/kk_physical_device.c | 4 ++++
+ 3 files changed, 12 insertions(+)
+
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index 5dddb41..be91778 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -1336,6 +1336,8 @@ static const char *
+ global_access_qualifier(struct nir_to_msl_ctx *ctx,
+                         enum gl_access_qualifier access)
+ {
++   if ((ctx->msl_opt & KK_MSL_OPT_VOLATILE_COHERENT) && (access & ACCESS_VOLATILE))
++      return "volatile coherent device";
+    if (!(ctx->disabled_workarounds & BITFIELD64_BIT(6)) &&
+        !((ctx->msl_opt & KK_MSL_OPT_COHERENT_PER_BASE) &&
+          (access & ACCESS_NON_WRITEABLE)) &&
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.h b/src/kosmickrisp/compiler/nir_to_msl.h
+index 4ddf747..0782701 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.h
++++ b/src/kosmickrisp/compiler/nir_to_msl.h
+@@ -62,6 +62,12 @@ struct vk_color_attachment_location_state;
+  * lower_reduce. Result-preserving: simd_min over the active lanes equals the
+  * chain for every active set (tests/simdred_test, 9.9 M checks). */
+ #define KK_MSL_OPT_NATIVE_REDUCE    (1u << 10)
++/* nps5 memtrk: volatile global accesses print as "volatile coherent device"
++ * (NPS5_KK_KEEP_COHERENT=1; off by default). Kyty marks GLC/coherent guest
++ * loads only Volatile, and on macOS 27 (KK_WORKAROUND_6 resolved) they print
++ * as plain "volatile device", which is not device-coherent on AGX: a spin on
++ * a flag another threadgroup sets may never see it (SAROS, 2026-11-22). */
++#define KK_MSL_OPT_VOLATILE_COHERENT (1u << 11)
+ /* The bits that keep the shader's results and are the default. */
+ /* nps5 loopcap: KK_LOOP_CAP = loop-condition checks per compute kernel
+  * invocation (unset = 2^18, 0 = off). See msl_loop_cap.h. */
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 927ae7b..451b345 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1260,6 +1260,10 @@ kk_parse_environment_options(struct kk_physical_device *pdev)
+    else
+       settings->msl_opt &= ~KK_MSL_OPT_NATIVE_REDUCE;
+ 
++   /* nps5 memtrk: opt-in, see KK_MSL_OPT_VOLATILE_COHERENT. */
++   if (debug_get_bool_option("NPS5_KK_KEEP_COHERENT", false))
++      settings->msl_opt |= KK_MSL_OPT_VOLATILE_COHERENT;
++
+    const char *list = debug_get_option("MESA_KK_DISABLE_WORKAROUNDS", "");
+    const char *all_workarounds = "all";
+    const size_t all_len = strlen(all_workarounds);
+-- 
+2.56.0
+

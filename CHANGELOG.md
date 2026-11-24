@@ -3,6 +3,33 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.3.0 (unreleased; version number proposed, not decided)
+
+One line for every title. The development branches that ran SAROS (`PPSA07631`, Unreal Engine 5.5) are now part of the release line, so
+Astro Bot, God of War Sons of Sparta and SAROS build from the same four repositories and the same KosmicKrisp. Everything in the v1.2.5
+candidate below is included. **Update:** all three component repositories move to new tags (see [components.lock](components.lock)): pull,
+check out the tags, rebuild everything (`scripts/build.sh recomp`, `kyty`, `anyps5`, `kosmickrisp`: patches 0031-0040 are new, 40 patches,
+`EXPECTED_TREE` ae17f099). **The first start after the update rebuilds the shaders once** (Kyty's shader recompiler sources changed, so the
+program cache and the pipeline cache of every title get a new key); run `nps5 cache prepare <id>` or expect one longer first launch.
+
+- **SAROS (`PPSA07631`, experimental) boots and plays from the release line.** Kyty decodes the flat-pointer shader operands UE5.5 uses
+  (scalar sources `0xEB`-`0xEE`), lowers 64-bit atomics, and carries the SAROS hand shaders for its bindless lighting passes
+  (`KYTY_SAROS_HANDSHADERS`, with the `HS_DYNIDX` canonical groups), the Nanite raster parameter path (`KYTY_SAROS_NANITE_RAW`), the
+  shader-bundle compaction (`KYTY_BUNDLE_COMPACT`) and the command-processor switches found by the SAROS experiments. The recompiler has
+  the packed-code discovery (`NPS5_SEED_AFTER_UD2`), `VFMADDSUB`/`VFMSUBADD`, and the SDK 11 shims the title imports. KosmicKrisp gains
+  opt-in 64-bit image and buffer atomics (`NPS5_KK_IMAGE_INT64`, `NPS5_KK_BUFFER_INT64`), the switch tree (`NPS5_KK_SWITCH_TREE`) and the
+  residency lock. Everything is off unless the `PPSA07631` profile (or the environment) sets it.
+- **No behaviour change for other titles by default.** Every title-specific switch reads as off when unset; a build gate
+  (`tests/one/run_one_tests.sh` in `nativeps5-kyty`) checks the switch defaults and that the library exports every graphics entry Astro
+  Bot, SAROS and Sons of Sparta import. POSIX `pthread_exit` takes the full thread-exit path only with `NPS5_PTHREAD_EXIT_SCE=1` (set by
+  the `PPSA07631` profile).
+- **MetalFX for Unreal titles (opt-in, experimental).** `KYTY_METALFX_UE=log|fsr3` places MetalFX temporal in the engine's third-party
+  upscaler slot; `KYTY_METALFX_PASS=<hash>:blit` uses MetalFX spatial at a full-screen upscale draw. Off by default.
+- **AnyPS5: upstream fixes** (13 shader-recompiler fixes for the legacy AnyPS5 GPU path, and the macOS libc arena hint placement, which
+  every title uses). The AnyPS5-path pipeline journal is rebuilt once.
+- Diagnostics (all off by default): compute and draw probes, bind logs, raw target and BC dumps, the guest-write journal, the input
+  profile capture, `NPS5_CRASH_REGDUMP`, `NPS5_TRACE_JOIN`, `NPS5_VFS_RANGELOG`, `NPS5_VFS_HOLE_CHECK`.
+
 ## v1.2.5 (unreleased)
 
 Everything in v1.2.4. Small, switched-off-by-default additions for Unreal Engine 5 titles (SAROS, `PPSA07631`, still experimental), one

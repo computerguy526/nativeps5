@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 12:07:36 +0000
+Subject: [PATCH] kosmickrisp: log every failed command buffer with the full
+ Metal error tree and the flight summary (nps5 devlost)
+
+The device-lost message only went through vk_log, which drops it without a
+debug messenger, and it held only the generic top-level MTL4 description.
+Logging only, error path only.
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_command_queue.m | 27 ++++++++++++++++++++++
+ src/kosmickrisp/bridge/mtl_types.h         |  4 ++++
+ src/kosmickrisp/vulkan/kk_safety.c         | 18 +++++++++++++++
+ 3 files changed, 49 insertions(+)
+
+diff --git a/src/kosmickrisp/bridge/mtl_command_queue.m b/src/kosmickrisp/bridge/mtl_command_queue.m
+index bc703c6..be52db1 100644
+--- a/src/kosmickrisp/bridge/mtl_command_queue.m
++++ b/src/kosmickrisp/bridge/mtl_command_queue.m
+@@ -19,6 +19,27 @@ mtl_new_commit_options(void)
+    }
+ }
+ 
++/* nps5 devlost: the NSError tree (depth 4) as one line: domain, code, description, the
++ * userInfo keys, then each underlying error. A page fault / invalid resource shows only in
++ * the underlying IOGPU error; the top-level MTL4 error is generic. */
++static void
++kk_mtl_error_describe(NSError *e, int depth, char *out, size_t cap)
++{
++   if (!e || depth > 4)
++      return;
++   size_t n = strlen(out);
++   NSMutableArray *keys = [NSMutableArray array];
++   for (NSString *k in e.userInfo)
++      if (![k isEqualToString:NSUnderlyingErrorKey] && ![k isEqualToString:NSLocalizedDescriptionKey])
++         [keys addObject:[NSString stringWithFormat:@"%@=%@", k, e.userInfo[k]]];
++   snprintf(out + n, n < cap ? cap - n : 0, "%s%s %ld '%s'%s%s%s", depth ? " <- " : "",
++            e.domain.UTF8String, (long)e.code, e.localizedDescription.UTF8String ?: "",
++            keys.count ? " {" : "", keys.count ? [keys componentsJoinedByString:@", "].UTF8String : "",
++            keys.count ? "}" : "");
++   for (NSError *u in e.underlyingErrors)
++      kk_mtl_error_describe(u, depth + 1, out, cap);
++}
++
+ void
+ mtl_commit_options_add_feedback_handler(mtl_commit_options *options,
+                                         mtl_feedback_handler_callback callback,
+@@ -41,6 +62,12 @@ mtl_commit_options_add_feedback_handler(mtl_commit_options *options,
+                .access_revoked = kk_mtl_error_access_revoked(error),
+                .out_of_memory = kk_mtl_error_out_of_memory(error),
+             };
++            char detail[2048];
++            if (error) {
++               detail[0] = 0;
++               kk_mtl_error_describe(error, 0, detail, sizeof(detail));
++               feedback_data.error_detail = detail;
++            }
+             callback(&feedback_data);
+          }
+       }];
+diff --git a/src/kosmickrisp/bridge/mtl_types.h b/src/kosmickrisp/bridge/mtl_types.h
+index d594bec..dea6bf0 100644
+--- a/src/kosmickrisp/bridge/mtl_types.h
++++ b/src/kosmickrisp/bridge/mtl_types.h
+@@ -401,6 +401,10 @@ struct mtl_feedback_data {
+     * `error` alone is the top-level code without its domain. */
+    bool access_revoked;
+    bool out_of_memory;
++   /* nps5 devlost: with an error, the whole NSError tree as one line
++    * ("domain code 'description' <- underlying ..."); NULL without one. Valid
++    * only inside the callback. */
++   const char *error_detail;
+ };
+ 
+ #endif /* KK_MTL_TYPES_H */
+diff --git a/src/kosmickrisp/vulkan/kk_safety.c b/src/kosmickrisp/vulkan/kk_safety.c
+index dc49268..956dc89 100644
+--- a/src/kosmickrisp/vulkan/kk_safety.c
++++ b/src/kosmickrisp/vulkan/kk_safety.c
+@@ -711,6 +711,24 @@ kk_safe_commit_done(struct kk_safe_token *tk, struct mtl_feedback_data *data)
+       data->out_of_memory = true;
+    }
+ 
++   /* nps5 devlost: any failed command buffer: the whole Metal error (the device-lost message Mesa
++    * prints only through vk_log, dropped without a messenger) and, once, the flight summary with
++    * this commit marked. First 8 errors; logging only, no behaviour change. */
++   if (data->error != MTL_COMMAND_QUEUE_ERROR_NONE || data->error_detail) {
++      static _Atomic unsigned n_err;
++      unsigned k = atomic_fetch_add(&n_err, 1);
++      if (k < 8) {
++         uint64_t age_ms = tk->slot && tk->slot->seq == tk->seq ? (now_ns() - tk->slot->start_ns) / 1000000ull : 0;
++         fprintf(stderr,
++                 "[kk-safe] [RED] command buffer error #%u: commit %llu (age %llu ms, gpu %.3f..%.3f s): code %d: %s\n",
++                 k + 1, (unsigned long long)tk->seq, (unsigned long long)age_ms, data->gpu_start, data->gpu_end,
++                 (int)data->error, data->error_detail ? data->error_detail : (data->error_message ? data->error_message : ""));
++         if (k == 0)
++            dump_flight(tk->slot && tk->slot->seq == tk->seq ? (int)(tk->slot - g_ring) : -1);
++         fflush(stderr);
++      }
++   }
++
+    /* Only MTL4CommandQueueErrorDomain AccessRevoked, also when it sits under a top-level timeout
+     * (bridge/mtl_error_classify.h). The top-level code alone is not enough: an innocent victim's
+     * IOGPU error has code 5 too, and the GPU recovers from a hang or fault alone. */
+-- 
+2.56.0
+
