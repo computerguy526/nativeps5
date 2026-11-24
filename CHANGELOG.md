@@ -29,6 +29,8 @@ Astro Bot crash fix and one display-buffer fix. **Update:** `nativeps5-recomp`, 
   deferral, eager readback pages, the switches above, and Unreal console variables set through `NPS5_UECVAR_SET`: Nanite persistent-thread
   culling and ray tracing off, Nanite raster on the vertex path). `nps5 uecvar` now lists float console variables as float (they were shown as
   integers).
+- SAROS itself is still not playable from the release line: its shader decoding, hand shaders (`HS_DYNIDX`) and boot support live on development
+  branches; the `PPSA07631` profile and the switches above only take effect together with them.
 - Not in this release: the SAROS hand-shader work (`HS_DYNIDX`), the `FAULT_HOST_READBACK` port (already in v1.2.3.1), the KosmicKrisp switch tree,
   the larger AnyPS5 recompiler bundle (it invalidates the pipeline journal).
 
