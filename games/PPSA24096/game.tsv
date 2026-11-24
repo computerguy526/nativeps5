@@ -1,0 +1,36 @@
+# Cronos: The New Dawn (PS5, Unreal Engine 5.5 line, AGC graphics). Schema: games/schema.tsv. See README.md: bring-up only.
+# key<TAB>value, comments on their own lines. No game data: identifiers, counts and switches only.
+# No translator profile (ps5recomp/profiles/PPSA24096.json) exists yet: the title ran on the SAROS stack. Nothing here is validated.
+
+# ---- Identity ----
+title_id	PPSA24096
+name	Cronos: The New Dawn
+engine	Unreal Engine 5.5 line (same cvar table as SAROS to within a few names; MegaLights and Substrate present, no 5.6 Nanite assemblies)
+graphics	AGC; Nanite, Lumen, virtual shadow maps, TSR; Bink 2 movies decoded in guest code
+build	01.010.000	eboot=badcaa3cd064868f	size=201566147
+package	01.010.000
+stage	S1
+
+# ---- Back end ----
+gpu	kyty
+preset	titles/kyty-preset.env
+window	1920x1080
+direct_mem_mib	13824
+gpu_profile_ban	on
+
+# ---- Timing / run limits ----
+run_secs	default=150	max=300
+cache	kind=none
+
+# ---- Environment words ----
+# The footprint guard was raised once, by the owner, from 17408 to 18432 MiB for this title (the 24 GB Mac limit is 18944); it is
+# never raised further and never to make a scene pass.
+env	NPS5_WINDOW_TITLE_NAME=Cronos	-	window title label
+env	NPS5_GPU=kyty	gpu=kyty	back end selector word
+env	NPS5_SELF_MEM_LIMIT_MB=18432	gpu=kyty	footprint guard for this title (17770 MiB was reached at about 8.5 min of a cold-cache session)
+env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
+
+# ---- Facts ----
+fact.content_version	01.010.000 (sce_sys/param.json contentVersion), SDK 10.00
+fact.footprint_gb	9.1 in the menu with a warm cache; 14-17.8 in a cold-cache play session
+fact.pack	about 35 GB as dumped (UE IoStore .ucas of 1, 14 and 19 GB)

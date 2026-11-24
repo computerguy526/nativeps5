@@ -1,3 +1,4 @@
+name	component	meaning	source
 APS5_A	anyps5		tools/tests/test_env_reference.py
 APS5_AB	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/RuntimeSwitches.cpp
 APS5_AB_FLAGS	anyps5	names of the switches APS5_AB_PERIOD alternates	core/libs/prx/libSceAgcDriver/Graphics/include/AbSwitch.hpp
@@ -808,7 +809,7 @@ KK_METALLIB_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_METAL_CACHE_ID	kosmickrisp	name of a private OS Metal shader cache for this configuration; use a fresh one per arm of a shader comparison	bridge/mtl_compiler.m
 KK_METAL_CACHE_ID	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_CACHE_BUST	kosmickrisp		bridge/mtl_compiler.m
-KK_MSL_CANON_KEY	kosmickrisp	1 = also key every shader by the MSL text macOS 26 / Apple GPU family 9 writes (canonical key, log field canon=); an override is looked up under this Mac's own key first, then the canonical key. Default 0 (v1.2.2 oskey)	vulkan/kk_shader.c
+KK_MSL_CANON_KEY	kosmickrisp	1 = also key every shader by the MSL text macOS 26 / Apple GPU family 9 writes (canonical key, log field canon=); an override is looked up under this Mac's own key first, then the canonical key. Default 0 (v1.2.2 oskey)	vulkan/kk_physical_device.c
 KK_MSL_CANON_KEY	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_COLLECT_DIR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_MSL_COLLECT_DIR	kosmickrisp		bridge/mtl_compiler.m
@@ -825,6 +826,8 @@ KK_MSL_OVERRIDE_DIR	kosmickrisp	directory of replacement compute kernels <b3>.me
 KK_MSL_OVERRIDE_DIR	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_OVERRIDE_LOG	kosmickrisp	1 = log the key of every application compute kernel ('[kk-mslinject] seen <b3>'); cache prepare pass 1 sets it	vulkan/kk_shader.c
 KK_MSL_OVERRIDE_LOG	nativeps5		scripts/nps5lib/cache.py
+KK_MSL_OVERRIDE_MESH	kosmickrisp		vulkan/kk_shader.c
+KK_MSL_OVERRIDE_MESH	nativeps5		scripts/nps5lib/metal.py
 KK_MSL_OVERRIDE_PERIOD	kosmickrisp	<s> = alternate replacement (even phases) and KosmicKrisp's kernel (odd phases) inside one run, for A/B	vulkan/kk_shader.c
 KK_MSL_STATS	kosmickrisp		vulkan/kk_shader.c
 KK_MSL_STATS	nativeps5		kosmickrisp/tests/msldrop/run.sh
@@ -879,6 +882,7 @@ KYTY_APR_KEEP_FILES	kyty		src/libs/libAmpr.cpp
 KYTY_APR_PREPARE_WRITE	kyty		src/libs/libAmpr.cpp
 KYTY_ASTRO_CB_SCALE	kyty		src/loader/gamePatch.cpp
 KYTY_ASTRO_TILE_GRID	kyty	`auto` or `<tx>x<ty>` (at most 240x135): ASTRO BOT light-tile grid for a forced internal size (fixes the 720p/900p blocks; set by the upscaling setting; `auto` acts only with MetalFX)	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_ATOMIC64_IMAGE	kyty		src/graphics/shader/recompiler/ShaderRecompiler.cpp
 KYTY_AUDIO2_UNLOCKED_PUSH	kyty		src/libs/libAudio2.cpp
 KYTY_AUDIO_CLOCK_SKEW_PPM	kyty		src/libs/audio.cpp
 KYTY_AUDIO_DIAG	kyty		src/libs/audioDiag.h
@@ -902,6 +906,7 @@ KYTY_BARRIER_BATCH	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_BARRIER_SINK	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_BDA_DIRTY_LOG	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_DIRTY_LOG_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_BDA_DRAW_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_BDA_HOT_SYNC	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_HOT_SYNC_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_INCREMENTAL_SYNC	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -912,6 +917,7 @@ KYTY_BDA_PAGETABLE_SPARSE	nativeps5		titles/kyty-preset.env
 KYTY_BDA_SHARED_BLOCKS	kyty		src/graphics/host_gpu/renderer/cache/streamBuffer.cpp
 KYTY_BDA_STORE_LOG	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_BDA_STORE_LOG_STATS	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_BDA_STRUCT_LOG	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_SYNC_EPOCH	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_SYNC_EPOCH_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BDA_SYNC_PER_SUBMISSION	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -935,6 +941,11 @@ KYTY_BUFFER_RANGE_FIXES	kyty		src/graphics/host_gpu/renderer/pipeline/descriptor
 KYTY_BUFFER_RANGE_MEMO	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BUFFER_RANGE_MEMO_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_BUFFER_REFRESH_FUSION	kyty		src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp
+KYTY_BUNDLE_COMPACT	kyty	SAROS: `1` compacts the command processor's shader bundles; set by the PPSA07631 profile	src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_BUNDLE_COMPACT	ps5recomp		pkg/pack/profile_test.go
+KYTY_BUNDLE_COMPACT_DROP	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_BUNDLE_LOG	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_BUNDLE_LOG_AFTER_S	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_CAPTURE_SHADER_DETAILS	kyty		src/launcher/src/mainDialog.cpp
 KYTY_CAPTURE_SHADER_DETAILS	nativeps5		titles/kyty-preset.env
 KYTY_CB_METADATA_MATERIALIZE	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
@@ -943,6 +954,7 @@ KYTY_CB_SHADER_MASK_EXPORTS	nativeps5		titles/kyty-preset.env
 KYTY_CFG_CLONE_EXITS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_CFG_TESTS_CONTINUE	kyty		tests/shaderCfgTests.cpp
 KYTY_CJK_FONT	kyty		src/common/systemFonts.cpp
+KYTY_CLAMP_MIP_TO_EXTENT	kyty	default on, `0` off: mip counts above floor(log2(max extent))+1 (illegal in Vulkan/Metal) are clamped on the host image and views; the guest layout of the declared count is kept	src/graphics/host_gpu/renderer/image/mipClamp.h
 KYTY_CLAMP_RANGE_MEMO	kyty		src/kernel/memory.cpp
 KYTY_CLAMP_RANGE_MEMO_VERIFY	kyty		src/kernel/memory.cpp
 KYTY_CLEAN_PAGE	kyty	1: a store to a page whose GPU bytes are already published skips the drain (v1.1.2 profile default on)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -954,12 +966,15 @@ KYTY_CLEAR_TRACE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_CLIP_GUARD	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_CLOSE_SAVE_TIMEOUT_MS	kyty	ms the close-time pipeline cache save may take on the main thread before the window closes anyway (0 = wait for ever; ASTRO BOT profile 5000)	src/graphics/presentation/window/window.cpp
 KYTY_CMASK_FAST_CLEAR	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
+KYTY_CMASK_GPU_REFRESH	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_CMASK_MSAA	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_CMASK_NATIVE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_CMD_GUARD	kyty		src/graphics/host_gpu/renderer/commandRecorder.cpp
 KYTY_COMPUTE_IMAGE_COPY	kyty	1 = a guest compute pass proven to copy one surface to another becomes a native image copy (default 1 in the ASTRO BOT profile since v1.2.2, 0 = off; verify-kernel / verify = compare)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_COMPUTE_META_CLEAR_DISPATCH	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_COMPUTE_WAVE64	kyty		src/graphics/presentation/window/vulkanWindow.cpp
+KYTY_CONDEXEC_LOG	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_CONDEXEC_SYNC	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_COPY_VIA_BUFFER_BATCH	kyty		src/graphics/host_gpu/renderer/image/image.cpp
 KYTY_CORPUS_CS	kyty		tests/ShaderRecompilerComputeTests.cpp
 KYTY_CORPUS_DUMP_IR	kyty		tests/ShaderRecompilerComputeTests.cpp
@@ -989,6 +1004,8 @@ KYTY_CP_OWNED_COUNTERS	kyty		src/graphics/host_gpu/renderer/drawPrep/ownedCounte
 KYTY_CP_OWNED_COUNTERS	nativeps5		titles/kyty-preset.env
 KYTY_CP_PASS_STATS	kyty	`1` logs draws, target sizes and commit time per pass	src/graphics/host_gpu/renderer/drawPrep/cpGaps.cpp
 KYTY_CP_PRIORITY	kyty		src/common/threads.cpp
+KYTY_CP_READ_DIAG	kyty		src/graphics/host_gpu/renderer/renderContext.cpp
+KYTY_CP_READ_IMAGE_SYNC	kyty		src/graphics/host_gpu/renderer/renderContext.cpp
 KYTY_CP_RECORDER	kyty		src/common/u59Preset.cpp
 KYTY_CP_RECORDER	nativeps5		titles/kyty-preset.env
 KYTY_CP_RECORDER_BENCH_DRAWS	kyty		tests/ShaderRecompilerComputeTests.cpp
@@ -1029,6 +1046,15 @@ KYTY_CP_WAIT_JOURNAL	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_CP_WAIT_JOURNAL	nativeps5		titles/kyty-preset.env
 KYTY_CP_WAKEUPS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_CP_WRITE_LOG	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_CS_BIND_LOG	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_CS_CAPTURE	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
+KYTY_CS_CAPTURE_AFTER_S	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
+KYTY_CS_CAPTURE_DIR	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
+KYTY_CS_KO	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_CS_KO_CYCLE	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_CS_KO_FROM_S	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_CS_MAX_GROUPS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_CS_PROBE	kyty		src/graphics/host_gpu/renderer/nanProbe.h
 KYTY_CS_SPIN_COUNT	kyty		src/common/threads.cpp
 KYTY_CUDA_EARLY_INIT	kyty		src/main.cpp
 KYTY_CUDA_VA_FLOOR_GB	kyty		src/main.cpp
@@ -1038,6 +1064,7 @@ KYTY_DCC_GPU	nativeps5		titles/kyty-preset.env
 KYTY_DCC_GPU_REFRESH	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DCC_GPU_REFRESH	nativeps5		titles/kyty-preset.env
 KYTY_DCC_GPU_REFRESH_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
+KYTY_DCC_KNOWN_FILL_ALIASED	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DEFER_PROTECTS	kyty		src/graphics/host_gpu/pageManager.cpp
 KYTY_DEFER_PROTECTS	nativeps5		titles/kyty-preset.env
 KYTY_DEFER_PROTECTS_COWATCH	kyty		src/graphics/host_gpu/pageManager.cpp
@@ -1053,6 +1080,7 @@ KYTY_DEPTH_FEEDBACK_USAGE	kyty	`0` creates depth images without the attachment f
 KYTY_DEPTH_GROW_RECREATE	kyty	1 = recreate a depth target that is narrower than the request (upstream KytyPS5 #2417; default 1 in the ASTRO BOT profile since v1.2.2, 0 = off)	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DEPTH_LAYOUT_STABLE	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DEPTH_RO_STORE_NONE	kyty		src/graphics/host_gpu/renderer/context.cpp
+KYTY_DEPTH_STENCIL_ALIAS_SYNC	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DESCRIPTOR_OFFSET_AUDIT	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_DESCRIPTOR_OFFSET_AUDIT	nativeps5		titles/kyty-preset.env
 KYTY_DESCRIPTOR_POOL_SCALE	kyty		src/graphics/host_gpu/renderer/pipeline/descriptorHeap.cpp
@@ -1068,9 +1096,11 @@ KYTY_DIRECT_IMAGE_COPY_WIDE	kyty		src/graphics/host_gpu/renderer/cache/textureCa
 KYTY_DIRTY_IMAGE_QUERY	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_DIRTY_IMAGE_QUERY	nativeps5		titles/kyty-preset.env
 KYTY_DISPATCHER_CAP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_DISPATCHER_TREE	kyty		src/graphics/shader/recompiler/CodegenFingerprint.cpp
 KYTY_DISPATCH_OVERLAP	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_DPP_SKIP_INACTIVE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_DRAW_BINDING_REPEAT_STATS	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
+KYTY_DRAW_BIND_LOG	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_DRAW_PREP	kyty		src/graphics/host_gpu/renderer/drawPrep/drawPrep.cpp
 KYTY_DRAW_PREP_BINDINGS	kyty		src/graphics/host_gpu/renderer/drawPrep/bindingPlan.cpp
 KYTY_DRAW_PREP_BINDINGS	nativeps5		titles/kyty-preset.env
@@ -1105,6 +1135,7 @@ KYTY_DRAW_PREP_VERIFY	kyty		src/graphics/host_gpu/renderer/drawPrep/drawPrep.cpp
 KYTY_DRAW_PREP_WAKE_BACKLOG	kyty		src/graphics/host_gpu/renderer/drawPrep/drawPrep.cpp
 KYTY_DRAW_PREP_WINDOW	kyty		src/graphics/host_gpu/renderer/drawPrep/drawPrep.cpp
 KYTY_DRAW_PREP_WORKERS	kyty		src/graphics/host_gpu/renderer/drawPrep/drawPrep.cpp
+KYTY_DRAW_PROBE	kyty		src/graphics/host_gpu/renderer/nanProbe.h
 KYTY_DRAW_RUN	kyty		src/graphics/host_gpu/renderer/drawPrep/drawRun.cpp
 KYTY_DRAW_RUN	nativeps5		titles/kyty-preset.env
 KYTY_DRAW_RUN_ACQUIRE	kyty		src/graphics/host_gpu/renderer/drawPrep/drawRun.cpp
@@ -1132,6 +1163,12 @@ KYTY_DRAW_RUN_WRITES	nativeps5		titles/kyty-preset.env
 KYTY_DRAW_SEQUENCE_FAST	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_DRAW_SEQUENCE_VERIFY	kyty		src/graphics/host_gpu/renderer/colorRenderTarget.cpp
 KYTY_DRAW_WRITE_SINK	kyty		src/graphics/host_gpu/renderer/context.cpp
+KYTY_DUMP_BC	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_BC_ADDRS	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_BC_ALL	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_BC_MAX	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_BC_MAXW	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_BC_MINW	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_DIR	kyty	folder for frame and target dumps; must be under NPS5_SCRATCH	src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_DUMP_DIR	nativeps5		scripts/nps5lib/run.py
 KYTY_DUMP_FRAMES	kyty	number of presented frames to dump as pictures (with _EVERY and _FROM); the only allowed source of pictures; output is game data	src/graphics/presentation/window/swapchain.cpp
@@ -1145,13 +1182,16 @@ KYTY_DUMP_SCALE	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_STAT	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_STDOUT	kyty		src/graphics/shader/recompiler/ShaderRecompiler.cpp
 KYTY_DUMP_TARGETS	kyty	dumps cached colour targets at chosen flips (with _FROM, _EVERY, _DELAY, _MINW)	src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_TARGETS_AFTER_S	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_BURST	kyty	target dumps on consecutive flips	src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_DELAY	kyty		src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_TARGETS_DEPTH	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_EVERY	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_FROM	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_MAXW	kyty	largest target width the target dump writes	src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_MINW	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DUMP_TARGETS_ONLYW	kyty	target dump writes only targets of this width	src/graphics/presentation/window/swapchain.cpp
+KYTY_DUMP_TARGETS_RAW	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_DYNAMIC_STATE_SHADOW	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_EOP_DROPPED_LABELS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_EOP_FLUSH_BATCH	kyty		src/graphics/guest_gpu/graphicsRun.cpp
@@ -1163,7 +1203,6 @@ KYTY_EQUEUE_COALESCE	kyty		src/kernel/eventQueue.cpp
 KYTY_EXEC_SELECTS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FALSE_SHARING_WRITES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FALSE_SHARING_WRITES_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
-KYTY_FAST_BACKING_TRANSFERS	kyty		src/kernel/memoryAddressSpace.inc
 KYTY_FAST_BACKING_TRANSFERS	nativeps5		titles/kyty-preset.env
 KYTY_FAST_FMINMAX	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_FAST_MATH	kyty	0|1|2|3 pixel/compute shaders without NoContraction/SignedZeroInfNanPreserve (Metal fast math); default 0 (v1 codegen); 1 = opt-in fast math, known 1-in-3-frame sky/rock/visor flicker at the crash site; changes shaders (re-prepare)	src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1192,6 +1231,10 @@ KYTY_FAULT_MAP_SECONDS	kyty		src/graphics/host_gpu/faultCost.cpp
 KYTY_FAULT_PAGE_LIFT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FAULT_PROCESS_VEC	kyty	1 = vectorised GPU fault-buffer parser (opt-in, default off)	src/graphics/host_gpu/renderer/cache/faultManager.cpp
 KYTY_FIBER_GUEST_STACK	kyty		src/libs/libKernel.cpp
+KYTY_FINDBUF_FAST	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FINDBUF_STATS	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FINDBUF_VERIFY	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_FLAG_READBACK	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_FLIGHTREC	kyty	flight recorder (v1.1; compiled in, OFF unless set): 1 = light (bounded rings, about 13 MB, dumps only on triggers: GPU watchdog, frame or present stall over 2 s, memory limit, SIGTERM/abort/crash, exit); 2 = verbose (every draw/bind event, exit dump); unset or 0 = off. A dump holds ids, sizes, hashes and timings, no game bytes	src/common/flightRec.cpp
 KYTY_FLIGHTREC_ALLTHREADS	kyty	1 = flight-recorder dumps backtrace every thread and add a 10 s guest-flip-stall dump (only with KYTY_FLIGHTREC; ASTRO BOT profile 1)	src/common/flightRec.cpp
 KYTY_FLIGHTREC_CTL	kyty	path of a control file; when it exists a dump is written and the file removed (polled once per flip)	src/common/flightRec.cpp
@@ -1226,6 +1269,7 @@ KYTY_GC_SETTLE_SKIP_EMPTY	kyty	1 = buffer collector does not wait for the GPU wi
 KYTY_GC_SIDE_SETTLE_LAZY	kyty	`1` buffer collector does not wait for pending side readbacks after every submission; off, not measured; no effect while KYTY_GC_SETTLE_SELECTIVE is on (the v1.1 default)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GC_SIDE_SETTLE_LAZY_CRITICAL	kyty	passes the collector may defer side-readback settles under pressure (default 0 = off; no effect while KYTY_GC_SETTLE_SELECTIVE is on)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_GDS_EOP_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_GDS_EOP_STATS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_GDS_TRACE	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_GFX_SLICE_DRAWS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_GPU_ACCURACY	kyty	high (exact) | normal (selective precision) | low (fast math outside the deny list; v1.1.2 profile default)	src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1271,6 +1315,7 @@ KYTY_GUEST_SCHED	kyty		src/kernel/pthread.cpp
 KYTY_GUEST_STORAGE_REPEAT	kyty		src/graphics/host_gpu/renderer/image/image.cpp
 KYTY_GUEST_TEB_STACK_RANGE	kyty		src/common/hostException.cpp
 KYTY_GUEST_TEB_STACK_RANGE	nativeps5		titles/kyty-preset.env
+KYTY_GUEST_WRITE_JOURNAL	kyty		src/kernel/memory.cpp
 KYTY_HANG_DELAY_AFTER_MS	kyty		src/common/hangWatchdog.cpp
 KYTY_HANG_DELAY_KEY	kyty		src/common/hangWatchdog.cpp
 KYTY_HANG_DELAY_MS	kyty		src/common/hangWatchdog.cpp
@@ -1306,6 +1351,7 @@ KYTY_HOT_PAGE_CHECK_LIMIT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache
 KYTY_HOT_PAGE_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_HOT_PAGE_MAX	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_HOT_PAGE_QUIET_FRAMES	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
+KYTY_HTILE_CS_EXPAND	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_IDLE_FLUSH_DRAWS	kyty		src/common/liveSwitch.h
 KYTY_IMAGE_ALIAS_AGE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_IMAGE_CACHE_POLICY	kyty		src/common/profiler.cpp
@@ -1325,10 +1371,25 @@ KYTY_IMAGE_TRANSIT_SKIP_VERIFY	kyty		src/graphics/host_gpu/renderer/image/image.
 KYTY_IMAGE_WRITEBACK_GUARD	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_IMAGE_WRITEBACK_ON_GPU_WRITE	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_INDIRECT_DRAW_INDEX	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_INDIRECT_LOG	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_INDIRECT_VALIDATE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
+KYTY_INPUT_PROFILE	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_FIRST	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_FLUSH_S	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_INTERVAL_MS	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_KB	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_MAX	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_MAX_SLOTS	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_OUT	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_RAW	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_RAW_KB	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_RAW_MB	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_STAT_KB	kyty		src/common/inputProfile.cpp
+KYTY_INPUT_PROFILE_VERTICES	kyty		src/common/inputProfile.cpp
 KYTY_INTERP_MODES	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_IR_LINEAR_USES	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_IR_VALIDATE	kyty		src/graphics/shader/recompiler/ir/Program.cpp
+KYTY_KK_TAG	kyty		src/graphics/host_gpu/renderer/pipeline/shaders.cpp
 KYTY_LABEL_ADDR_LOG	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_LABEL_COMPLETION_INTERRUPTS	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_LABEL_COMPLETION_NOORDER	kyty		src/graphics/guest_gpu/graphicsRun.cpp
@@ -1381,7 +1442,6 @@ KYTY_LOD_STATS_PLAIN_VARIANT	kyty		src/graphics/host_gpu/renderer/lodStats.cpp
 KYTY_LOOP_GUARD	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_LOOP_GUARD_SHADERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MAD_MODE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
-KYTY_MAP_REGION_EPOCH	kyty		src/kernel/memoryAddressSpace.inc
 KYTY_MEMLOG	kyty	1 = a 1 Hz [mem] line (footprint, resident, compressed, swap, guest direct memory) and [slowframe] lines on stderr	src/graphics/presentation/window/swapchain.cpp
 KYTY_MEMTRIM_ALIAS_FRAMES	kyty	`<n>`: free an image unused for n frames whose range a newer GPU-written image at the same address covers; default 0 = off; experimental	src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_MEMTRIM_BIG_WIDTH	kyty	`<n>`: render/depth/storage images at least n pixels wide get their own Metal heap (dedicated allocation), so retiring one returns its memory; default 0 = off; 2400 covers the off-resolution targets; opt-in (with KYTY_BDA_PAGETABLE_MB=64)	src/graphics/host_gpu/vma.cpp
@@ -1393,12 +1453,15 @@ KYTY_MESH_RESTART	nativeps5		titles/kyty-preset.env
 KYTY_METALFX	kyty	`1|temporal|spatial` MetalFX in place of the game's own temporal upscale pass; built, NOT validated (the pass matcher has not engaged)	src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX	ps5recomp	MetalFX scaler for the game's upscale pass: off | spatial | temporal (set by the upscaling setting)	pkg/cli/settingsdialog_test.go
 KYTY_METALFX_COMPUTE_PASS	kyty	hash of the level compute upscale pass that gets MetalFX (hex; 0 = off)	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_COMPUTE_REPLACE	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_CYCLE	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_CYCLE_FROM	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_DEPTH	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_DEPTH_NEAR	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_DEPTH_REVERSED	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_FIND	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_FIND_ANCHOR	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_FIND_ANCHOR_FRAMES	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_FIND_RESET_S	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_FIND_W	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_JITTER	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
@@ -1408,8 +1471,12 @@ KYTY_METALFX_MAX_IN_W	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_MV_JITTER	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_MV_SIGN	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_METALFX_PASS	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_UE	kyty	`log|fsr3`: MetalFX temporal in the Unreal third-party upscaler (FSR3) slot; default off, experimental	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_METALFX_UE_SKIP	kyty	`1` skips the FSR3 dispatches when MetalFX takes the slot	src/graphics/host_gpu/renderer/metalfx.cpp
+KYTY_META_CLEAR_LOG	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_META_CLEAR_MEMO	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_META_CLEAR_MEMO	nativeps5		titles/kyty-preset.env
+KYTY_META_EXPORT_NOT_CLEAR	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_MIP_STATS_BASE_LEVEL	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_MOVREL_KNOWN_ZEROS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_MOVREL_RANGE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
@@ -1433,12 +1500,13 @@ KYTY_MSL_KK_BLEND	nativeps5	set by metal.py for kyty_msl_dump: the blend column 
 KYTY_MSL_KK_COLOR_MASK	kyty	set by metal.py for kyty_msl_dump: bit i = colour attachment i exists (graphics pair generation)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_KK_COLOR_MASK	nativeps5	set by metal.py for kyty_msl_dump: bit i = colour attachment i exists (graphics pair generation)	scripts/nps5lib/metal.py
 KYTY_MSL_KK_PS_ADCE	kyty	1 = drop fragment-shader instructions whose only reads are dead (opt-in, off; not used by the verified pairs)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
-KYTY_MSL_KK_PS_READS	kyty	set by metal.py for kyty_msl_dump: fragment interpolant components the vertex stage must write (from the generated fragment text)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
+KYTY_MSL_KK_PS_READS	kyty	set by metal.py for kyty_msl_dump: fragment interpolant components the vertex stage must write (from the generated fragment text)	src/graphics/shader/recompiler/backend/msl/MslMesh.cpp
 KYTY_MSL_KK_PS_READS	nativeps5	set by metal.py for kyty_msl_dump: fragment interpolant components the vertex stage must write (from the generated fragment text)	scripts/nps5lib/metal.py
 KYTY_MSL_KK_SET0	kyty	set by metal.py for kyty_msl_dump: descriptor set 0 offsets binding:offset (from games/<id>/metal-gfx-pairs.tsv)	src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
 KYTY_MSL_KK_SET0	nativeps5	set by metal.py for kyty_msl_dump: descriptor set 0 offsets binding:offset (from games/<id>/metal-gfx-pairs.tsv)	scripts/nps5lib/metal.py
 KYTY_MSL_KK_VA	kyty	set by metal.py for kyty_msl_dump: vertex attributes loc:binding:format (from games/<id>/metal-gfx-pairs.tsv)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_KK_VA	nativeps5	set by metal.py for kyty_msl_dump: vertex attributes loc:binding:format (from games/<id>/metal-gfx-pairs.tsv)	scripts/nps5lib/metal.py
+KYTY_MSL_KK_VS_ADCE	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_KK_VS_OUTS	kyty	set by metal.py for kyty_msl_dump: varying locations KosmicKrisp's own vertex shader writes (read from its text)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_KK_VS_OUTS	nativeps5	set by metal.py for kyty_msl_dump: varying locations KosmicKrisp's own vertex shader writes (read from its text)	scripts/nps5lib/metal.py
 KYTY_MSL_KK_WRITE_MASK	kyty	per-attachment colour write masks for fragment-output liveness (opt-in, off; not used by the verified pairs)	src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
@@ -1446,15 +1514,23 @@ KYTY_MSL_LDS_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.c
 KYTY_MSL_LOADGROUP	kyty		src/graphics/shader/recompiler/backend/msl/MslXform.cpp
 KYTY_MSL_LOADGROUP_MUTANT	kyty		src/graphics/shader/recompiler/backend/msl/MslXform.cpp
 KYTY_MSL_LOOP_CAP	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_MESH	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_MESH	nativeps5		scripts/nps5lib/metal.py
+KYTY_MSL_MESH_FLOAT	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_MESH_MODES	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_MESH_REASSOC	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_MESH_SPILL	kyty		src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
 KYTY_MSL_MIPSTATS_PLAIN	kyty	1 = emit the fragment shader without the LOD-feedback (MipStats) buffer (the "twin" variant in metal-gfx-pairs.tsv); set by metal.py	src/graphics/shader/recompiler/backend/msl/MslKkBda.cpp
 KYTY_MSL_MIPSTATS_PLAIN	nativeps5	1 = emit the fragment shader without the LOD-feedback (MipStats) buffer (the "twin" variant in metal-gfx-pairs.tsv); set by metal.py	scripts/nps5lib/metal.py
 KYTY_MSL_PERM_CURSOR	kyty	kyty_msl_dump: 0 = compile graphics permutations at push-data cursor 0 (old); default uses the cursor stored in programs.bin	tools/msl-dump/kytyMslDump.cpp
 KYTY_MSL_VOTE_MERGE	kyty	MSL back end: wave64 halves take one subgroup vote (default 1; 0 = the per-half votes)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
+KYTY_MSL_VS_MODES	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_VS_PERF	kyty		src/graphics/shader/recompiler/backend/msl/MslStageIo.cpp
 KYTY_MSL_VS_SINGLE_LANE	kyty	MSL back end, vertex stage: single-lane subgroup semantics like Kyty SPIR-V on KosmicKrisp (default on; 0 = old)	src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAITCNT_FENCE	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_WAVE64	kyty		src/graphics/shader/recompiler/backend/msl/MslEmitter.cpp
 KYTY_MSL_XF	kyty		src/graphics/shader/recompiler/backend/msl/MslXform.cpp
+KYTY_MSL_XF_AUTO	kyty		tests/MslCoreTests.cpp
 KYTY_MSL_XF_BLIM	kyty	emitter transform bounds_lim (kyty_msl_dump --mode blim; list rows only, off = unchanged text; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
 KYTY_MSL_XF_CLOAD	kyty	emitter transform vs_const_load (mode cload; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
 KYTY_MSL_XF_GEXIT	kyty	emitter transform guard_exit (mode gexit; list rows only; v1.2.2)	src/graphics/shader/recompiler/backend/msl/MslXform.cpp
@@ -1589,6 +1665,11 @@ KYTY_PRESENT_PORT_UNLOCKED	kyty		src/graphics/presentation/videoOut.cpp
 KYTY_PRESENT_UNLOCKED	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_PRIORITY_WAIT_SPIN_US	kyty		src/graphics/host_gpu/renderer/commandScheduler.cpp
 KYTY_PRIORITY_WAKE_BATCH	kyty		src/graphics/host_gpu/renderer/commandScheduler.cpp
+KYTY_PROBE_AFTER_S	kyty		src/graphics/host_gpu/renderer/nanProbe.h
+KYTY_PROBE_IDS	kyty		src/graphics/host_gpu/renderer/nanProbe.h
+KYTY_PROBE_LAYERS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_PROBE_LINES	kyty		src/graphics/host_gpu/renderer/nanProbe.h
+KYTY_PROBE_WATCH	kyty		src/graphics/host_gpu/renderer/nanProbe.h
 KYTY_PROFILE_AGGREGATES	kyty		src/common/profiler.cpp
 KYTY_PROFILE_AGGREGATES	nativeps5		titles/kyty-preset.env
 KYTY_PROFILE_COUNTERS	kyty		src/common/profiler.cpp
@@ -1618,6 +1699,7 @@ KYTY_PS_APPEND_LIVE_ELECTION	kyty		src/graphics/shader/recompiler/CodegenOptions
 KYTY_PS_HELPER_ATOMICS_SKIP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_PS_LIVE_EXEC	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_PS_PER_VERTEX	kyty	how pixel shaders read raw vertices of custom-interpolation parameters without per-vertex fragment inputs: `unpack` (canonical; vertex shader exports the unpacked fields), `gs` (generated geometry stage; correct, too much memory), `0` (interpolated packed bits = black triangles)	src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_PS_UINT32_TARGETS	kyty	`1` integer (UINT and SINT) colour targets get a raw uint4 pixel output; set by the PPSA07631 profile	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PUBLICATION_SNAPSHOT	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_PUSH_CONSTANT_SHADOW	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_PUSH_SHADOW_FRESH_SKIP	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
@@ -1703,6 +1785,23 @@ KYTY_SAMPLER_MEMO	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_SAMPLER_REDUCTION	kyty		src/graphics/host_gpu/renderer/cache/samplerCache.cpp
 KYTY_SAMPLE_LOD_CLAMP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_SAMPLE_OFFSETS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_SAROS_ASYNC_CS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SAROS_ASYNC_CS_WAIT_MS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SAROS_HANDSHADERS	kyty	SAROS: `1` or a comma list of hashes opens the 8 listed bindless-lighting compute shaders to the indirect-image path; set by the PPSA07631 profile	src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_SAROS_HANDSHADERS	ps5recomp		pkg/pack/profile_test.go
+KYTY_SAROS_HANDSHADERS_LOG	kyty		src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp
+KYTY_SAROS_HS_DYNIDX	kyty	SAROS: `1` one canonical image-slot layout for the hand shaders (needs KYTY_SAROS_HANDSHADERS); default off, experimental	src/graphics/shader/recompiler/sarosHandShaders.h
+KYTY_SAROS_KEYSTRIDE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SAROS_MAP_PAD	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SAROS_NANITE_RAW	kyty	SAROS: `1` (or a hash list) gives Nanite raster pixel shaders their triangle from the raw vertex masks; set by the PPSA07631 profile	src/graphics/shader/recompiler/sarosHandShaders.h
+KYTY_SAROS_NANITE_RAW	ps5recomp		pkg/pack/profile_test.go
+KYTY_SAROS_NANITE_RAW_AND	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
+KYTY_SAROS_NANITE_RAW_VERTS	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
+KYTY_SAROS_NANITE_SHADE_STATS	kyty		src/graphics/guest_gpu/command_processor/naniteShadeStats.h
+KYTY_SAROS_PROGRAM_CACHE	kyty	SAROS: `1` keeps hand-shader and Nanite-raw programs in the persistent program cache (default off = recompile)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SAROS_SAMPLE_DBG	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
+KYTY_SAROS_SAMPLE_FRACT	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
+KYTY_SAROS_SAMPLE_LOD0	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAVE_LOAD_MAX_DEFER_S	kyty		src/common/nps5Frame.h
 KYTY_SAVE_LOAD_QUIET_S	kyty	periodic cache saves held during and N s after a level load (v1.1.2 profile default 20)	src/common/nps5Frame.h
 KYTY_SAVE_LOAD_VFS_MBS	kyty		src/common/nps5Frame.h
@@ -1743,9 +1842,11 @@ KYTY_SINGLE_F2I_SATURATION	kyty		src/graphics/shader/recompiler/CodegenOptions.c
 KYTY_SKIP_EMPTY_INDIRECT	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_SKIP_INACTIVE_PS	kyty		src/graphics/host_gpu/renderer/debug.cpp
 KYTY_SKIP_INVALID	kyty		src/common/skipInvalid.h
+KYTY_SKIP_UNDECODABLE	kyty		src/graphics/shader/recompiler/frontend/decode/ShaderDecoder.cpp
 KYTY_SMOKE_BAD_SCRIPT	anyps5		core/libs/nps5/tests/kyty_host_smoke.c
 KYTY_SNAPSHOT_CLEAN_READS	kyty	Small read-only buffer bindings the GPU has not written are copied at bind (visor flicker fix; default 1, 0 = v1.0.3 behaviour)	src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_SPEC_CHURN_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SPEC_DIFF_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SPEC_UNMAPPED_NULL	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_SPIN_GATE	kyty		src/common/spinGate.cpp
 KYTY_SPIN_RELAX	kyty	`pause` spins instead of yielding in worker waits; neutral on frame time, +10 % CPU; off	src/common/threads.cpp
@@ -1759,8 +1860,10 @@ KYTY_SRT_READ_RUNS	kyty		src/common/u59Preset.cpp
 KYTY_SRT_READ_RUNS	nativeps5		titles/kyty-preset.env
 KYTY_SRT_SHARED_CLEAN_VALUES	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SRT_SHARED_CLEAN_VALUES	nativeps5		titles/kyty-preset.env
+KYTY_SRT_SMIN	kyty		src/graphics/shader/recompiler/ir/passes/SrtWalker.cpp
 KYTY_SRT_TRACE	kyty		src/graphics/shader/recompiler/ir/passes/SrtWalker.cpp
 KYTY_SRT_TRACE_STATS	kyty		src/graphics/shader/recompiler/ir/passes/SrtWalker.cpp
+KYTY_SRT_UNMAPPED_DIAG	kyty		src/graphics/shader/recompiler/ir/passes/SrtWalker.cpp
 KYTY_SRT_VARIANT_READS	kyty		src/common/u59Preset.cpp
 KYTY_SRT_VARIANT_READS	nativeps5		titles/kyty-preset.env
 KYTY_STAGE_PREP_PARALLEL	kyty		src/graphics/host_gpu/renderer/pipeline/stagePrepWorker.cpp
@@ -1770,6 +1873,7 @@ KYTY_START_INSTANCE_SGPR	kyty		src/graphics/guest_gpu/command_processor/pm4Handl
 KYTY_STENCIL_TARGETS_APART	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_STENCIL_TARGETS_APART	nativeps5		titles/kyty-preset.env
 KYTY_STORAGE_RANGE_CAP	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
+KYTY_STORE_COMPLETION_FENCE	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_STREAM_COPY_DEFER	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_STREAM_COPY_DEFER	nativeps5		titles/kyty-preset.env
 KYTY_STREAM_COPY_PROBE	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1851,6 +1955,8 @@ KYTY_UFFD_WP	kyty		src/common/platform/uffdWriteWatch.cpp
 KYTY_UNIFORM_BUFFERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_UNIFORM_BUFFERS	nativeps5		titles/kyty-preset.env
 KYTY_UNIFORM_LANE_READS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_UNITY_WARMUP_NOSKIP	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
+KYTY_UNMAP_STATS	kyty		src/graphics/host_gpu/renderer/renderContext.cpp
 KYTY_UPLOAD_BATCH	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_UPLOAD_BATCH_SCOPED_FLUSH	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_UPLOAD_COPY_OUTSIDE_LOCK	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
@@ -1891,8 +1997,11 @@ KYTY_VS_OUTPUT_GUARD	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_VULKAN_SYNC_VALIDATION	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_VULKAN_VALIDATION_LOG	kyty		src/graphics/presentation/window/vulkanWindow.cpp
 KYTY_VULKAN_VALIDATION_MODE	kyty		src/graphics/presentation/window/vulkanWindow.cpp
+KYTY_WATCH_CONSUMER	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_WAVE32_CLUSTERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_WAVE64_WARPS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_WAVE64_WARPS_ALLOW	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_WAVE64_WARPS_DENY	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_WAVE64_WARPS_LOG	kyty		src/graphics/shader/recompiler/backend/spirv/SpirvEmitter.cpp
 KYTY_WIDE_FILL_CLEAR	kyty		src/graphics/host_gpu/renderer/cache/textureCache.cpp
 KYTY_WINDOW_FULLSCREEN	kyty		src/hybrid/kytyGpuBridge.cpp
@@ -1915,6 +2024,7 @@ MESA_KK_EXPERIMENTAL	kosmickrisp		vulkan/kk_debug.c
 MESA_KK_GPU_CAPTURE	kosmickrisp		vulkan/kk_physical_device.c
 MESA_KK_GPU_CAPTURE_DIRECTORY	kosmickrisp		vulkan/kk_physical_device.c
 MESA_KK_GPU_CAPTURE_IMMEDIATELY	kosmickrisp		vulkan/kk_physical_device.c
+NPS5_ACM_CONTEXT_OK	ps5recomp		pkg/runtime/modules/libSceNpOnlineStubs/nps5_online_stubs.c
 NPS5_ADDR_BASE	ps5recomp		pkg/guestmem/manifest.go
 NPS5_ADDR_IDENTITY	ps5recomp		pkg/guestmem/guestmem_test.go
 NPS5_AGC_WRITE_WATCH	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp
@@ -1940,16 +2050,23 @@ NPS5_AUDIO_NULL	nativeps5	`1` silent audio device; the default in run-title.sh	s
 NPS5_AUDIO_NULL	ps5recomp	`1` silent audio device; the default in run-title.sh	pkg/runtime/modules/libSceAudioOut/ps4_audioout.c
 NPS5_AUTOCAP_PROMOTION	kyty	1 = same as KYTY_FPS_AUTOCAP=promotion	src/graphics/presentation/autoCap.h
 NPS5_AVLOOP_COUNT	ps5recomp		tests/avloop/avloop_unit.cpp
+NPS5_AVPLAYER_CLOSE_CALLER_CTX	ps5recomp		pkg/pack/profile_test.go
 NPS5_AVPLAYER_DEC_THREADS	ps5recomp	video decode threads (default 4; 1 = one thread; 2..16)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_HOLD	ps5recomp	fetched video buffers kept away from the decoder (default 2, capped by the number of frame buffers)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_LOG	ps5recomp	`1` logs each video stream and its first three frames (sizes, pitch, crops, guest address)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_PITCH_ALIGN	ps5recomp	`=<n>` row pitch alignment of video frames from the AvPlayer HLE; default 256 for PS5 images (64 smeared 880-wide clips, docs/reference/rendering.md)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_SYNC_LEGACY	ps5recomp	1 = old video delivery (one frame per poll, no pacing in sync mode NONE, one decode thread)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
 NPS5_AVPLAYER_SYNC_TOL_MS	ps5recomp	how early a video frame may be shown (default 8 ms)	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_UNITY	ps5recomp		pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_VT	ps5recomp		pkg/runtime/modules/libSceAvPlayer/avplayer_vt.h
 NPS5_AVPLAYER_VTRACE	ps5recomp	1 = log every video frame and a timing summary	pkg/runtime/modules/libSceAvPlayer/ps4_avplayer.cpp
+NPS5_AVPLAYER_VT_FAIL_AT	ps5recomp		pkg/runtime/modules/libSceAvPlayer/avplayer_vt.h
+NPS5_AVPLAYER_VT_FORCE_SW	ps5recomp		pkg/runtime/modules/libSceAvPlayer/avplayer_vt.h
 NPS5_BREW_PREFIX	nativeps5		scripts/build.sh
 NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
 NPS5_BUILD_QOS	nativeps5	utility, background or maintenance: run the metallib compilers under taskpolicy -c at that QoS (default plain nice 5)	scripts/kk-libcache-build.sh
+NPS5_CACHE_COMPRESS	nativeps5	`1` makes `nps5 cache prepare` APFS-compress the finished cache folder, `0` forces off; default off	scripts/nps5lib/cachezip.py
+NPS5_CACHE_COMPRESS_MIN_AGE	nativeps5		scripts/nps5lib/cachezip.py
 NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_CALL_IC	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_CHECKED_PTR	ps5recomp		pkg/cli/cli.go
@@ -1958,6 +2075,7 @@ NPS5_COMPILE_THREADS	kyty	number of compile workers (prepare, launch phase, meta
 NPS5_COMPILE_THREADS	nativeps5	number of compile workers (prepare, launch phase, metallib build); default logical cores - 4, at least 2	scripts/nps5lib/cache.py
 NPS5_CONF	nativeps5		scripts/nps5-env.sh
 NPS5_CRASH_MEM	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_CRASH_REGDUMP	ps5recomp		pkg/runtime/core/recomp_runtime.c
 NPS5_DATA_STATE_DIR	nativeps5		scripts/nps5lib/data.py
 NPS5_DEV	nativeps5		scripts/nps5lib/metal.py
 NPS5_DIAG_FULL_PATHS	ps5recomp		pkg/runtime/core/nps5_diag.c
@@ -1969,6 +2087,7 @@ NPS5_DUMP_DIR	nativeps5		tests/test_bugreport.py
 NPS5_DUMP_MAP	ps5recomp		pkg/runtime/core/recomp_runtime.c
 NPS5_DUMP_PCMAP	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_EH_TRACE	ps5recomp		pkg/runtime/core/nps5_eh.c
+NPS5_EXPLAIN_ADDRS	ps5recomp		pkg/disasm/cfg.go
 NPS5_EXTRA_ENV	nativeps5		tests/compare_env.sh
 NPS5_FLUSH_STATS	anyps5		core/shader/recompiler/Translation/src/TranslationContext/OperandAccess.cpp
 NPS5_FONT_LAYOUT	ps5recomp	hhea = old font layout (ascender) instead of the face bbox	pkg/runtime/modules/libSceFont/ps4_font.c
@@ -2013,13 +2132,24 @@ NPS5_IC_FLUSH_STRESS	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_IGNORE_START_HOLD	nativeps5		scripts/nps5lib/run.py
 NPS5_INPUT_JSON	anyps5		core/libs/prx/libSceVideoOut/src/InputMapping.cpp
 NPS5_JOBS	ps5recomp		pkg/cli/cli.go
+NPS5_KEEP_FALLINTO	ps5recomp		pkg/disasm/cfg.go
+NPS5_KIO_BOUNCE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_KK_BUFFER_INT64	kosmickrisp	opt-in: 64-bit integer buffer atomics in KosmicKrisp; set by the PPSA07631 profile	vulkan/kk_physical_device.c
+NPS5_KK_BUFFER_INT64_SPLIT	kosmickrisp		compiler/nir_to_msl.c
 NPS5_KK_DIR	nativeps5		scripts/nps5lib/cache.py
 NPS5_KK_ICD	nativeps5		scripts/nps5-env.sh
+NPS5_KK_IMAGE_INT64	kosmickrisp	opt-in: 64-bit integer image atomics in KosmicKrisp (Unreal Nanite); set by the PPSA07631 profile	vulkan/kk_physical_device.c
 NPS5_KK_INSTALL	nativeps5		scripts/nps5-env.sh
 NPS5_KK_INSTALL	ps5recomp		pkg/diag/tools.go
+NPS5_KK_KEEP_COHERENT	kosmickrisp		vulkan/kk_physical_device.c
 NPS5_KK_LIBCACHE_BUILD	nativeps5		scripts/nps5lib/cache.py
+NPS5_KK_LOOP_KEYS	kosmickrisp		vulkan/kk_shader.c
 NPS5_KK_PREFIX	nativeps5		scripts/nps5-env.sh
 NPS5_KK_PREFIX	ps5recomp		pkg/pack/build.go
+NPS5_KK_RESIDENCY_AUDIT	kosmickrisp		vulkan/kk_cmd_draw.c
+NPS5_KK_RESIDENCY_LOCK	kosmickrisp	opt-in: serialises residency commits in KosmicKrisp; set by the PPSA07631 profile	vulkan/kk_queue.c
+NPS5_KK_SWITCH_TREE	kosmickrisp	opt-in: lowers large switch statements to a tree for Metal; set by the PPSA07631 profile	vulkan/kk_physical_device.c
+NPS5_KK_SWITCH_TREE	nativeps5	opt-in: lowers large switch statements to a tree for Metal; set by the PPSA07631 profile	kosmickrisp/tests/switchtree/run.sh
 NPS5_KK_WORK	nativeps5		nps5.conf.example
 NPS5_KYPLST_TOOL	nativeps5		scripts/verify-pipeline-list.sh
 NPS5_KYTY_ALIAS	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
@@ -2032,6 +2162,7 @@ NPS5_KYTY_GPU_LIB	ps5recomp	path of kyty_gpu.dylib when NPS5_GPU=kyty	pkg/runtim
 NPS5_KYTY_LAZY_START	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_KYTY_NO_DRIVER_DMEM	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_KYTY_NO_SHUTDOWN	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
+NPS5_KYTY_PROGRESS_VERDICT	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_KYTY_STATS	ps5recomp	`=<seconds>` logs fault counts and time in the fault handler per interval	pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_KYTY_TRACE	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_LAZY_DISPATCH	ps5recomp		pkg/runtime/core/recomp_runtime.c
@@ -2043,6 +2174,7 @@ NPS5_LOG	ps5recomp		pkg/diag/diag_test.go
 NPS5_LOG_RATE	ps5recomp	first,every: thin repeated periodic log lines (default off)	pkg/runtime/modules/libSceAnyPS5/nps5_log.h
 NPS5_LONG	nativeps5		tests/test_evidence_ab_report.py
 NPS5_LOWERING_ID	ps5recomp		pkg/emitter/lowering.go
+NPS5_MESH_ROWS	nativeps5		scripts/nps5lib/metal.py
 NPS5_METALLIB_STORE	nativeps5	content-addressed store of built Metal libraries; cache prepare sets <cache root>.metallib-store; empty = off	scripts/kk-libcache-build.sh
 NPS5_METAL_CANON	nativeps5	default ON (v1.2.2): pass KK_MSL_CANON_KEY=1 in prepare and at launch so the shipped Metal shaders match on any macOS / GPU (the lists' keys are canonical: macOS 26 / GPU family 9); 0 = off	scripts/nps5lib/metal.py
 NPS5_METAL_CLASS	nativeps5	override the GPU class of the Metal lists (needs NPS5_DEV=1)	scripts/nps5lib/metal.py
@@ -2050,6 +2182,7 @@ NPS5_METAL_SHADERS	nativeps5	0 = do not generate or use our Metal compute kernel
 NPS5_MISS	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_MKDIR	ps5recomp		pkg/pack/assets/launcher.c
 NPS5_MSL_TOOL	nativeps5	kyty_msl_dump used by the Metal shader generation (default <NPS5_KYTY_DIR>/build-arm64/kyty_msl_dump)	scripts/nps5lib/metal.py
+NPS5_NET_SOCKOPT_MAP	ps5recomp		pkg/runtime/modules/libSceNet/ps4_net.c
 NPS5_NO_BUNDLE	ps5recomp		pkg/cli/diag_hook.go
 NPS5_NO_HLE_COUNT	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_NO_LEVEL_ALIAS	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
@@ -2059,9 +2192,11 @@ NPS5_NO_PEEPHOLE	ps5recomp		pkg/cli/tier1_test.go
 NPS5_NO_PERF	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_NO_STALL_CREDIT	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_NO_TERM_HANDLER	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_NP_WEBAPI_INIT_OK	ps5recomp		pkg/runtime/modules/libSceNpCppWebApi/nps5_npcppwebapi_stubs.c
 NPS5_OVERLAY_DIR	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_PAD_LOG	anyps5		core/libs/nps5/KytyHost.cpp
 NPS5_PAD_MOTION_TRACE	anyps5		core/libs/tests/GuestPadMotion.cpp
+NPS5_PAD_NET	kyty	`<port>`: a controller on another Mac forwards its input over loopback TCP (tools-host padfwd); default off	src/libs/controller.cpp
 NPS5_PAK_LOCALE_FALLBACK	ps5recomp		pkg/runtime/kernel/vfs/ps4_pak.c
 NPS5_PATCH_BOOT	nativeps5		tests/test_patch_real.py
 NPS5_PATCH_OTHER_NATIVE	nativeps5		tests/test_patch_real.py
@@ -2074,23 +2209,39 @@ NPS5_PERF	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_PERF_HUD	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_PERF_HZ	ps5recomp		pkg/runtime/core/nps5_perf.c
 NPS5_PERF_PRINT	ps5recomp		pkg/runtime/core/nps5_perf.c
+NPS5_PHYS_DTCLAMP_HZ	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_DTCLAMP_OBJ	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SPRING	ps5recomp	physsub: bridge spring steps <= 1/600 s (default 1; 0 = unchanged)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SPRING_HZ	ps5recomp	physsub: spring step rate (600)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SPRING_LOG	ps5recomp	physsub: per-bridge spring log	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SPRING_MAX	ps5recomp	physsub: most spring sub-steps per call (8)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP	ps5recomp	physsub: Havok world sub-steps + cloth clamp (default 1; 0 = steps unchanged)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_ATTACH_ONCE	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_BT	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_BT_AT	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_CLAMP_DTFIX	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_CLOTH	ps5recomp	physsub: cloth clamp|substep|off	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_DTFIX	ps5recomp	0 = do not write the frame dt / 1/dt back after a split world step (default 1: fixes flickering leaves; v1.2.2)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_HOLD	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_HZ	ps5recomp	physsub: longest world/cloth step 1/hz s (60)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_INNER	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_LOG	ps5recomp	physsub: [physsub] line every 5 s	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_MAX	ps5recomp	physsub: most world steps per frame (4)	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_POISON	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_POISON_PERIOD	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_RELOCK	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PHYS_SUBSTEP_WORLD	ps5recomp	physsub: 0 leaves the rigid-body world step untouched	pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_WORLD_CLAMP	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
+NPS5_PHYS_SUBSTEP_WORLD_HZ	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_PPROF	ps5recomp		cmd/ps4-recomp/main.go
 NPS5_PREBUILD	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREBUILD_SCREEN	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREBUILD_SECONDS	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/Driver/Presentation.cpp
 NPS5_PREPARE_KEEP_PASS1	nativeps5	0 = cache prepare always runs a fresh second pass; default: pass 2 is skipped when pass 1 loaded every shader from stored metallibs and there is nothing new to generate	scripts/nps5lib/cache.py
 NPS5_PROFILES	ps5recomp		pkg/pack/profile.go
+NPS5_PRX_ENTRY_ARGS	ps5recomp		pkg/runtime/modules/libkernel/ps4_sysmodule.c
+NPS5_PTHREAD_ATTR_REAL	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
+NPS5_PTHREAD_EXIT_SCE	ps5recomp	`1` POSIX pthread_exit takes the full console thread-exit path; set by the PPSA07631 profile, off for other titles	pkg/runtime/modules/libScePosix/ps4_posix.c
 NPS5_PUBLIC_DIR	nativeps5		scripts/build.sh
 NPS5_RECOMP_DIR	nativeps5		nps5.conf.example
 NPS5_REGRESS_SKIP	nativeps5		scripts/nps5lib/regress.py
@@ -2120,12 +2271,15 @@ NPS5_RUN_SHADER_CACHE	nativeps5	0 = `nps5 run` does not point at the stack's pre
 NPS5_RUN_TAG	anyps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	core/libs/prx/libSceVideoOut/include/DisplayWindow.hpp
 NPS5_RUN_TAG	nativeps5	name of the run's output folder under NPS5_SCRATCH/runs/<title id>/	scripts/nps5lib/run.py
 NPS5_SAVEDATA_DIR	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
+NPS5_SAVEDATA_PREPARE_RW	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SAVEDATA_TRACE	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SCENE_OPEN_KEY	nativeps5		games/game.py
 NPS5_SCENE_OPEN_KEY	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_SCENE_TAG_SKIP	nativeps5	scene name prefixes that never become the current scene (default ui_; profile key scene_tag_skip)	games/game.py
 NPS5_SCENE_TAG_SKIP	ps5recomp	scene name prefixes that never become the current scene (default ui_; profile key scene_tag_skip)	pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_SCRATCH	nativeps5	folder outside every checkout for everything derived from a title: translated code, caches, runs, frame dumps	nps5.conf.example
+NPS5_SCRATCH_DWORDS	kyty		tools/spirv-dump/kytySpvDump.cpp
+NPS5_SEED_AFTER_UD2	ps5recomp		pkg/disasm/cfg.go
 NPS5_SELF_MEM_LIMIT_MB	anyps5	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
 NPS5_SELF_MEM_LIMIT_MB	kyty	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	src/hybrid/kytyGpuBridge.cpp
 NPS5_SELF_MEM_LIMIT_MB	nativeps5	process footprint limit in MiB; above it the process logs [RED] and exits 86. 37/48 of RAM from scripts/nps5-env.sh; never raised to make a scene pass (docs/reference/memory.md)	nps5.conf.example
@@ -2133,11 +2287,13 @@ NPS5_SETTINGS_DIALOG	ps5recomp		pkg/cli/settingsdialog_test.go
 NPS5_SHADER_PREPARE	nativeps5	`all` or `scene`: overrides the player's shader preparation setting	games/game.py
 NPS5_SHADER_PREPARE	ps5recomp	`all` or `scene`: overrides the player's shader preparation setting	pkg/runtime/modules/libSceSystemService/ps4_settings.m
 NPS5_SHADOW_ENTRIES	ps5recomp		pkg/runtime/core/nps5_shadow.c
+NPS5_SHADOW_FAULT_FAST	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_SHADOW_STATS	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_STACK_KK	nativeps5		scripts/nps5lib/cache.py
 NPS5_STACK_KYTY	nativeps5		scripts/nps5lib/cache.py
 NPS5_STACK_RECOMP	nativeps5		scripts/nps5lib/cache.py
 NPS5_SUPPORT_DIR	ps5recomp		pkg/pack/assets/launcher.c
+NPS5_SYSMODULE_ISLOADED_SCE	ps5recomp		pkg/runtime/modules/libkernel/ps4_sysmodule.c
 NPS5_TEST_B	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_FAST_LIGHTING	ps5recomp		pkg/emitter/patchpoints_test.go
 NPS5_TEST_HELLO_ELF	ps5recomp		pkg/disasm/hello_elf_ext_test.go
@@ -2145,9 +2301,11 @@ NPS5_TEST_METALFX	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_NO_DISKIMAGE	nativeps5		tests/test_data.py
 NPS5_TEST_PPSA21564_EBOOT	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_PS4_LIBC	ps5recomp		pkg/emitter/shim_test.go
+NPS5_TEST_TMP	nativeps5		tests/test_cachezip.py
 NPS5_TEST_UPSCALING	ps5recomp		pkg/emitter/patchchoice_test.go
 NPS5_TEST_VERBOSE	nativeps5		tests/test_data.py
 NPS5_TEST_XS	nativeps5		tests/test_patch.py
+NPS5_TEXNAME_GUARD	ps5recomp		pkg/runtime/modules/libSceAnyPS5/nps5_physsub.c
 NPS5_TIER1_CACHE	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_CACHE_MB	ps5recomp		pkg/runtime/core/nps5_tier1.c
 NPS5_TIER1_MAX_CONCURRENT	ps5recomp		pkg/runtime/core/nps5_tier1.c
@@ -2165,27 +2323,42 @@ NPS5_TITLE_RESOLUTION	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_TITLE_RUN	nativeps5		scripts/nps5lib/run.py
 NPS5_TRACE_CONDWAIT	ps5recomp		pkg/runtime/kernel/sync/ps4_sync.c
 NPS5_TRACE_HLE	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_TRACE_HLE_DUMP	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_TRACE_HLE_FIRST	ps5recomp		pkg/runtime/core/nps5_diag.c
+NPS5_TRACE_JOIN	ps5recomp		pkg/runtime/kernel/threading/ps4_threading.c
+NPS5_TRACE_SLOWDISPATCH	ps5recomp		pkg/runtime/core/nps5_shadow.c
 NPS5_TSO_RELAX_FUNCS	ps5recomp		pkg/cli/tier1_test.go
+NPS5_TSO_STRICT_FUNCS	ps5recomp		pkg/lifter/arm64_lifter.go
 NPS5_TS_POOL_MAX	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
 NPS5_UECVAR_AT	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_UECVAR_DUMP	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_UECVAR_LIST	ps5recomp		pkg/runtime/core/nps5_uecvar.c
-NPS5_UECVAR_SET	ps5recomp	Unreal Engine titles: `name=value[,..]` console variables applied at start (PPSA30552)	pkg/runtime/core/nps5_uecvar.c
+NPS5_UECVAR_SET	ps5recomp	Unreal Engine titles: `name=value[,..]` console variables applied at start (PPSA30552)	pkg/pack/profile_test.go
 NPS5_UECVAR_SET_FOR	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_UEMALLOC_POISON	ps5recomp		pkg/runtime/modules/libSceUeMalloc/nps5_uemalloc.c
 NPS5_UEMALLOC_STATS	ps5recomp		pkg/runtime/modules/libSceUeMalloc/nps5_uemalloc.c
+NPS5_UMTX_OP	ps5recomp		pkg/runtime/modules/libSceHlesys/nps5_hlesys.c
+NPS5_UNRESOLVED_RET0	ps5recomp		pkg/runtime/core/recomp_runtime.c
+NPS5_UNWIND_LOG	ps5recomp		pkg/runtime/modules/libkernel/ps4_kernel_sys.c
 NPS5_USERDATA_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_USERDATA_DIR	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_DEVLOG	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_VFS_DIRCACHE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_HOLE_CHECK	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_VFS_LOADPROFILE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_RANGELOG	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_VFS_RAW_WRITE	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_VFS_READLOG	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
+NPS5_VFS_SEGFILES	ps5recomp	`0` turns off the packed-file lookup (`<f>.nps5seg/` shown to the game as `<f>`); automatic otherwise, a plain file always wins (docs/reference/large-games.md)	pkg/runtime/kernel/vfs/nps5_segfile.c
+NPS5_VFS_SEGFILES_FDS	ps5recomp	segment file descriptors kept open (default 64, least recently used closes above it)	pkg/runtime/kernel/vfs/nps5_segfile.c
+NPS5_VFS_SEGFILES_TRACE	ps5recomp	`<n>`: log the first n packed-file reads with an FNV-1a hash of the bytes returned (for `gamepack.py checktrace`)	pkg/runtime/kernel/vfs/nps5_segfile.c
 NPS5_VFS_TRACE_INI	ps5recomp		pkg/runtime/kernel/syscalls/ps4_syscalls.c
 NPS5_VPAD_ASYNC	anyps5		core/libs/prx/libSceVideoOut/src/PadInput.cpp
 NPS5_VPAD_SCRIPT	anyps5		core/libs/nps5/KytyHost.cpp
 NPS5_VPAD_SCRIPT	nativeps5		scripts/nps5lib/run.py
 NPS5_VPAD_TYPE	anyps5		core/libs/prx/libSceVideoOut/src/PadInput.cpp
 NPS5_VPAD_TYPE	nativeps5		scripts/nps5lib/run.py
+NPS5_VQ_RESERVED_UNCOMMITTED	ps5recomp		pkg/pack/profile_test.go
 NPS5_VULKAN_LIB	nativeps5		scripts/nps5-env.sh
 NPS5_VULKAN_LIB	ps5recomp		pkg/pack/build.go
 NPS5_WATCH	nativeps5		scripts/nps5lib/run.py

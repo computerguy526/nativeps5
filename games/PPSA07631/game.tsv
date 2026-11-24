@@ -1,0 +1,44 @@
+# SAROS (PS5, Unreal Engine 5.5 line, AGC graphics). Schema: games/schema.tsv. See README.md for status, setup and known issues.
+# key<TAB>value, comments on their own lines. No game data: identifiers, counts and switches only.
+# The environment the title needs at run time is the translator profile ps5recomp/profiles/PPSA07631.json (baked into the translated
+# program); the rows below are what `nps5 run` adds on top. They do not repeat the profile.
+
+# ---- Identity ----
+title_id	PPSA07631
+name	SAROS
+engine	Unreal Engine 5.5 line (Nanite, Lumen, virtual shadow maps, TSR; ray tracing and Nanite compute raster turned off by the profile)
+graphics	AGC; compute-heavy (bindless lighting kernels), mesh-shader Nanite raster, 64-bit atomics, 4K output from a 720p-class scene
+build	01.005.002	eboot=6d383b3837ff06b8	size=195443417
+package	01.005.002
+stage	S4
+
+# ---- Translated binary lineage ----
+lineage	one	recomp=8f51072	the one release line (profile PPSA07631 with the hand-shader stack); v1.2.2-era translations of the same eboot also run
+canonical_lineage	one
+
+# ---- Back end ----
+gpu	kyty
+preset	titles/kyty-preset.env
+window	1920x1080
+# the guest direct-memory pool: the title allocates what it is given and sizes its pools to it
+direct_mem_mib	13824
+gpu_profile_ban	on
+
+# ---- Timing / run limits ----
+# the first 80 s are boot and intro; the load of the first level follows. A cold shader cache needs several runs to warm (README).
+run_secs	default=150	max=300
+blank_fail_s	150
+stall_fail_s	180
+cache	kind=none
+
+# ---- Environment words (deltas over the preset; why: README.md, "What the profile needs") ----
+env	NPS5_WINDOW_TITLE_NAME=Saros	-	window title label
+env	NPS5_GPU=kyty	gpu=kyty	back end selector word
+env	NPS5_SELF_MEM_LIMIT_MB=17408	gpu=kyty	SAROS runs at 15-16 GB; the limit is a guard, never raised to make a scene pass
+env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
+
+# ---- Facts ----
+fact.content_version	01.005.002 (sce_sys/param.json contentVersion), SDK 11.00
+fact.footprint_gb	15-16 in gameplay (about 7 resident, 3 compressed, 5 GPU)
+fact.output	3840x2160 display buffer; TSR from a scene rendered at about 720p (r.ScreenPercentage 33.34 in the tested configuration)
+fact.pack	about 153 GB as dumped (UE IoStore .ucas up to 64 GB); 79 GB after scripts/gamepack.py pack

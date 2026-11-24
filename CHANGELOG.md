@@ -30,6 +30,16 @@ program cache and the pipeline cache of every title get a new key); run `nps5 ca
   stays off for every other title.
 - **gamepack: pack a title to save disk space.** `scripts/gamepack.py` packs a title's large files; packed titles are detected automatically
   by the runtime (`NPS5_VFS_SEGFILES=0` forces it off). See the README, "Save disk space: pack a title".
+- **SAROS profile completed.** `profiles/PPSA07631.json` now sets `KYTY_SAROS_HANDSHADERS`, `KYTY_SAROS_NANITE_RAW` and `KYTY_BUNDLE_COMPACT` (the test
+  runners used to pass them) and keeps the approved `r.LightFunctionQuality=1` look. New game notes: [SAROS](games/PPSA07631/README.md) (setup, settings,
+  known issues) and [Cronos](games/PPSA24096/README.md) (bring-up status only: boots, warm cache, no profile, the pipeline-list tool cannot list
+  Unreal shaders, footprint guard 18432 MiB). The README Games table lists both.
+- **Mip-count clamp keeps the guest layout (Kyty, `KYTY_CLAMP_MIP_TO_EXTENT`, on by default).** A texture declaring more mip levels than its size
+  allows is clamped on the host image and views only; the declared layout (slice stride of array and 3D textures) is kept. The first version moved
+  the stride and is the likely cause of the SAROS fireball artefacts. Legal textures (all of ASTRO BOT's) are unchanged.
+- **Three upstream KytyPS5 fixes, credited to Jetsku** (authorship kept): D16 depth copy, MSAA resolve extent, R8/R16 CMASK clear; with unit tests.
+- **New reference page [large games](docs/reference/large-games.md):** the packed-file layer (`<file>.nps5seg/`, automatic), `nps5 data compress`,
+  cache compression, the memory guard and which trims are unsafe for which title. `docs/env_switches.tsv` regenerated for this line.
 - **Builds target macOS 26.0.** `scripts/build.sh` and `kosmickrisp/build-kosmickrisp.sh` set `MACOSX_DEPLOYMENT_TARGET=26.0` unless you set it, and
   fail when a built binary needs a newer macOS (`scripts/check-minos.sh`). A KosmicKrisp built on macOS 27 without it dropped an
   `@available(macOS 27)` guard and crashed on macOS 26 (`-[MTLTextureViewDescriptor setMinLOD:]`).

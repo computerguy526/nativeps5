@@ -1,5 +1,7 @@
 # Disk space: pack the title, compress the caches
 
+How the runtime reads packed files, the limits and the memory guard: [large-games.md](large-games.md). A game folder without big files can use `scripts/nps5 data compress <folder> --apply` (README, "Save disk space: keep the game folder compressed").
+
 A PS5 title is tens to hundreds of GB, and the caches this project builds for it are several GB more. Two tools shrink both
 with APFS transparent compression. The game reads the same bytes; nothing about the dump or the caches changes except how
 they sit on the disk. Numbers: SAROS (PPSA07631) packs 152.8 GB -> 78.9 GB; the ASTRO shader cache goes 5.9 GB -> 2.3 GB.

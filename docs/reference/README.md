@@ -12,6 +12,7 @@ their scene.
 | [shaders.md](shaders.md) | the chain from PS5 bytecode to AGX machine code, the tools that read each layer, what the corpus looks like, what shader work is worth, the `KK_MSL_OPT` bits |
 | [memory.md](memory.md) | the self limit, level-load texture residency, alias double counting, budgets and collectors, mip skip, disk |
 | [disk-space.md](disk-space.md) | step 1 of a new title (pack the dump with `gamepack`: dry run, verify, keep originals until it passes) and the APFS-compressed shader caches (`NPS5_CACHE_COMPRESS`) |
+| [large-games.md](large-games.md) | big titles (35-160 GB): the packed-file layer (`<file>.nps5seg/`, automatic), what is compressed and how, the memory guard and the trims, which ones are unsafe for which title |
 | [machine-safety.md](machine-safety.md) | the incidents (kernel panic, WindowServer watchdog reboots), why GPU work survives the process, loop caps and guards, the rules and their reasons |
 | [hardware.md](hardware.md) | supported and untested machines, what is derived from RAM and core count, machine classes and conditional profile rows, per-machine cache identities, how to add a machine |
 | [logging.md](logging.md) | the `[subsystem] LEVEL` line convention, `NPS5_LOG`, reading a noisy log (`nps5 log`), the run-end SUMMARY block, and `nps5 bug-report` (one redacted zip for an issue) |

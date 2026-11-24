@@ -1,0 +1,93 @@
+# SAROS (`PPSA07631`)
+
+Game note. No game data is here and none is accepted; you need your own dump ([CONTRIBUTING.md](../../CONTRIBUTING.md)).
+Experimental: SAROS is supported from v1.3.0, on the same release line as ASTRO BOT.
+
+- **Version:** 01.005.002 (SDK 11.00), eboot Build ID `6d383b3837ff06b8`.
+- **Engine and graphics:** Unreal Engine 5.5 line (Nanite, Lumen, virtual shadow maps, TSR, MegaLights and Substrate present); AGC; the
+  title outputs 3840x2160 from a scene rendered at about 720p.
+- **Back end:** `kyty` (KytyPS5's renderer on KosmicKrisp), with the KosmicKrisp patches 0031-0040 (64-bit image and buffer atomics,
+  the switch tree, the residency lock).
+- **Status as of 2026-11-24** on an M5 Pro, 24 GB, macOS 27 (and the M4 Pro line it is built from): boots, plays intro and gameplay with a
+  controller. Frame time on the release line, gameplay window 80-145 s, 720p scene (`r.ScreenPercentage=33.34`): p50 51.4 ms, p99 59.4 ms
+  (about 19 fps), footprint 15-16 GB. It is slower than the console; do not expect a smooth 30. A 16 GB Mac cannot run it. Not tested on
+  the M4 Pro with the release line yet.
+- **Profile files:** [game.tsv](game.tsv). The title's runtime switches live in the translator profile `profiles/PPSA07631.json` of
+  `nativeps5-recomp` (they are baked into the translated program). No `patches.py`, no pipeline list (see "Shader cache").
+
+## Set it up
+
+1. **Pack the dump first** (79 GB instead of 153 GB; the largest `.ucas` is 64 GB and APFS cannot compress a file over 2 GiB by
+   itself): [disk-space](../../docs/reference/disk-space.md). The runtime reads the packed copy with no setting
+   ([large games](../../docs/reference/large-games.md)).
+2. **Translate from a clean view of the dump.** A dump made by some tools carries emulator artefacts: a `fakelib/` folder and an
+   `ampr_emu.index` file. Translate from a copy or a folder of links without them; excluding the module instead (`-exclude-module`)
+   binds the system library to empty stubs and the game stops at its first file read. `nps5 build` picks the profile by title ID.
+   Translating takes about six minutes and 3.3 GB of memory on an M5 Pro (about 625,000 functions) and the program is 730 MB.
+3. **Create `titles/PPSA07631.env`** from `titles/example.env`: `BIN` (the program `nps5 build` printed), `APP0` (your dump), `GPU=kyty`.
+4. **The Unreal console-variable list.** The profile's cvar settings (below) and `NPS5_TITLE_RESOLUTION` need the title's cvar list
+   (`NPS5_UECVAR_LIST`) made from your own eboot; without it the runtime logs `need NPS5_UECVAR_LIST` and sets nothing. Recipe from
+   `docs/m3/uecvar.md` in `nativeps5-recomp`: `uecvar xref -o x.json <eboot.bin>` then `uecvar dumplist x.json > saros.list`, and put
+   `NPS5_UECVAR_LIST=<path>` in the env file. (The recipe is documented, but no one has re-run it from a clean checkout for this
+   release: if the list comes out empty, open an issue.)
+5. **Run.** `scripts/nps5 run PPSA07631 --play`. The first minute is boot and intro (press Cross to skip). **The first start with an
+   empty shader cache opens and closes a small warm-up window by itself; that is not a crash.** The title compiles most of its shaders
+   while you play the first time: expect stutter for several minutes, and a first run that is slow to reach its first level. Quit with
+   the window's close button; the caches are saved on the way out.
+
+## What the profile needs and why
+
+| Setting | Why |
+|---|---|
+| `KYTY_SAROS_HANDSHADERS=1` | opens the bindless-lighting kernels (8 listed shader hashes) to the indirect-image path; without it the lighting passes are dark or dropped |
+| `KYTY_SAROS_NANITE_RAW=1` | Nanite hardware raster pixel shaders find their triangle from raw vertex masks; without it each pixel of a cluster is shaded with another triangle (a mosaic of normals and colour) |
+| `KYTY_BUNDLE_COMPACT=1` | compacts the shader bundles of the command processor |
+| `NPS5_KK_IMAGE_INT64`, `NPS5_KK_BUFFER_INT64`, `NPS5_KK_SWITCH_TREE`, `NPS5_KK_RESIDENCY_LOCK` | KosmicKrisp 64-bit atomics (Nanite visibility buffer), the switch tree and the residency lock |
+| `KYTY_PS_UINT32_TARGETS=1` | integer (UINT, SINT) colour targets: the streaming-virtual-texture page table was empty without it and the character was flat grey |
+| `KYTY_PREDICATION_NO_DRAIN=2`, `KYTY_DCC_KNOWN_FILL_ALIASED=1`, `KYTY_GDS_EOP_MODE=defer`, `KYTY_FAULT_*`, `KYTY_READBACK_EAGER_PAGES`, `NPS5_SHADOW_FAULT_FAST` | command-processor waits and write-fault costs |
+| `NPS5_PTHREAD_EXIT_SCE=1` | the title's threads leave through the console thread-exit path |
+| `NPS5_AVPLAYER_VT=2` | movies decode on the Apple video decoder |
+| `NPS5_UECVAR_SET`: Nanite compute culling, ray tracing, primitive and mesh-shader raster off; `r.LightFunctionQuality=1` | what a Mac cannot afford, and the lighting look: `r.LightFunctionQuality=1` gives the console's darker, moodier light at no measured cost (scene luminance 88 -> 41, console 21; an owner playtest approved it) |
+| `KYTY_VRAM_BUDGET_MB=8000` | GPU memory planning |
+| footprint guard `NPS5_SELF_MEM_LIMIT_MB=17408` (`game.tsv`) | the title stays at 15-16 GB; the guard is never raised to make a scene pass |
+
+**Scene resolution.** Not in the profile: it needs the cvar list. The tested configuration sets
+`r.ScreenPercentage=33.34`, `r.DynamicRes.MinScreenPercentage=33.34`, `r.DynamicRes.MaxScreenPercentage=33.34` and
+`r.SecondaryScreenPercentage.GameViewport=100` through `NPS5_UECVAR_SET` (the title's own TSR upscales to 4K), or `NPS5_TITLE_RESOLUTION=1280x720`.
+Set `NPS5_UECVAR_SET_FOR=100000` so the values are kept for the whole run (the default stops after 120 s). Also set the game's
+scalability settings to 0 (`sg.*Quality=0` in the game user settings). Heavier shadows cost: cascaded +11-19 ms, virtual shadow maps
++34 ms and the footprint guard.
+
+**Optional, off by default (all experimental):**
+
+- `KYTY_SAROS_HS_DYNIDX=1` and `KYTY_SAROS_PROGRAM_CACHE=1` (cheaper hand-shader permutations; the program cache keeps hand-shader
+  programs instead of recompiling them). DYNIDX once flickered with teal rectangles in an owner session; fixes landed, not re-confirmed.
+- **MetalFX in Unreal's third-party upscaler slot** (`KYTY_METALFX=temporal KYTY_METALFX_UE=fsr3 KYTY_METALFX_UE_SKIP=1
+  KYTY_METALFX_MAX_IN_W=1920 KYTY_METALFX_JITTER_SIGN=-1 KYTY_METALFX_DEPTH_REVERSED=1` with the FSR3 cvars
+  `r.FidelityFX.FSR3.Enabled=1`, `...CreateReactiveMask=0`, `...QualityMode=4`, `r.DynamicRes.OperationMode=0`). Owner verdicts on the
+  tested arms: 560p scene to 4K "looks good, very responsive"; 720p scene to 4K had a spawn-point flicker and fireball artefacts.
+  Fireball artefacts were traced to the mip-layout clamp, fixed in this release; the check with MetalFX on is still open.
+
+## Shader cache
+
+There is no shipped pipeline list for SAROS: the game's shaders live in its Unreal containers, not in the executable, so the list
+tool cannot locate them. The caches build while you play: driver cache, program cache, KosmicKrisp archive, Metal libraries and the
+pipeline journal. A warm cache of a developer machine held about 12,400 Metal libraries, 173 archive segments and 2,930 program records;
+it is rebuilt on yours. The first start after a v1.3 update rebuilds every title's cache once (the shader recompiler changed). Optional
+cache compression: [disk-space](../../docs/reference/disk-space.md).
+
+## Known issues
+
+- Slow: about 19 fps in gameplay at a 720p scene (see Status). The command processor is the limit (bind and synchronisation cost per
+  draw); ray tracing is off.
+- The first minutes of a cold cache stutter (several runs warm it; keep using the same cache folder).
+- The engine path that indexes past a direct-memory base occasionally aborts early in a run (a guest data abort at engine init, seen
+  a few times on development builds, not reproduced on demand). Run again.
+- The clay-like flat look of the main character (empty streaming-virtual-texture page table) is fixed by `KYTY_PS_UINT32_TARGETS=1`,
+  which the profile sets; if the character is flat grey the switch is not reaching the game.
+- Frame dump and probe tools exist for development only and are off.
+- Audio, saves and trophies: not verified on this release.
+
+## Found on this game
+
+[memory](../../docs/reference/memory.md): never raise the guard; whole mip chains. [large games](../../docs/reference/large-games.md).
