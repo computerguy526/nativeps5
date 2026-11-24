@@ -29,6 +29,7 @@ KK_LIBCACHE_DIR (KK's library cache) is set to <cache dir>/kk-libcache. `prepare
 $NPS5_KK_LIBCACHE_BUILD (default scripts/kk-libcache-build.sh) <dir> <jobs> builds it into metallibs, pass 2 starts again from an empty
 cache and a fresh Metal cache id with the metallibs in place. (KK's Metal archive keys a pipeline on its library: a pipeline built from
 a source-compiled library never hits when the same shader is later loaded from a metallib, so only pass 2's archive is kept.)
+After a successful `prepare`, cachezip.py compresses the finished cache dir with APFS LZFSE (about 2.5x smaller) when NPS5_CACHE_COMPRESS=1.
 Tool: $NPS5_KYPLST_TOOL, else <kyty>/build-arm64/kyty_pipeline_list. Exit codes: 0 ok, 1 failed / stale, 2 usage."""
 import hashlib, importlib.util, os, re, shlex, shutil, subprocess, sys, threading, time
 
@@ -837,6 +838,9 @@ def cmd_prepare(ctx, o, runner):
     warm = 0
     if rc == 0 and (passes == 2 or keep1) and not o.get("nowarm"):
         warm = warm_starts(ctx, app0, o, runner, build_libs)
+    if rc == 0:
+        import cachezip  # APFS compression of the finished cache; NPS5_CACHE_COMPRESS=1 enables (default off)
+        cachezip.maybe_compress(ctx.dir, ctx.environ)
     info = {}
     try:
         info = parse_info(runner([tool_path(ctx), "info", ctx.list_path], env=ctx.environ, capture=True)[1])

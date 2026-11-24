@@ -11,6 +11,7 @@ their scene.
 | [rendering.md](rendering.md) | per-vertex fragment inputs, barriers in Metal 4, aliased render targets, LOD statistics, depth bounds, video frames, upscaler placement, picture diagnostics |
 | [shaders.md](shaders.md) | the chain from PS5 bytecode to AGX machine code, the tools that read each layer, what the corpus looks like, what shader work is worth, the `KK_MSL_OPT` bits |
 | [memory.md](memory.md) | the self limit, level-load texture residency, alias double counting, budgets and collectors, mip skip, disk |
+| [disk-space.md](disk-space.md) | step 1 of a new title (pack the dump with `gamepack`: dry run, verify, keep originals until it passes) and the APFS-compressed shader caches (`NPS5_CACHE_COMPRESS`) |
 | [machine-safety.md](machine-safety.md) | the incidents (kernel panic, WindowServer watchdog reboots), why GPU work survives the process, loop caps and guards, the rules and their reasons |
 | [hardware.md](hardware.md) | supported and untested machines, what is derived from RAM and core count, machine classes and conditional profile rows, per-machine cache identities, how to add a machine |
 | [logging.md](logging.md) | the `[subsystem] LEVEL` line convention, `NPS5_LOG`, reading a noisy log (`nps5 log`), the run-end SUMMARY block, and `nps5 bug-report` (one redacted zip for an issue) |
