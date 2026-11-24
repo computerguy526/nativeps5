@@ -3,6 +3,31 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.3.1 (hotfix)
+
+Everything in v1.3.0. An ASTRO BOT fix for the shader pre-build, a larger pipeline list and honest SAROS text. **Update:** `nativeps5-kyty` moves to the new tag
+(`v1.3.1`; see [components.lock](components.lock)), `nativeps5-recomp` and `nativeps5-anyps5` stay at v1.3.0 and v1.1.2: pull, check out the Kyty tag, rebuild Kyty
+(`scripts/build.sh kyty`), and run `nps5 cache prepare PPSA21564` once. No new translation of the title is needed.
+
+- **Astro Bot: `nps5 cache prepare` builds the whole list again (Kyty).** On the v1.3.0 Kyty a prepare built only about 300 of the list's pipelines: the list stores each shader permutation with its resource
+  specialization, and v1.3.0 changed that encoding (an extra field per image slot), so 560 of 1,382 permutations were skipped and 4,678 pipelines found
+  no shader modules; the shaders then compiled during play. Kyty now reads the old layout, re-encodes it in the current one, and logs the skip reasons.
+  The same prepare on a fresh cache now compiles 1,185 permutations (197 already present), skips none, and builds 4,844 of the 4,892 listed pipelines
+  (14 already known, 34 whose shader module is not published, 0 failed).
+- **SAROS (`PPSA07631`) is not playable on v1.3.x, and the v1.3.0 text that said it was is withdrawn.** With the hand shaders on it stalls at about 1 fps; with them off the
+  background is missing. No switch combination on the v1.3.0 Kyty fixes both, so v1.3.1 changes no SAROS setting. Support is coming in v1.4. The SAROS note and the
+  README Games table now say so (the "about 19 fps" figure came from development builds).
+- **Astro Bot: pipeline list extended** with the play sessions since v1.3.0 and the all-levels warm-up recordings: 1,382 shader permutations (1,086 shaders) and 4,892 pipelines (v1.3.0 shipped 1,161 permutations /
+  2,381 pipelines). Keys and hashes only, with its no-game-code record (`games/PPSA21564/pipelines.kyplst.verified`). `nps5 cache prepare PPSA21564` builds
+  about 4,850 of them (plus 123 compute pipelines) before the first start, so far fewer shaders compile while you play. The first prepare is longer than before
+  (it builds the whole list, not a few hundred pipelines); later prepares reuse what is built.
+
+**Known issues** (added to the v1.3.0 list)
+- SAROS (`PPSA07631`) is not playable on v1.3.x (stalls at about 1 fps with the hand shaders, missing background without them); support is coming in v1.4.
+- A rare crash at startup inside the game's own static initialisation (`fn_64ed360`, a null-guard fault in its logging setup). It was also seen on
+  builds before v1.3.0, so it is not a v1.3 regression; the trigger is unknown. Relaunch: it does not repeat on the next start.
+- The Metal compiler-service crash on a fully cold shader cache (ASTRO BOT) is still possible: run `nps5 cache prepare PPSA21564` first, or relaunch.
+
 ## v1.3.0 (2026-11-24)
 
 One line for every title. The development branches that ran SAROS (`PPSA07631`, Unreal Engine 5.5) are now part of the release line, so
@@ -11,7 +36,6 @@ candidate below is included. **Update:** all three component repositories move t
 check out the tags, rebuild everything (`scripts/build.sh recomp`, `kyty`, `anyps5`, `kosmickrisp`: patches 0031-0040 are new, 40 patches,
 `EXPECTED_TREE` ae17f099). **The first start after the update rebuilds the shaders once** (Kyty's shader recompiler sources changed, so the
 program cache and the pipeline cache of every title get a new key); run `nps5 cache prepare <id>` or expect one longer first launch.
-
 - **SAROS (`PPSA07631`, experimental) boots and plays from the release line.** Kyty decodes the flat-pointer shader operands UE5.5 uses
   (scalar sources `0xEB`-`0xEE`), lowers 64-bit atomics, and carries the SAROS hand shaders for its bindless lighting passes
   (`KYTY_SAROS_HANDSHADERS`, with the `HS_DYNIDX` canonical groups), the Nanite raster parameter path (`KYTY_SAROS_NANITE_RAW`), the
