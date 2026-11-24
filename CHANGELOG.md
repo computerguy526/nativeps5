@@ -3,7 +3,7 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.2.4 (release candidate, not tagged)
+## v1.2.4 (2026-11-24)
 
 Everything in v1.2.3.1. More Metal shader rows for Astro Bot (the skinned-vertex "bone" shaders and two foliage pairs) and a first
 bring-up of a second kind of title: God of War Sons of Sparta (`PPSA28997`, a Unity IL2CPP player). **Update:** `nativeps5-recomp` and
@@ -21,11 +21,13 @@ needs no new translation: the recompiler changes are switched on only by the Uni
   the per-shader B/A (microbenchmark) of the new rows is 0.66-0.99, median about 0.9 (one edge-word row has no recorded B/A, 0.000; its two M4 runs measured its vertex stage 167 -> 92 us). These are per-shader timings, not a frame-rate promise.
 - **God of War Sons of Sparta (`PPSA28997`, experimental).** With `nativeps5-recomp` v1.2.4 and Kyty v1.2.4 the title boots, plays the intro
   (press Cross to skip it), reaches the title menu, a new game and the first level (the Cyclops fight); 5-minute scripted runs on an M5 Pro were
-  clean at about 90 fps uncapped. Everything the Unity player needed is behind the new engine profile `profiles/engines/unity-ps5.json`
+  clean at about 90 fps uncapped; the release smoke run of v1.2.4 itself (170 s, M5 Pro) reached the Cyclops level with no faults at
+  about 115 fps average (p50 8.0 ms, p99 14.6 ms). Everything the Unity player needed is behind the new engine profile `profiles/engines/unity-ps5.json`
   (`"base": "unity-ps5"` in `profiles/PPSA28997.json`), so other titles are unaffected: reservation-aware `VirtualQuery`, a PRX entry
   that gets `(argc, argv, NULL)`, `_umtx_op` WAIT/WAKE, real thread stack bounds for the garbage collector, the PS5 `AvPlayer` stream-info,
   seek and looping-back warning, offline `sce::Np::CppWebApi`/save-data/audio-context answers, a socket-option map for FMOD, and a
-  fault-livelock verdict for Unity's graphics worker. Kyty gains 37 graphics NIDs in its route table (indexes 101-137; 0-100 are
+  fault-livelock verdict for Unity's graphics worker, and the `sceKernelGetOperationMode` and `_sceLibcInternalThreadAtexit` shims
+  (found by the release smoke run: without them the title stops at boot). Kyty gains 37 graphics NIDs in its route table (indexes 101-137; 0-100 are
   unchanged). Known: without a button press the Mega Cat Studios logo holds (Cross skips it); the first seconds of a start show
   1-1.5 s load hitches (guest-side asset loading); audio and a real-controller session are not verified; no shader cache is shipped.
 - **SAROS character materials (opt-in, `KYTY_PS_UINT32_TARGETS=1`, default off).** A pixel export of raw 32-bit dwords to an integer (UINT)
