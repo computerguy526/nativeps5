@@ -42,6 +42,9 @@ program cache and the pipeline cache of every title get a new key); run `nps5 ca
 - **Three upstream KytyPS5 fixes, credited to Jetsku** (authorship kept): D16 depth copy, MSAA resolve extent, R8/R16 CMASK clear; with unit tests.
 - **New reference page [large games](docs/reference/large-games.md):** the packed-file layer (`<file>.nps5seg/`, automatic), `nps5 data compress`,
   cache compression, the memory guard and which trims are unsafe for which title. `docs/env_switches.tsv` regenerated for this line.
+- **Shader library cache repair no longer fails silently on large caches (AnyPS5 `tools/kk-metallib/build_metallib.sh`).** With more than about 8000 collected
+  shader texts the file glob overflowed the argument limit (exit 126, nothing built); it now uses `find | xargs -0`. `nps5 cache prepare` uses its own
+  `scripts/kk-libcache-build.sh` and was not affected.
 - **Builds target macOS 26.0.** `scripts/build.sh` and `kosmickrisp/build-kosmickrisp.sh` set `MACOSX_DEPLOYMENT_TARGET=26.0` unless you set it, and
   fail when a built binary needs a newer macOS (`scripts/check-minos.sh`). A KosmicKrisp built on macOS 27 without it dropped an
   `@available(macOS 27)` guard and crashed on macOS 26 (`-[MTLTextureViewDescriptor setMinLOD:]`).
