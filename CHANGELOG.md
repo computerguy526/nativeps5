@@ -3,6 +3,35 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.2.5 (unreleased)
+
+Everything in v1.2.4. Small, switched-off-by-default additions for Unreal Engine 5 titles (SAROS, `PPSA07631`, still experimental), one
+Astro Bot crash fix and one display-buffer fix. **Update:** `nativeps5-recomp`, `nativeps5-kyty` and `nativeps5-anyps5` move to the new tags (see
+[components.lock](components.lock)): pull, check out the tags in `../ps5recomp`, `../kyty` and `../anyps5`, rebuild (`scripts/build.sh recomp`,
+`kyty`, `anyps5`). Astro Bot needs no new `nps5 cache prepare`: no shader translation changed.
+
+- **Astro Bot: no more crash in the space flight (AnyPS5).** A draw whose index count is larger than its `MAX_SIZE` field was refused as an
+  invalid packet and the whole submission was dropped; Astro Bot 01.007 then exited (code 134, about 1 run in 8, around the 10-minute mark of
+  the space flight). The real hardware simply draws `MAX_SIZE` indices; the driver now does the same (unit test added).
+- **Display buffers with any clear colour (Kyty, from upstream KytyPS5 `7d0c350e`).** A compressed (DCC) display buffer is no longer rejected
+  because its register clear colour is not zero.
+- **SAROS integer render targets (opt-in).** `KYTY_PS_UINT32_TARGETS=1` now also covers signed-integer (SINT) colour targets; still off by default.
+- **SAROS command-processor waits (opt-in).** `KYTY_PREDICATION_NO_DRAIN=2` skips waiting for the GPU before a predicated draw when nothing can
+  still write the predicate; `KYTY_DCC_KNOWN_FILL_ALIASED=1` lets a recorded DCC fill of an aliased image keep the image's contents (`=verify`
+  checks it). New wait counters (`gpuwait.unmap`, `gpuwait.predication`, `gpuwait.gds`) split the old `gpuwait.misc` line of the CP report.
+  Both switches are off unless set; the `PPSA07631` profile sets them.
+- **Video playback on VideoToolbox (opt-in, `NPS5_AVPLAYER_VT=1|2`).** The `AvPlayer` module can decode H.264 movies on the Apple video decoder
+  (`2` maps the frame without a copy), with a software fallback after three decode errors in a row or when a software frame appears. Off by
+  default; the `PPSA07631` profile sets `2`. No other title uses it.
+- **Faster guest-write fault test (opt-in, `NPS5_SHADOW_FAULT_FAST=1`).** Checks the faulting instruction before scanning the 8192-slot shadow
+  registry. Off by default.
+- **`PPSA07631` profile** (the only profile touched): the runtime environment found by the SAROS experiments (`KYTY_FAULT_AHEAD_*`, GDS end-of-pipe
+  deferral, eager readback pages, the switches above, and Unreal console variables set through `NPS5_UECVAR_SET`: Nanite persistent-thread
+  culling and ray tracing off, Nanite raster on the vertex path). `nps5 uecvar` now lists float console variables as float (they were shown as
+  integers).
+- Not in this release: the SAROS hand-shader work (`HS_DYNIDX`), the `FAULT_HOST_READBACK` port (already in v1.2.3.1), the KosmicKrisp switch tree,
+  the larger AnyPS5 recompiler bundle (it invalidates the pipeline journal).
+
 ## v1.2.4 (2026-11-24)
 
 Everything in v1.2.3.1. More Metal shader rows for Astro Bot (the skinned-vertex "bone" shaders and two foliage pairs) and a first
