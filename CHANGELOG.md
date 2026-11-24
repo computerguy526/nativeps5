@@ -30,6 +30,10 @@ program cache and the pipeline cache of every title get a new key); run `nps5 ca
   stays off for every other title.
 - **gamepack: pack a title to save disk space.** `scripts/gamepack.py` packs a title's large files; packed titles are detected automatically
   by the runtime (`NPS5_VFS_SEGFILES=0` forces it off). See the README, "Save disk space: pack a title".
+- **Builds target macOS 26.0.** `scripts/build.sh` and `kosmickrisp/build-kosmickrisp.sh` set `MACOSX_DEPLOYMENT_TARGET=26.0` unless you set it, and
+  fail when a built binary needs a newer macOS (`scripts/check-minos.sh`). A KosmicKrisp built on macOS 27 without it dropped an
+  `@available(macOS 27)` guard and crashed on macOS 26 (`-[MTLTextureViewDescriptor setMinLOD:]`).
+- **Optional shader-cache compression.** `NPS5_CACHE_COMPRESS=1` makes `nps5 cache prepare` APFS-compress the finished cache (about 2.5x smaller; off by default).
 - **AnyPS5: upstream fixes** (13 shader-recompiler fixes for the legacy AnyPS5 GPU path, and the macOS libc arena hint placement, which
   every title uses). The AnyPS5-path pipeline journal is rebuilt once.
 - Diagnostics (all off by default): compute and draw probes, bind logs, raw target and BC dumps, the guest-write journal, the input
