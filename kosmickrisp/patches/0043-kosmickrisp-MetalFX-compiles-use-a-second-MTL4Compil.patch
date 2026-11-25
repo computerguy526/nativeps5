@@ -1,0 +1,142 @@
+From 3b5830aa2e157ab2533f0fb02d424bf88153a348 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 23:08:12 +0000
+Subject: [PATCH] kosmickrisp: MetalFX compiles use a second MTL4Compiler
+ without the archive serializer (KK_FX_PLAIN_COMPILER, default 1) (nps5
+ archfix)
+
+Metal crashes (-[_MTLBinaryArchive newArchiverIdWithBinaryKey:...], NULL airScript) when a function compile starts on a compiler that has
+pipelineDataSetSerializer attached while serializeAsArchiveAndFlushToURL runs. mtl_fx.m's scaler constructors and fx_mv_init pipelines
+compiled on that compiler outside kk_compile_lock. mtl_compiler_plain(device, fallback) = a lazily created serializer-free compiler per
+device (own mutex, never waits for a flush); mtl_fx_scale uses it. KK_FX_PLAIN_COMPILER=0 restores the old behaviour. The archive stamp
+and library key are untouched.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/bridge/mtl_compiler.h       |  4 ++
+ src/kosmickrisp/bridge/mtl_compiler.m       | 52 +++++++++++++++++++++
+ src/kosmickrisp/bridge/mtl_fx.m             |  5 +-
+ src/kosmickrisp/bridge/stubs/mtl_compiler.c |  6 +++
+ 4 files changed, 66 insertions(+), 1 deletion(-)
+
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.h b/src/kosmickrisp/bridge/mtl_compiler.h
+index 4ad332e..8aa1339 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.h
++++ b/src/kosmickrisp/bridge/mtl_compiler.h
+@@ -18,6 +18,10 @@ enum mtl_pixel_format;
+ /* Compiler */
+ mtl_compiler *mtl_new_compiler(mtl_device *device);
+ 
++/* nps5 archfix: a compiler without the archive serializer, for compiles made outside kk_compile_lock (MetalFX).
++ * Returns serializer_compiler when KK_FX_PLAIN_COMPILER=0. */
++mtl_compiler *mtl_compiler_plain(mtl_device *device, mtl_compiler *serializer_compiler);
++
+ /* Write the KK_PIPELINE_ARCHIVE file if new pipelines were compiled. */
+ void mtl_compiler_flush_archive(void);
+ 
+diff --git a/src/kosmickrisp/bridge/mtl_compiler.m b/src/kosmickrisp/bridge/mtl_compiler.m
+index f50ce2a..38d0a3c 100644
+--- a/src/kosmickrisp/bridge/mtl_compiler.m
++++ b/src/kosmickrisp/bridge/mtl_compiler.m
+@@ -802,6 +802,58 @@ mtl_new_compiler(mtl_device *device)
+    }
+ }
+ 
++/* nps5 archfix (patch 0043): a second MTL4Compiler per device WITHOUT the pipelineDataSetSerializer. Metal crashes
++ * (-[_MTLBinaryArchive newArchiverIdWithBinaryKey:...], NULL airScript) when a function compile STARTS on a compiler
++ * that has the serializer attached while serializeAsArchiveAndFlushToURL runs. Code that compiles outside
++ * kk_compile_lock (the MetalFX scaler constructors and the MetalFX motion-vector prep pipelines in mtl_fx.m) uses this
++ * compiler: nothing it builds is recorded into the archive (those pipelines were never looked up there anyway).
++ * KK_FX_PLAIN_COMPILER=0 returns the serializer compiler (old behaviour). */
++#define KK_PLAIN_MAX 4
++/* its own mutex: kk_flush_lock is held for the whole 5-10 s serialize, a scaler creation must not wait for it */
++static pthread_mutex_t kk_plain_lock = PTHREAD_MUTEX_INITIALIZER;
++static struct {
++   id<MTLDevice> dev;
++   id<MTL4Compiler> comp;
++} kk_plain[KK_PLAIN_MAX];
++
++mtl_compiler *
++mtl_compiler_plain(mtl_device *device, mtl_compiler *serializer_compiler)
++{
++   const char *g = getenv("KK_FX_PLAIN_COMPILER");
++   if (g && g[0] == '0')
++      return serializer_compiler;
++   id<MTLDevice> dev = (id<MTLDevice>)device;
++   id<MTL4Compiler> r = nil;
++   pthread_mutex_lock(&kk_plain_lock);
++   for (int i = 0; i < KK_PLAIN_MAX && !r; i++)
++      if (kk_plain[i].dev == dev)
++         r = kk_plain[i].comp;
++   if (!r) {
++      @autoreleasepool {
++         MTL4CompilerDescriptor *desc = [[MTL4CompilerDescriptor new] autorelease];
++         NSError *error = nil;
++         id<MTL4Compiler> c = [dev newCompilerWithDescriptor:desc error:&error];
++         if (c == nil) {
++            fprintf(stderr, "Failed to create plain MTL4Compiler: %s\n", [error.localizedDescription UTF8String]);
++         } else {
++            for (int i = 0; i < KK_PLAIN_MAX; i++) {
++               if (kk_plain[i].dev == nil) {
++                  kk_plain[i].dev = dev; /* never released: the device lives as long as the process */
++                  kk_plain[i].comp = c;
++                  r = c;
++                  break;
++               }
++            }
++            if (!r)
++               r = c; /* table full (cannot happen with <= 4 devices): leak one compiler per call */
++         }
++      }
++   }
++   pthread_mutex_unlock(&kk_plain_lock);
++   /* a failed creation falls back to the serializer compiler (old behaviour) rather than a nil compiler */
++   return r ? (mtl_compiler *)r : serializer_compiler;
++}
++
+ /* In-process library cache: the same (MSL, options) text is built again for
+  * every pipeline state that shares a shader (43% of live compiles in a level
+  * repeat a text already built in the process, and the OS Metal cache does not
+diff --git a/src/kosmickrisp/bridge/mtl_fx.m b/src/kosmickrisp/bridge/mtl_fx.m
+index 3950d47..1f25b66 100644
+--- a/src/kosmickrisp/bridge/mtl_fx.m
++++ b/src/kosmickrisp/bridge/mtl_fx.m
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "mtl_fx.h"
++#include "mtl_compiler.h"
+ 
+ #include <Metal/Metal.h>
+ #include <Metal/MTL4ArgumentTable.h>
+@@ -249,7 +250,9 @@ mtl_fx_scale(mtl_command_buffer *cmd_buf, mtl_device *device,
+    @autoreleasepool {
+       id<MTL4CommandBuffer> cb = (id<MTL4CommandBuffer>)cmd_buf;
+       id<MTLDevice> dev = (id<MTLDevice>)device;
+-      id<MTL4Compiler> comp = (id<MTL4Compiler>)compiler;
++      /* nps5 archfix: MetalFX compiles here run outside kk_compile_lock, so they must not use the compiler that has the
++       * archive serializer attached (Metal crashes when a compile starts during a serialize). */
++      id<MTL4Compiler> comp = (id<MTL4Compiler>)mtl_compiler_plain(device, compiler);
+       id<MTLTexture> color = (id<MTLTexture>)info->color;
+       id<MTLTexture> depth = (id<MTLTexture>)info->depth;
+       id<MTLTexture> motion = (id<MTLTexture>)info->motion;
+diff --git a/src/kosmickrisp/bridge/stubs/mtl_compiler.c b/src/kosmickrisp/bridge/stubs/mtl_compiler.c
+index 2735838..a3bc791 100644
+--- a/src/kosmickrisp/bridge/stubs/mtl_compiler.c
++++ b/src/kosmickrisp/bridge/stubs/mtl_compiler.c
+@@ -15,6 +15,12 @@ mtl_new_compiler(mtl_device *device)
+    return NULL;
+ }
+ 
++mtl_compiler *
++mtl_compiler_plain(mtl_device *device, mtl_compiler *serializer_compiler)
++{
++   return serializer_compiler;
++}
++
+ void
+ mtl_compiler_collect_only_arm(void)
+ {
+-- 
+2.56.0
+

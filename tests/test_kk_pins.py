@@ -25,6 +25,10 @@ class KkPins(unittest.TestCase):
         names = os.listdir(os.path.join(KK, "patches"))
         self.assertTrue(any(n.startswith("0041-") for n in names), "patch 0041 (nps5_kk_archive_flush) missing")
 
+    def test_fx_plain_compiler_patch_present(self):
+        names = os.listdir(os.path.join(KK, "patches"))
+        self.assertTrue(any(n.startswith("0043-") for n in names), "patch 0043 (MetalFX plain compiler, archfix) missing")
+
 
 if __name__ == "__main__":
     unittest.main()
