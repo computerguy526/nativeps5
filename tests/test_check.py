@@ -323,5 +323,15 @@ class TestPerClassMetalLists(unittest.TestCase):
             self.assertTrue(C.check_metal_keys((self.H + bad + "\n").encode()), bad)
 
 
+class TestGuestSidecar(unittest.TestCase):
+    H = b"format\tnps5-metal-guests\t1\n"
+
+    def test_guest_sidecar(self):
+        self.assertEqual(C.check_guests_list(b"# hashes only\n" + self.H + ("cs\t" + "1" * 16 + "\t" + "a" * 16 + "\n").encode()), [])
+        for bad in (b"cs\t" + b"1" * 16 + b"\tmain() { return; }\n", b"fs\t" + b"1" * 15 + b"\t" + b"a" * 16 + b"\n",
+                    b"gs\t" + b"1" * 16 + b"\t" + b"a" * 16 + b"\n", b"a\0b"):
+            self.assertTrue(C.check_guests_list(self.H + bad), bad)
+
+
 if __name__ == "__main__":
     unittest.main()

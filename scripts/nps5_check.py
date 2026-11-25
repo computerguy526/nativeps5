@@ -78,7 +78,8 @@ ENCODED_LINE, ENCODED_LINE_MIN, ENCODED_MAX = re.compile(r"[A-Za-z0-9+/=_-]+"), 
 PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
-                 "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt"}
+                 "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt",
+                 "metal-guests.tsv"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 # v1.2.1 (keys format 2, pairs format 3): per GPU class rows end with five short words: emitter mode, GPU class, near-exact rule,
@@ -176,6 +177,25 @@ def check_deny_list(data):
         if not line or DENY_ROW_RE.match(line) or (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
             continue
         bad.append("line %d is not a guest shader hash (16 hex digits) or a comment" % n)
+        if len(bad) >= 3:
+            break
+    return bad
+
+
+# games/<title id>/metal-guests.tsv (scripts/nps5lib/ovguard.py): guest shader hash of each Metal override key. Hashes only.
+GUESTS_ROW_RE = re.compile(rb"^(?:cs|fs)\t[0-9a-f]{16}\t[0-9a-f]{16}$")
+
+
+def check_guests_list(data):
+    """-> reasons a games/<id>/metal-guests.tsv is refused: anything but the format row, short comments and `cs|fs kk guest` hash rows."""
+    if b"\0" in data or len(data) > (256 << 10):
+        return ["a guest-hash sidecar is a short text file"]
+    bad = []
+    for n, line in enumerate(data.split(b"\n"), 1):
+        if not line or GUESTS_ROW_RE.match(line) or line == b"format\tnps5-metal-guests\t1" or \
+                (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
+            continue
+        bad.append("line %d is not a `cs|fs <kk key> <guest hash>` row, the format row or a comment" % n)
         if len(bad) >= 3:
             break
     return bad
@@ -519,6 +539,10 @@ class Check:
             return
         if profile and profile.group(2) == "fast-math-deny.txt":
             for why in check_deny_list(data):
+                F(f": {why}")
+            return
+        if profile and profile.group(2) == "metal-guests.tsv":
+            for why in check_guests_list(data):
                 F(f": {why}")
             return
         if profile and profile.group(2) in ("metal-gfx-pairs.tsv.verified", "metal-shaders.tsv.verified"):
