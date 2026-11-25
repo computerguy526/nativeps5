@@ -244,7 +244,7 @@ class AstroPairRowTests(unittest.TestCase):
 
     def test_folship_rows_exact_and_faster(self):
         fs = [r for r in self.rows() if r[14] == "autoval,folship"]
-        self.assertEqual(len(fs), 16)
+        self.assertEqual(len(fs), 14)  # 16 before the shipgate drop
         for r in fs:
             self.assertEqual(r[18], "faster"); self.assertIn(r[17], ("exact", "outprec:1"))  # relabel56: D9-class rows are outprec:1
             self.assertIn(r[16], ("g16", "g17", "g18"))
@@ -263,9 +263,28 @@ class AstroPairRowTests(unittest.TestCase):
         """valfix: no row may carry the text of a row removed after the level-profile check (hashes in tests/data/valfix_dropped.tsv)."""
         p = os.path.join(HERE, "data", "valfix_dropped.tsv")
         gone = {tuple(l.split("\t")[2:4]) for l in open(p).read().splitlines() if l and not l.startswith("#")}
-        self.assertEqual(len(gone), 85)
+        self.assertEqual(len(gone), 117)
         for r in self.rows():
             self.assertNotIn((r[7], r[8]), gone)
+
+    def test_shipgate_dropped_rows_stay_out_and_lists_are_consistent(self):
+        """v1.4 fin2: the 32 texts with a shipgate FAIL (tier SHIPGATE) do not ship; the guest sidecar holds no key of a removed row; the deny list holds every guest."""
+        p = os.path.join(HERE, "data", "valfix_dropped.tsv")
+        sg = [l.split("\t") for l in open(p).read().splitlines() if l and not l.startswith("#")]
+        sg = [r for r in sg if r[6] == "SHIPGATE"]
+        self.assertEqual(len({(r[2], r[3]) for r in sg}), 32)
+        shipped = {(r[7], r[8]) for r in self.rows()}
+        for r in sg:
+            self.assertNotIn((r[2], r[3]), shipped)
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        deny = {l.strip() for l in open(os.path.join(d, "fast-math-deny.txt")) if l.strip() and not l.startswith("#")}
+        keys = {("vs", r[5]) for r in self.rows()} | {("fs", r[6]) for r in self.rows()}
+        for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines():
+            f = l.split("\t")
+            if len(f) == 3 and f[0] in ("vs", "fs"):
+                self.assertIn((f[0], f[1]), keys)
+            if len(f) == 3 and f[0] in ("cs", "fs"):
+                self.assertIn(f[2], deny)
 
     def test_relabel56_d9_rows_are_outprec1(self):
         """relabel56: the 56 D9-class rows ship as outprec:1 (never exact); none of the 33 P7-only dropped rows ships."""
