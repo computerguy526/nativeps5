@@ -1,0 +1,20 @@
+format	nps5-promotions	1
+# title	word=value	verdict	evidence (doc name + run tags, no paths)	decided	status	owner	note
+# Register of validated (or rejected) settings. Rules: docs/promotion.md. Check: python3 -I scripts/nps5lib/profdrift.py check <title>
+PPSA21564	NPS5_QOS_GPU=rt	KEEP	D100 / playbook row 201; qosexec-2026-11-25, m5ab-2026-11-25 (-6.1 % mean, box 3, n=1 B run)	2026-11-25	pending	v14rc	D100 says opt-in; the composed profile already carries it: confirm the landing commit and the laptop confirm the row asks for
+PPSA21564	KYTY_READBACK_EAGER_PAGES=1024	KEEP	beststack-2026-11-19 (IDROP=1), overnight-2026-11-21	2026-11-19	pending	v14rc	rig value; profile composes 256 (preset or row): decide which is the player value
+PPSA21564	KYTY_READ_FAULT_PUBLISHED_BURST=8	KEEP	beststack-2026-11-19 (IDROP=1), overnight-2026-11-21	2026-11-19	pending	v14rc	rig value; profile composes 0
+PPSA21564	KYTY_GC_SETTLE_SELECTIVE=1	KEEP	beststack-2026-11-19 (GCSEL=1)	2026-11-19	pending	v14rc	
+PPSA21564	KYTY_DEPTH_FEEDBACK_USAGE=0	KEEP	beststack-2026-11-19 (DEPTHCOMP=1)	2026-11-19	pending	v14rc	
+PPSA21564	KYTY_TEX_MIP_SKIP=2	KEEP	beststack-2026-11-19 (MIPSKIP=2)	2026-11-19	pending	v14rc	
+PPSA21564	KYTY_CP_LEAD_MAX_MS=16	KEEP	D59, beststack-2026-11-19 (CPLEAD=16)	2026-11-19	pending	v14rc	
+PPSA21564	KYTY_BDA_PAGETABLE_MB=64	KEEP	beststack-2026-11-19 (MEMTRIM=1 safe set); ASTRO only, unsafe on UE5 (playbook row 183)	2026-11-19	pending	v14rc	skill says MEMTRIM=1 is in the test rig only: confirm it ships
+PPSA21564	KYTY_MEMTRIM_BIG_WIDTH=2400	KEEP	beststack-2026-11-19 (MEMTRIM=1 safe set)	2026-11-19	pending	v14rc	
+PPSA21564	KYTY_FAULT_AHEAD_KB=16	LOSS	D99 / playbook row 197 (+9..10 % on Sky Garden and the clock tower on v1.4)	2026-11-25	rejected	main	SAROS wants it, ASTRO must not carry it
+PPSA21564	KYTY_FAULT_AHEAD_ADAPT=0	LOSS	D99 / playbook row 197	2026-11-25	rejected	main	same as above
+PPSA21564	KYTY_PREDICATION_NO_DRAIN=2	NEUTRAL	D99 / playbook row 198	2026-11-25	optin	main	SAROS KEEP, ASTRO neutral: per-title profile only
+PPSA21564	KYTY_BUNDLE_COMPACT=1	NEUTRAL	D99 / playbook row 198	2026-11-25	optin	main	
+PPSA21564	KYTY_WAVE64_WARPS=1	NEUTRAL	D99 / playbook row 198	2026-11-25	optin	main	
+PPSA21564	KYTY_PIPELINE_SKIP_FAULT_BUFFER=1	NEUTRAL	D99 / playbook row 199	2026-11-25	optin	main	
+PPSA21564	KYTY_IDLE_FLUSH_REFRESH_US=200	NEUTRAL	D100 / playbook row 200	2026-11-25	optin	main	
+PPSA21564	KYTY_HOSTED_RETRIED_WRITES=1	NEUTRAL	D101 / playbook row 202	2026-11-25	optin	main	

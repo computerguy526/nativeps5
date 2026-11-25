@@ -29,6 +29,7 @@ __pycache__/
 !/games/*/metal-gfx-pairs.tsv
 !/games/*/metal-gfx-pairs.tsv.verified
 !/games/*/metal-guests.tsv
+!/games/*/promotions.tsv
 !/games/*/override-guard.baseline
 !/games/*/metal-shaders.tsv.verified
 !titles/README.md

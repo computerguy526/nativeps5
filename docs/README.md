@@ -11,6 +11,7 @@
 | Measure a change and write the PR evidence | [agents/evidence.md](agents/evidence.md) |
 | Work as or with a coding agent | [agents/README.md](agents/README.md) |
 | Work on one title | [../games/](../games/README.md) |
+| Promote a validated setting into a profile |  [promotion.md](promotion.md) |
 | Look up an environment switch | [env_switches.tsv](env_switches.tsv) |
 
 ## Layout, and how it maps to NXNative's

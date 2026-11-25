@@ -79,7 +79,7 @@ PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
                  "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt",
-                 "metal-guests.tsv", "override-guard.baseline"}
+                 "metal-guests.tsv", "override-guard.baseline", "promotions.tsv"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 # v1.2.1 (keys format 2, pairs format 3): per GPU class rows end with five short words: emitter mode, GPU class, near-exact rule,
@@ -196,6 +196,26 @@ def check_guests_list(data):
                 (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
             continue
         bad.append("line %d is not a `cs|fs|vs <kk key> <guest hash>` row, the format row or a comment" % n)
+        if len(bad) >= 3:
+            break
+    return bad
+
+
+# games/<title id>/promotions.tsv (scripts/nps5lib/profdrift.py): validated / rejected words with verdict, evidence names, status. No paths, no code.
+PROMO_ROW_RE = re.compile(rb"^PPSA\d{5}\t[^\t]{3,200}\t(?:KEEP|NEUTRAL|LOSS)\t[^\t]{3,300}\t\d{4}-\d{2}-\d{2}\t(?:pending|rejected|optin|landed [0-9a-f]{7,40})\t[^\t]{1,40}(?:\t[^\t]{0,300})?$")
+
+
+def check_promotions_list(data):
+    """-> reasons a games/<id>/promotions.tsv is refused: anything but the format row, short comments and register rows."""
+    if b"\0" in data or len(data) > (128 << 10):
+        return ["a promotion register is a short text file"]
+    bad = []
+    for n, line in enumerate(data.split(b"\n"), 1):
+        if not line or line == b"format\tnps5-promotions\t1" or (line.startswith(b"#") and len(line) <= 300 and not re.search(rb"[{}]|/Users/|~/", line)):
+            continue
+        if PROMO_ROW_RE.match(line) and not re.search(rb"/Users/|~/|[{}]", line):
+            continue
+        bad.append("line %d is not a register row (title, word=value, verdict, evidence, date, status, owner), the format row or a comment" % n)
         if len(bad) >= 3:
             break
     return bad
@@ -561,6 +581,10 @@ class Check:
             return
         if profile and profile.group(2) == "override-guard.baseline":
             for why in check_baseline_list(data):
+                F(f": {why}")
+            return
+        if profile and profile.group(2) == "promotions.tsv":
+            for why in check_promotions_list(data):
                 F(f": {why}")
             return
         if profile and profile.group(2) == "metal-guests.tsv":
