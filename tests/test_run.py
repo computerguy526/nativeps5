@@ -49,6 +49,18 @@ class T(unittest.TestCase):
             self.plan(argv, env)
         self.assertEqual(c.exception.code, code, str(c.exception)); return str(c.exception)
 
+    # ---- host libraries (LIBS): build tree or flat dir; a missing dir is refused at launch
+    def test_libs_flat_dir_is_used_when_it_holds_the_host_library(self):
+        flat = os.path.join(self.d, "flat"); os.makedirs(flat); open(os.path.join(flat, "libnps5_gpu.dylib"), "w").write("x")
+        self.titles('LIBS="%s"\n' % flat)
+        self.assertEqual(self.plan([]).env["DYLD_LIBRARY_PATH"], flat)
+
+    def test_libs_build_tree_layout_is_kept(self):
+        tree = os.path.join(self.d, "b", "core/libs/libs/unpatched"); os.makedirs(tree); open(os.path.join(tree, "libnps5_gpu.dylib"), "w").write("x")
+        self.titles('LIBS="%s"\n' % os.path.join(self.d, "b"))
+        self.assertEqual(self.plan([]).env["DYLD_LIBRARY_PATH"], tree)
+        self.assertEqual(run.host_lib_dir("/nowhere/at/all"), "/nowhere/at/all/core/libs/libs/unpatched")
+
     # ---- layering
     def test_shader_cache_words_never_raise(self):
         # the shader cache is an optimisation: an unknown title, a missing list or a broken profile gives a warning or nothing, never an error
@@ -542,6 +554,33 @@ class RehearseGuards(unittest.TestCase):
         self.assertEqual(run.guest_image_plan(dict(path="/nonexistent/native"))[:2], (True, None))
 
 
+class LoadedCheck(unittest.TestCase):
+    class P: gpu = "kyty"; env = {"NPS5_KYTY_GPU_LIB": "/rc/kyty_gpu.dylib", "DYLD_LIBRARY_PATH": "/new/flat"}
+    def test_rpath_fallback_is_reported(self):
+        txt = "n 1 u REG 1,1 1 1 /rc/kyty_gpu.dylib\nn 1 u REG 1,1 1 2 /old/build-arm64/core/libs/libs/unpatched/libnps5_gpu.dylib\n"
+        bad = run.verify_loaded(self.P, lambda: txt, sleep=lambda s: None, tries=2)
+        self.assertEqual(len(bad), 1); self.assertIn("libnps5_gpu.dylib loaded from", bad[0])
+    def test_planned_libraries_pass(self):
+        txt = "n 1 u REG 1,1 1 1 /rc/kyty_gpu.dylib\nn 1 u REG 1,1 1 2 /new/flat/libnps5_gpu.dylib\n"
+        self.assertEqual(run.verify_loaded(self.P, lambda: txt, sleep=lambda s: None, tries=2), [])
+    def test_never_mapped_is_not_a_mismatch(self):
+        self.assertEqual(run.verify_loaded(self.P, lambda: "", sleep=lambda s: None, tries=2), [])
+
+
+class MissingHostLibs(unittest.TestCase):
+    def test_missing_dyld_dir_is_refused(self):
+        T.setUp(self); self.app0 = os.path.join(self.d, "app0"); os.makedirs(self.app0)
+        T.titles(self, "APP0=%s\n" % self.app0)
+        tid, opts = run.parse_args(["PPSA00001"])
+        plan = run.compose(tid, opts, dict(self.env))
+        self.assertFalse(os.path.isdir(plan.env["DYLD_LIBRARY_PATH"]))
+        saved = run.preflight; run.preflight = lambda plan: ([], [])
+        try:
+            self.assertEqual(run.execute(plan, opts, plan.environ), 2)
+        finally:
+            run.preflight = saved
+
+
 class Exec(unittest.TestCase):
     """execute() with a fake child: run.json states, clean-up on failure, the binary's patch record."""
     titles = T.titles
@@ -556,7 +595,7 @@ class Exec(unittest.TestCase):
         run.verify_binary = lambda g, p, sel, environ, patchmod=None: dict(build="01.001", build_id="0123456789abcdef", sidecar=None, patches_applied=[], notes=[])
         run.components = lambda plan: dict(public=None, ps5recomp="r", anyps5="a", kk="k", kyty="y")
         run.shutil.which = lambda n: "/usr/bin/true"
-        self.env["NPS5_WATCH"] = "0"
+        self.env["NPS5_WATCH"] = "0"; self.env["NPS5_ALLOW_MISSING_HOST_LIBS"] = "1"   # fake host path
 
     def tearDown(self):
         run.preflight, run.verify_binary, run.components, run.shutil.which = self.saved

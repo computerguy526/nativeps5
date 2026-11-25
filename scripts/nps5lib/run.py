@@ -19,7 +19,7 @@ Verdicts in run.json: DONE_UNTIL (the --until target was reached), DONE_FIXED (n
 not reached in time), ENDED_EARLY (the title exited by itself before the target), EARLY_BLACK, EARLY_STALL, CRASH,
 FAIL_RC<n>, DUMP_MODIFIED, INTERRUPTED / ERROR (the runner was stopped or failed; the title is stopped with it).
 A tag names one run: a run folder that already holds a run.json is set aside as <tag>.prev-<time>, never mixed."""
-import ctypes, hashlib, importlib.util, json, os, re, shlex, shutil, signal, subprocess, sys, threading, time
+import importlib.util, ctypes, hashlib, importlib.util, json, os, re, shlex, shutil, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -446,7 +446,7 @@ def compose(tid, opts, environ=None, g=None):
     # The PS5 system libraries come from AnyPS5's arm64 host libraries, also with GPU=kyty (Kyty replaces the graphics
     # exports only). Without a build (scripts/build.sh anyps5) the plan carries a placeholder and the run stops below.
     libs = os.path.expanduser(libs) if libs else (environ.get("NPS5_ANYPS5_BUILD") or ANYPS5_MISSING)
-    plan.put("DYLD_LIBRARY_PATH", os.path.join(libs, "core/libs/libs/unpatched"), "back end")
+    plan.put("DYLD_LIBRARY_PATH", host_lib_dir(libs), "back end")
     if gpu == "kyty":
         kl = arm["pieces"].get("kyty") or titles.get("KYTY_LIB")
         if kl:
@@ -878,6 +878,16 @@ def keep_cache_per_hardware(cache_dir, key, log=None):
     return moved
 
 
+def host_lib_dir(libs):
+    """The directory DYLD_LIBRARY_PATH gets for the AnyPS5 host libraries: LIBS is either a build tree (<LIBS>/core/libs/libs/unpatched)
+    or a flat directory that holds libnps5_gpu.dylib itself. A wrong LIBS used to leave a path that did not exist, and the binary then
+    silently loaded the host libraries of its LC_RPATH (an older build: no pad-motion export, v1.4 playtests ran on it)."""
+    tree = os.path.join(libs, "core/libs/libs/unpatched")
+    if not libs.startswith("<") and not os.path.isdir(tree) and os.path.isfile(os.path.join(libs, "libnps5_gpu.dylib")):
+        return libs
+    return tree
+
+
 def components(plan):
     e = plan.environ
     libs = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(plan.env["DYLD_LIBRARY_PATH"])))))  # <anyps5 checkout>/build-arm64 -> checkout
@@ -965,6 +975,27 @@ def parse_args(argv):
     if len(pos) != 1:
         raise Refuse("a title id is required (no default game): nps5 run <id> [options]; see --help", 2)
     return pos[0], opts
+
+
+def _loadedcheck():
+    spec = importlib.util.spec_from_file_location("nps5_loadedcheck", os.path.join(os.path.dirname(os.path.abspath(__file__)), "loadedcheck.py"))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+
+
+def verify_loaded(plan, lsof, sleep=time.sleep, tries=45, check=None):
+    """Launch-time check (v1.4): once the title has mapped its libraries, the host library (libnps5_gpu.dylib) and Kyty library
+    that are mapped must be the planned ones (DYLD_LIBRARY_PATH dir, NPS5_KYTY_GPU_LIB). A wrong LIBS used to fall back silently to the
+    binary's LC_RPATH build. Returns [] when ok or never seen within tries*2 s (a title that crashes early is judged elsewhere),
+    else the problem lines."""
+    lc = check or _loadedcheck()
+    kyty = plan.env.get("NPS5_KYTY_GPU_LIB") if plan.gpu == "kyty" else None
+    host = plan.env.get("DYLD_LIBRARY_PATH")
+    for _ in range(tries):
+        found = lc.mapped_images(lsof())
+        if found.get("libnps5_gpu.dylib") and (not kyty or found.get("kyty_gpu.dylib")):
+            return lc.compare(found, kyty, host)
+        sleep(2)
+    return []
 
 
 def watch_run(plan, pr, err_path, environ):
@@ -1108,6 +1139,11 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         print("nps5 run: the AnyPS5 arm64 host libraries are missing: set NPS5_ANYPS5_BUILD or LIBS in %s. They provide the PS5 "
               "system libraries for every title run (also with GPU=kyty): scripts/fetch-components.sh anyps5, then "
               "scripts/build.sh anyps5 (BUILDING.md, step 5)" % plan.titles_path, file=sys.stderr); return 2
+    dyld = plan.env.get("DYLD_LIBRARY_PATH", "")
+    if dyld and not os.path.isdir(dyld) and not plan.environ.get("NPS5_ALLOW_MISSING_HOST_LIBS"):
+        print("nps5 run: DYLD_LIBRARY_PATH %r does not exist: LIBS in %s must be an AnyPS5 build tree (core/libs/libs/unpatched/) or a flat "
+              "directory holding libnps5_gpu.dylib; without it the binary would load the host libraries of its LC_RPATH (an older build)"
+              % (dyld, plan.titles_path), file=sys.stderr); return 2
     if not os.path.isdir(plan.titles.get("APP0", "")):
         print("nps5 run: APP0 %r is not a folder (set it in %s)" % (plan.titles.get("APP0"), plan.titles_path), file=sys.stderr); return 2
     tmo = shutil.which("gtimeout") or shutil.which("timeout")
@@ -1149,6 +1185,22 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
             with open(rj["logs"]["out"], "w") as of:
                 pr = popen(command_line(plan, tmo), env=env, cwd=os.path.join(plan.run_dir, "frames"), stdout=of, stderr=ef, stdin=subprocess.DEVNULL)
                 fp = footprint(pr.pid).start() if isinstance(getattr(pr, "pid", None), int) else None
+                mism = []
+                if isinstance(getattr(pr, "pid", None), int) and environ.get("NPS5_LOADED_CHECK", "1") != "0":
+                    import threading
+                    def _lc():
+                        def _ls():
+                            kids = subprocess.run(["pgrep", "-P", str(pr.pid)], capture_output=True, text=True).stdout.split() or [str(pr.pid)]
+                            return subprocess.run(["lsof", "-n", "-p", ",".join(kids)], capture_output=True, text=True).stdout
+                        mism.extend(verify_loaded(plan, _ls))
+                        if mism:
+                            msg = "LOADED LIBRARIES DIFFER FROM THE PLAN: " + "; ".join(mism)
+                            print("nps5 run: " + msg, file=sys.stderr)
+                            try: open(rj["logs"]["err"], "a").write("[nps5] " + msg + "\n")
+                            except OSError: pass
+                            try: pr.terminate()
+                            except OSError: pass
+                    threading.Thread(target=_lc, daemon=True).start()
                 try:
                     wv = watch_run(plan, pr, rj["logs"]["err"], environ)
                     rc = pr.wait() if wv is None else wv[2]
@@ -1158,7 +1210,9 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         t1 = time.time()
         rj["rc"] = rc; rj["timings"].update(end=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t1)), wall_s=round(t1 - t0, 1))
         rj["verdict"] = "DONE_FIXED" if rc in (0, 124) else ("CRASH" if rc < 0 or rc > 128 else "FAIL_RC%d" % rc)
-        if wv and wv[0]:
+        if mism:
+            rj["verdict"] = "LOADED_MISMATCH"; rj["timings"]["loaded_mismatch"] = mism
+        elif wv and wv[0]:
             rj["verdict"] = wv[0]; rj["timings"]["watch"] = wv[1]
             if wv[0] in ("DONE_UNTIL", "DONE_FIXED"): rc = 0
         elif plan.until and rj["verdict"] == "DONE_FIXED":
