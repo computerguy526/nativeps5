@@ -14,6 +14,7 @@ Generate it from a cold run's guest -> KosmicKrisp key map (`stage guest kk [win
 
 Commands (python3 -I scripts/nps5lib/ovguard.py ...):
     check [games/<id> ...] [--strict] [--words]   static check (no sidecar: warning, error under --strict)
+    sidecar-xf games/<id> XFKEYS.txt...           same from `kyty_msl_dump --programs <programs.bin> --xf-keys` output (digest -> guest; no run needed)
     sidecar games/<id> MAP.tsv                    write games/<id>/metal-guests.tsv from a guest->kk map
     summary games/<id> RUNLOG [--min-hit N]       "metal overrides: rows N, keys seen M, hit H" from a run's stderr; exit 3 when low
     envdump                                       print the composed env of this checkout for a run dir (env.dump)
@@ -151,12 +152,7 @@ def cmd_sidecar(args):
         if len(r) >= 3 and r[0] in ("cs", "fs") and HEX16.match(r[1]) and HEX16.match(r[2]) and r[2] in keys[r[0]]:
             rows.add((r[0], r[2], r[1]))
     miss = {(k, v) for k in ("cs", "fs") for v in keys[k]} - {(a, b) for a, b, _ in rows}
-    with open(os.path.join(d, SIDECAR), "w") as f:
-        f.write("# nativeps5: guest shader hash of every Metal override key (hashes only, no shader code).\n"
-                "# INVARIANT (scripts/nps5lib/ovguard.py check): while KYTY_GPU_ACCURACY is not high, every guest hash here is in fast-math-deny.txt.\n")
-        f.write("\t".join(SIDECAR_HEAD) + "\n")
-        for kind, kk, g in sorted(rows):
-            f.write("%s\t%s\t%s\n" % (kind, kk, g))
+    write_sidecar(d, rows)
     print("ovguard: wrote %d rows; %d override keys have no guest hash yet" % (len(rows), len(miss)))
     return 0
 
@@ -201,6 +197,49 @@ def cmd_summary(args):
     return 3 if flag and mh is not None else 0
 
 
+def xf_sidecar_rows(compute_rows, gfx_rows, xf_lines):
+    """-> {(kind, kk, guest)} from `kyty_msl_dump --programs <play cache programs.bin> --xf-keys` lines (`cs|ps|vs <guest> <digest>`):
+    a row's program digest (compute: column 1, pair fragment: column 4) names its guest hash. The method behind the 153-hash deny list."""
+    g = {}
+    for l in xf_lines:
+        f = l.split()
+        if len(f) == 3 and f[0] in ("cs", "ps") and HEX16.match(f[1]) and HEX32.match(f[2]):
+            g.setdefault((f[0], f[2]), set()).add(f[1])
+    rows = set()
+    for r in compute_rows or ():
+        if len(r) >= 4 and HEX32.match(r[0]) and HEX16.match(r[2]) and r[3] != "-":
+            rows |= {("cs", r[2], x) for x in g.get(("cs", r[0]), ())}
+    for r in gfx_rows or ():
+        if len(r) >= 9 and r[0] == "gfx" and HEX32.match(r[3]) and HEX16.match(r[6]) and r[8] != "-":
+            rows |= {("fs", r[6], x) for x in g.get(("ps", r[3]), ())}
+    return rows
+
+
+def write_sidecar(d, rows):
+    with open(os.path.join(d, SIDECAR), "w") as f:
+        f.write("# nativeps5: guest shader hash of every Metal override key (hashes only, no shader code).\n"
+                "# INVARIANT (scripts/nps5lib/ovguard.py check): while KYTY_GPU_ACCURACY is not high, every guest hash here is in fast-math-deny.txt.\n")
+        f.write("\t".join(SIDECAR_HEAD) + "\n")
+        for kind, kk, g in sorted(rows):
+            f.write("%s\t%s\t%s\n" % (kind, kk, g))
+
+
+def cmd_sidecar_xf(args):
+    if len(args) < 2:
+        return usage()
+    d = args[0]
+    lines = []
+    for p in args[1:]:
+        with open(p, errors="replace") as f:
+            lines += f.read().splitlines()
+    rows = xf_sidecar_rows(read_rows(os.path.join(d, "metal-shaders.tsv")), read_rows(os.path.join(d, "metal-gfx-pairs.tsv")), lines)
+    keys = load_profile(d)[0]
+    miss = {(k, v) for k in ("cs", "fs") for v in keys[k]} - {(a, b) for a, b, _ in rows}
+    write_sidecar(d, rows)
+    print("ovguard: wrote %d rows; %d override keys have no guest hash yet" % (len(rows), len(miss)))
+    return 0 if not miss else 1
+
+
 def cmd_envdump(args):
     repo = os.getcwd()
     gid = args[0] if args else "PPSA21564"
@@ -216,7 +255,7 @@ def usage():
 def main(argv):
     if not argv or argv[0] not in ("check", "sidecar", "summary", "envdump"):
         return usage()
-    return {"check": cmd_check, "sidecar": cmd_sidecar, "summary": cmd_summary, "envdump": cmd_envdump}[argv[0]](argv[1:])
+    return {"check": cmd_check, "sidecar": cmd_sidecar, "sidecar-xf": cmd_sidecar_xf, "summary": cmd_summary, "envdump": cmd_envdump}[argv[0]](argv[1:])
 
 
 if __name__ == "__main__":

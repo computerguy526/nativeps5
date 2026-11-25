@@ -82,6 +82,24 @@ class T(unittest.TestCase):
         else:
             self.assertNotIn("KYTY_FAST_MATH_DENY", p.env)
 
+    def test_deny_list_problem(self):
+        f = run.deny_list_problem
+        good = os.path.join(self.d, "deny.txt"); open(good, "w").write("# c\n0123456789abcdef\n")
+        empty = os.path.join(self.d, "empty.txt"); open(empty, "w").write("# only a comment\n")
+        low = {"KYTY_GPU_ACCURACY": "low"}
+        self.assertEqual(f({}), ""); self.assertEqual(f(dict(low)), "")                                 # not set: nothing to check here
+        self.assertEqual(f({"KYTY_FAST_MATH_DENY": "/nope"}), "")                                       # accuracy high: the list is moot
+        self.assertEqual(f(dict(low, KYTY_FAST_MATH_DENY=good)), "")
+        for bad in ("/no/such/file", empty, "", self.d):
+            self.assertTrue(f(dict(low, KYTY_FAST_MATH_DENY=bad)), bad)
+        self.assertEqual(f(dict(low, KYTY_FAST_MATH_DENY="/no/such", KYTY_FAST_MATH_DENY_OPTIONAL="1")), "")
+
+    def test_deny_path_missing_refuses_at_plan(self):
+        # the shipped composition with a deny path that does not exist (box 3) is refused, dry run included (same check_final)
+        with self.assertRaises(run.Refuse) as c:
+            self.plan(["--env", "KYTY_GPU_ACCURACY=low", "--env", "KYTY_FAST_MATH_DENY=/no/such/deny.txt"])
+        self.assertIn("not a readable file", str(c.exception))
+
     def test_titles_file_is_not_executed(self):
         self.titles('BIN=$(touch %s/pwned)\n' % self.d)
         self.refused([], 2); self.assertFalse(os.path.exists(os.path.join(self.d, "pwned")))

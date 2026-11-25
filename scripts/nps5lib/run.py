@@ -165,6 +165,23 @@ def is_prepare_run(plan):
             and plan.env.get("KYTY_PIPELINE_LIST_PREPARE") == "1")
 
 
+def deny_list_problem(env):
+    """-> why KYTY_FAST_MATH_DENY is unusable under KYTY_GPU_ACCURACY != high ('' = fine). An unreadable path or a list without one hash
+    leaves EVERY shader on fast math: the Metal override keys move and all overrides silently miss (v14 rekey: a laptop path in the
+    env on a box that does not have it ran whole gate series with no list). KYTY_FAST_MATH_DENY_OPTIONAL=1 accepts it on purpose."""
+    if env.get("KYTY_GPU_ACCURACY", "high") == "high" or env.get("KYTY_FAST_MATH_DENY_OPTIONAL") == "1" or "KYTY_FAST_MATH_DENY" not in env:
+        return ""
+    v = env["KYTY_FAST_MATH_DENY"]
+    if not v:
+        return "KYTY_FAST_MATH_DENY is empty (the deny list is off)"
+    try:
+        with open(v, encoding="utf-8", errors="replace") as f:
+            ok = any(re.fullmatch(r"[0-9a-f]{16}", l.strip()) for l in f)
+    except OSError:
+        return "KYTY_FAST_MATH_DENY=%s is not a readable file" % v
+    return "" if ok else "KYTY_FAST_MATH_DENY=%s holds no guest hash" % v
+
+
 def check_final(g, p, plan, secs, environ, gpu):
     """The safety rules on the FINAL environment, whatever layer a word came from. Raises Refuse(78)."""
     forb = [c[0] for c in p.get("env_forbidden") if c]
@@ -188,6 +205,11 @@ def check_final(g, p, plan, secs, environ, gpu):
         if not os.path.isfile(full):
             raise Refuse("%s=%s is not a file (%s): %s" % (k, v, plan.layers.get(k, "?"), why or "see the game README"))
         plan.env[k] = full
+    why = deny_list_problem(plan.env) if gpu == "kyty" else ""
+    if why:
+        raise Refuse("%s (%s) while KYTY_GPU_ACCURACY=%s: every shader would get fast math and the Metal overrides would silently miss; "
+                     "fix the path, or set KYTY_FAST_MATH_DENY_OPTIONAL=1 to run without the list on purpose"
+                     % (why, plan.layers.get("KYTY_FAST_MATH_DENY", "?"), plan.env.get("KYTY_GPU_ACCURACY")))
     ban_on = (p.one("gpu_profile_ban", "on") or "on") != "off"
     prof = [k for k in PROFILE_BAN if plan.env.get(k, "0") not in ("", "0")]
     if plan.env.get("KYTY_EOP_TIMESTAMPS") == "gpu":

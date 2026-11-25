@@ -88,6 +88,12 @@ class T(unittest.TestCase):
             self.assertEqual((sorted(m), bad), ([("cs", K1), ("fs", K2)], []))
             self.assertEqual(O.check_profile(keys, m, {D1, D2}, {"KYTY_GPU_ACCURACY": "low"}, strict=True), ([], []))
 
+    def test_xf_sidecar(self):
+        xf = ["cs %s %s" % (D1, "0" * 32), "ps %s %s" % (D2, "7" * 32), "vs %s %s" % ("c" * 16, "8" * 32), "garbage"]
+        gfx = [["gfx", "9" * 32, "x:0", "7" * 32, "y:0", "4" * 16, K2, "5" * 64, "6" * 64, "twin"]]
+        self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf), {("cs", K1, D1), ("fs", K2, D2)})
+        self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf[:1]), {("cs", K1, D1)})        # a key with no digest hit stays unmapped
+
 
 if __name__ == "__main__":
     unittest.main()
