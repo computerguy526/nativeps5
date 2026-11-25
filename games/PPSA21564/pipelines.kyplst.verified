@@ -1,9 +1,9 @@
 # Record of the no-game-code proof for pipelines.kyplst, written by scripts/verify-pipeline-list.sh.
 # The proof reads the listed shaders' code from the verifier's own copy of the game and finds no 64-byte window
 # of it in the file or in any decompressed section. scripts/check.sh accepts the list only with this record.
-sha256=461aa28811a9be8129cbd3837e837d84e4f69e9094c3a5b959b5c50468d4bc2e
+sha256=b35adef67afb7145f8e4c0b388f926a47c44494e7bc8e5430d6f35c5bab503c3
 result=verify: no shader code in the list
 title=PPSA21564 01.007.000
-counts=shaders 1090 (vertex 639, pixel 321, compute 130), permutations 1457, pipelines 2456
+counts=shaders 1163 (vertex 642, pixel 321, compute 200), permutations 1538, pipelines 2507
 tool=kyty_pipeline_list verify (kyty fork, pipeline-list tool)
 date=2026-11-25
