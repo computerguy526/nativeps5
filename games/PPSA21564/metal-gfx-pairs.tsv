@@ -23,8 +23,7 @@
 # metal-guests.tsv maps key -> guest hash, new rows need one there.
 # folship (v1.4, 2026-11-25): + 25 rows (g16 12, g17 7, g18 6) for Sky Garden foliage and skinned-bone pairs, exact (autoval VERIFIED on every
 # pipeline of the key), FASTER in every timing on that class (at least 2), same modes as above.
-# relabel56 (v1.4, USER 2026-11-25): the 56 D9-class rows (every lane within 1 stored-precision unit, 1-5 words on some level) are labelled outprec:1, not exact, texts unchanged
-# (tests/data/relabel56.tsv).
+# relabel56 (v1.4, USER 2026-11-25): the 56 D9-class rows (within 1 stored-precision unit) are labelled outprec:1, not exact, texts unchanged.
 # valfix (v1.4, 2026-11-25): 110 rows removed (tests/data/valfix_dropped.tsv): level-profile validation found output differences beyond their rule on real inputs.
 format	nps5-metal-gfx-pairs	3
 title	PPSA21564	01.007.000
