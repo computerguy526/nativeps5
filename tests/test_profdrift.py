@@ -125,6 +125,21 @@ class Shipped(unittest.TestCase):
             env = P.compose(REPO, t)
             self.assertEqual(env["NPS5_TITLE_ID"], t)
 
+    def test_memgov_words_gated_to_kyty_and_never_raise_the_limit(self):
+        # memgrow-2026-11-25: the footprint governor and the rscale load hold are profile words for the kyty back end only.
+        path = os.path.join(REPO, "games", "PPSA21564", "game.tsv")
+        with open(path) as f:
+            rows = [l.rstrip("\n").split("\t") for l in f if l.startswith("env\t")]
+        for word in ("KYTY_FOOTPRINT_GOVERNOR=1", "KYTY_RSCALE_HOLD_ON_LOAD=1"):
+            hit = [r for r in rows if r[1] == word]
+            self.assertEqual(len(hit), 1, word)
+            self.assertIn("gpu=kyty", hit[0][2], word)
+        self.assertFalse([r for r in rows if r[1].startswith("NPS5_SELF_MEM_LIMIT_MB")])
+        for t in P.titles_with_register(REPO):
+            if t == "PPSA21564":
+                continue
+            self.assertNotIn("KYTY_FOOTPRINT_GOVERNOR", P.compose(REPO, t), t)
+
     def test_cli_exit_codes(self):
         self.assertEqual(P.main([]), 2)
         self.assertEqual(P.main(["check", "--all"]), 0)     # pending rows only warn

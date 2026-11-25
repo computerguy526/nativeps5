@@ -1261,6 +1261,10 @@ KYTY_FLIGHTREC_WINDOW_S	kyty	seconds of history a dump holds per ring; default 1
 KYTY_FLIP_LOG	kyty		src/graphics/presentation/window/swapchain.cpp
 KYTY_FLIP_WAIT_MODE	kyty		src/graphics/guest_gpu/graphicsRun.cpp
 KYTY_FOLD_LANE_MASKS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_FOOTPRINT_FACTOR_PCT	kyty	footprint governor: budget factor in percent while active, 20..100, default 60 (never raises the budget, floor 1 GiB)	src/hybrid/footprintGovernor.h
+KYTY_FOOTPRINT_GOVERNOR	kyty	1 = footprint governor (default off): above a soft mark of the self memory limit the planning budget is scaled down so the image/buffer collectors and the native image pool run before the limit exit; never changes the limit	src/hybrid/kytyGpuBridge.cpp
+KYTY_FOOTPRINT_HOLD_MS	kyty	footprint governor: ms below the leave mark before it releases, 0..600000, default 5000	src/hybrid/footprintGovernor.h
+KYTY_FOOTPRINT_SOFT_PCT	kyty	footprint governor: soft mark as percent of NPS5_SELF_MEM_LIMIT_MB, 50..98, default 86 (leave mark 4 points lower; at least 512 MiB under the limit)	src/hybrid/footprintGovernor.h
 KYTY_FPS_AUTOCAP	kyty	promotion = opt-in ProMotion cap (highest 120/n the scene sustains)	src/graphics/presentation/autoCap.h
 KYTY_FPS_AUTOCAP_MIN	kyty	autocap floor in fps (default 30): below it the game runs uncapped	src/graphics/presentation/videoOut.cpp
 KYTY_FPS_LIMIT	kyty		src/graphics/presentation/videoOut.cpp
@@ -1772,6 +1776,7 @@ KYTY_RES_AUDIT_INTERNAL	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_RES_AUDIT_MAX	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_RES_AUDIT_SHADERS	kyty		src/graphics/host_gpu/renderer/metalfx.cpp
 KYTY_ROBUST_BUFFER_LOADS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
+KYTY_RSCALE_HOLD_ON_LOAD	ps5recomp	1 = the render-scale controller does not switch 720p -> 540p for 60 s after a level change, nor (up to 120 s) while the frame-time average is over 100 ms (a streaming level; default off; hold_s, stream_ms, stream_max_s in NPS5_RENDER_TUNE)	pkg/runtime/core/nps5_rscale.c
 KYTY_RTIMAGE_PROBE	kyty	1 = diagnostic: log the dispatch shape of compute shaders that touch formatted buffers (v1.2.2)	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_BUDGET_GUARD	kyty	software RT dispatches skipped while lanes exhaust the BVH node budget (default on, 0 off)	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_RT_BUDGET_GUARD_HOLD_MS	kyty		src/graphics/host_gpu/renderer/renderCompute.cpp
