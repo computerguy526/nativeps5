@@ -2102,6 +2102,7 @@ NPS5_DUMP_DIR	nativeps5		tests/test_bugreport.py
 NPS5_DUMP_MAP	ps5recomp		pkg/runtime/core/recomp_runtime.c
 NPS5_DUMP_PCMAP	ps5recomp		pkg/runtime/core/nps5_diag.c
 NPS5_EH_TRACE	ps5recomp		pkg/runtime/core/nps5_eh.c
+NPS5_ENTRY_DIR	ps5recomp	the entry repository (nativeps5) checkout `nps5 build` finds scripts/gamepack.py in	pkg/pack/gamezip.go
 NPS5_EXPLAIN_ADDRS	ps5recomp		pkg/disasm/cfg.go
 NPS5_EXTRA_ENV	nativeps5		tests/compare_env.sh
 NPS5_FLUSH_STATS	anyps5		core/shader/recompiler/Translation/src/TranslationContext/OperandAccess.cpp
@@ -2121,9 +2122,10 @@ NPS5_FRAMERATE_NO_FREEZE_AV	ps5recomp	1 = do not freeze the frame-rate block whi
 NPS5_FRAMERATE_NO_FREEZE_LOAD	ps5recomp	1 = do not freeze the frame-rate block while a level loads	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FRAMERATE_WARM	ps5recomp	frames without a rewrite after a freeze ends (default 60; 0..36000, anything else is ignored)	pkg/runtime/modules/libSceAnyPS5/nps5_anyps5.c
 NPS5_FUNC_HOLD_LOAD	nativeps5		scripts/nps5-env.sh
+NPS5_GAMEPACK	ps5recomp	path of scripts/gamepack.py for the `nps5 build` compress question (default: found next to the recomp checkout)	pkg/pack/gamezip.go
 NPS5_GAMES_DIR	nativeps5		games/game.py
 NPS5_GAMES_FIRST	nativeps5		games/game.py
-NPS5_GAME_COMPRESS	nativeps5	`1`/`0`: the answer to "compress the game files?"; makes the shader-cache question default to yes/no	scripts/nps5lib/cachezip.py
+NPS5_GAME_COMPRESS	nativeps5	`1`/`0`: the answer to "compress the game files?" (`nps5 build` packs without asking / records no); makes the shader-cache question default to yes/no	scripts/nps5lib/cachezip.py
 NPS5_GPU	nativeps5	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	scripts/nps5lib/run.py
 NPS5_GPU	ps5recomp	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_GPU_ARCH	nativeps5		scripts/nps5lib/metal.py

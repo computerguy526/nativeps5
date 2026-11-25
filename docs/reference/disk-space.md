@@ -8,6 +8,28 @@ they sit on the disk. Numbers: SAROS (PPSA07631) packs 152.8 GB -> 78.9 GB; the 
 
 ## Step 1 of every new title: pack it
 
+`nps5 build <title dir>` does this step for you as a question. Before it translates, if the dump has big files (512 MiB or
+more) that are not packed yet, it shows the dry run (current size, estimated saving, how many files over 1.9 GiB will be cut
+into `.nps5seg` segments, a rough time, the free disk needed while the largest file is packed) and asks `Compress the game
+files? [Y/n]`. Yes runs `python3 scripts/gamepack.py pack <dump>` (the steps below, same safety rules); the answer is
+written to `game-compress-answer` in the data state folder (`NPS5_DATA_STATE_DIR`, default
+`~/Library/Application Support/nativeps5/data`) and makes the shader-cache question of `nps5 cache prepare` default to yes.
+
+| Situation | What `nps5 build` does |
+|---|---|
+| terminal, dump not packed | asks (Enter = yes; end of input = no) |
+| no terminal (CI, a script) | no question, nothing packed (default off) |
+| `NPS5_GAME_COMPRESS=1` | packs without asking, also without a terminal |
+| `NPS5_GAME_COMPRESS=0` | does not pack, records no |
+| a game is running | skips; packing never runs while a game does |
+| dump under `/Volumes` (external, read-only dumps) | skips and says so; copy the dump to the internal disk first |
+| dump read-only or not on APFS | skips and says why (`chmod -R u+w` the dump for the run) |
+| `scripts/gamepack.py` not found | skips (`NPS5_GAMEPACK=<path>` or `NPS5_ENTRY_DIR=<entry repository>`) |
+| already packed, or nothing over 512 MiB, or nothing that compresses | no question |
+
+A failed pack never fails the build; every original is still in place and the message says how to continue. The time
+shown is a guess (about 120 MB/s), not a measurement.
+
 Do this first, before translating or running anything, so every later step (translate, first run, cache prepare) works on the
 small copy and you never need the full size on disk twice.
 

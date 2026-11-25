@@ -108,6 +108,15 @@ From a fresh Mac to a running game. The steps are CPU only until the last one. T
 
 ### Save disk space: keep the game folder compressed
 
+`nps5 build` asks about this itself: before it translates a title whose dump still has big files (512 MiB or more) that are not
+packed, it prints a dry-run estimate (size now, expected saving, how many files over 1.9 GiB become `.nps5seg` segment folders,
+a rough time and the free disk needed) and asks `Compress the game files? [Y/n]`. The packing is lossless and reversible: the
+game reads the same bytes, and each original is removed only after its packed copy has been read back and compared by
+SHA-256 (`scripts/gamepack.py unpack` rebuilds it). After you answer, `nps5 cache prepare` asks about the shader cache and
+defaults to your answer. Without a terminal nothing is asked and nothing is packed; `NPS5_GAME_COMPRESS=1` packs without a
+question, `NPS5_GAME_COMPRESS=0` says no. It never runs while a game runs, and it leaves a dump on an external volume
+(`/Volumes`), a read-only folder or a non-APFS disk alone and says why.
+
 An extracted game is large (ASTRO BOT: about 160 GB) and mostly textures and models, which compress well. On an APFS
 disk macOS can store files compressed and still hand every program the original bytes, so nothing else changes:
 

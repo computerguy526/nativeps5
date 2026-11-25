@@ -3,6 +3,10 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## Unreleased
+
+- **`nps5 build` asks "Compress the game files? [Y/n]"** before it translates a title whose dump has big unpacked files: a dry-run estimate (size, saving, files that become `.nps5seg` segments, rough time, free disk needed), then `scripts/gamepack.py pack` on yes. Lossless and reversible; originals stay until each packed copy is verified. The answer makes the shader-cache question after `nps5 cache prepare` default the same way. No terminal: no question, nothing packed; `NPS5_GAME_COMPRESS=1/0` answers it; never while a game runs; a dump on `/Volumes`, a read-only or non-APFS folder is left alone with the reason. Needs the recomp commit that adds it (`pkg/pack/gamezip.go`).
+
 ## v1.4.1 (hotfix)
 
 Everything in v1.4.0, plus the fix that lets players build SAROS. **Update:** `nativeps5-recomp` moves to `v1.4.1` (see [components.lock](components.lock));

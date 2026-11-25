@@ -124,7 +124,7 @@ game files. Rules:
 - Everything derived from a dump (translated code, shader and pipeline caches, frame dumps, logs) goes to
   `NPS5_SCRATCH`, never into a checkout. `scripts/check.sh` refuses such files in a commit.
 
-Step 1 for a new title: pack the dump (`scripts/gamepack.py pack --dry-run`, then pack, then verify) before anything else;
+Step 1 for a new title: pack the dump (`nps5 build` asks "Compress the game files? [Y/n]" before it translates; by hand: `scripts/gamepack.py pack --dry-run`, then pack, then verify) before anything else;
 see [docs/reference/disk-space.md](docs/reference/disk-space.md). Shader caches can be compressed after `nps5 cache prepare`
 (`NPS5_CACHE_COMPRESS=1`).
 
