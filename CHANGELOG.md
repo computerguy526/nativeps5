@@ -5,21 +5,34 @@ pinned commits are in [components.lock](components.lock).
 
 ## v1.4 (release candidate, not released)
 
-Draft: the claims below are measured on the runs named in each line; the SAROS status stays "pending" until its first run on the release candidate has passed.
+Draft: every number below was measured on a release-candidate build (M5 Pro, ASTRO BOT, the profile settings `nps5 run` composes); numbers marked PENDING are not claims yet.
+
+**Update:** all of `nativeps5-kyty`, `nativeps5-recomp` and `nativeps5-anyps5` move to `v1.4.0` (see [components.lock](components.lock)). Pull, check out the tags,
+rebuild (`scripts/build.sh`) and **rebuild KosmicKrisp** (`scripts/build.sh kosmickrisp`: patch 0041, `nps5_kk_archive_flush`, is new; 41 patches), then
+start the title. The first start on a v1.3.x cache prepares it once behind the loading card (see below); later starts are warm.
 
 - **Astro Bot: an upgraded shader cache is prepared once, then stays warm.** A cache left by v1.3.x holds entries for the old shader code
   that only take room (the old replay limit stopped the pipeline replay after 85 builds and left 4,772 pipelines to compile in play). v1.4 stamps
-  the driver cache with the shader-code version. The first start on an older cache sets it aside, shows the loading card, and rebuilds it
-  from the pipeline list ("prepared"); later starts are warm (measured: 0 pipelines compiled in play on the warm start). The driver cache
-  cap is 1,024 MB with a replay limit of 896 MB. `KYTY_CACHE_UPGRADE=0` turns the upgrade off. The one-time preparation took three runs of about three
-  minutes on a cold machine cache.
+  the driver cache with the shader-code version. The first start on an older cache sets it aside, shows the loading card, and rebuilds it from the
+  pipeline list until it is "prepared". Measured on a clone of a v1.3.x play cache (cold OS Metal cache): three runs, each cut at 175 s, reached
+  "prepared" (0 failed, 0 beyond the cache limit), the set-aside copy was removed, and the next start was warm: 0 pipelines compiled in play and 2,207 libraries
+  loaded in 0.4 s. The driver cache cap is 1,024 MB with a replay limit of 896 MB. `KYTY_CACHE_UPGRADE=0` turns the upgrade off. A cache is
+  re-prepared only when the shader code or a switch that changes it changes (render scale, MetalFX, frame cap, window and QoS settings do not).
 - **Astro Bot: pipeline list replaced** by a list of 1,090 shaders, 1,457 permutations and 2,456 pipelines (the 4,892 entries of the
   v1.3.1 list were pairs that differ only in state the device decides; 2,446 were unique). Keys and hashes only; its no-game-code record is
-  `games/PPSA21564/pipelines.kyplst.verified`.
-- **Astro Bot: `NPS5_QOS_GPU=rt` is on by default** (the GPU-feeding threads at real-time priority): Sky Garden A/B/A on an M5, mean frame time
-  41.7 / 38.9 / 41.1 ms (-6.1 % against the A mean), game speed 98-99 %. Off with `--env NPS5_QOS_GPU=off`.
+  `games/PPSA21564/pipelines.kyplst.verified`. On the release candidate the pre-build replays 1,505 shader permutations (0 skipped, 0 failed) and 2,431 pipelines (0 failed).
+- **Astro Bot: `NPS5_QOS_GPU=rt` is on by default** (the GPU-feeding threads at real-time priority). Sky Garden on an M5 Pro, release candidate, warm cache, A/B/A:
+  mean frame time 36.5 ms with it, 39.0 ms with `NPS5_QOS_GPU=off` (-6.4 %), 99 % game speed. Off with `--env NPS5_QOS_GPU=off`. PENDING: rerun on the final profile.
 - Upstream fixes taken (neutral in the Astro A/B): memory log no longer prints clamped buffer ranges (KytyPS5 #2540), `V_CMPX_NGE_F16` is decoded (#2532).
   The IPO/PGO build switches exist and are off by default.
+
+**Known issues (v1.4):**
+- With `NPS5_QOS_GPU=rt` the guest fault cost per frame is higher (about 8-13 ms against about 2 ms in the Sky Garden A/B/A); the frame time is still lower.
+- KosmicKrisp patch 0041: a failed archive write reports success, so with `KYTY_PREPARE_FLUSH_SYNC=1` the fallback wait is skipped; the switch stays off.
+- Closing the window can hit the 5-second save timeout, leaving about 20 Metal archive pipelines unflushed (they compile again next time).
+- The first start after an update is longer (the one-time cache preparation).
+- `KYTY_SAROS_PROGRAM_CACHE=1`: per-launch cost not measured.
+
 - **SAROS (`PPSA07631`): pending SAROS verification run.** The v1.4 Kyty carries the generic indirect-image path, the Nanite raw raster
   parameters and the shader-bundle compaction, and `nps5 run PPSA07631` now starts (the preset's `KYTY_EOP_TIMESTAMPS=gpu` is overridden to
   `cbtime`, as for ASTRO BOT; before, the safety check refused the run) and refuses to run without the Unreal console-variable list
