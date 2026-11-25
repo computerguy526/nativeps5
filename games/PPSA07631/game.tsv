@@ -37,6 +37,49 @@ env	NPS5_WINDOW_TITLE_NAME=Saros	-	window title label
 env	NPS5_GPU=kyty	gpu=kyty	back end selector word
 env	NPS5_SELF_MEM_LIMIT_MB=17408	gpu=kyty	SAROS runs at 15-16 GB; the limit is a guard, never raised to make a scene pass
 env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	record-time clocks instead of the preset's counter-heap timestamps (refused by the env_forbidden row below)
+# v1.4 SAROS player settings (v14rc 2026-11-25: the MFX720 stack of the best 2026-11-24 runs, ue2boot/upsaros_mfx.sh + sarostilerexec; evidence in promotions.tsv). The cvar VALUES live here, the cvar LIST FILE is machine-local (env_required).
+env	NPS5_UECVAR_SET=r.Nanite.PersistentThreadsCulling=0,r.RayTracing.Enable=0,r.Nanite.PrimShaderRasterization=0,r.Nanite.MeshShaderRasterization=0,r.FidelityFX.FSR3.Enabled=1,r.FidelityFX.FSR3.CreateReactiveMask=0,r.FidelityFX.FSR3.QualityMode=4,r.DynamicRes.OperationMode=0	gpu=kyty	Unreal console variables applied from the list: Nanite compute culling and raster modes, ray tracing off (no flicker, about -30 ms), the FSR3 upscaler slot that MetalFX temporal fills (720p to 4K)
+env	NPS5_UECVAR_SET_FOR=100000	gpu=kyty	the cvars stay applied past 120 s
+env	KYTY_METALFX=temporal	gpu=kyty	MetalFX temporal upscaler in the game's FSR3 slot (720p scene to 4K)
+env	KYTY_METALFX_UE=fsr3	gpu=kyty	upscaler adapter for the Unreal FSR3 slot
+env	KYTY_METALFX_UE_SKIP=1	gpu=kyty	the game's own FSR3 pass is skipped
+env	KYTY_METALFX_MAX_IN_W=1920	gpu=kyty	largest input width the scaler takes
+env	KYTY_METALFX_MV_SIGN=1	gpu=kyty	motion vector sign
+env	KYTY_METALFX_JITTER_SIGN=-1	gpu=kyty	jitter sign
+env	KYTY_METALFX_DEPTH_REVERSED=1	gpu=kyty	Unreal uses reversed depth
+env	KYTY_BDA_REACH=1	gpu=kyty	bounded buffer-device-address reach: Sky-tiler traffic and commit time down (MFX720 p50 40.9 to 35.3 ms, p99 49.2 to 39.0 ms, verify 0 mismatches)
+env	KYTY_PREDICATION_NO_DRAIN=2	gpu=kyty	predication without a GPU drain
+env	KYTY_GDS_EOP_MODE=defer	gpu=kyty	GDS end-of-pipe writes deferred
+env	KYTY_READBACK_EAGER_PAGES=1024	gpu=kyty	eager readback of the GPU-written pages the game polls
+env	KYTY_READ_FAULT_PUBLISHED_BURST=8	gpu=kyty	read-fault burst bound
+env	KYTY_PS_UINT32_TARGETS=1	gpu=kyty	pixel stages writing 32-bit integer targets
+env	KYTY_DCC_KNOWN_FILL_ALIASED=1	gpu=kyty	DCC known-fill of aliased targets
+env	KYTY_FAULT_HOST_READBACK=1	gpu=kyty	a write fault on GPU bytes whose writers completed copies them on the host
+env	KYTY_CP_READ_IMAGE_SYNC=1	gpu=kyty	image reads synchronised with the command processor
+env	KYTY_STORE_COMPLETION_FENCE=1	gpu=kyty	stores completed before the dependent dispatch
+env	KYTY_DISPATCHER_TREE=1	gpu=kyty	dispatcher as a switch tree (joins the codegen fingerprint)
+env	KYTY_BINDLESS=1	gpu=kyty	bindless descriptor path
+env	KYTY_BUNDLE_COMPACT=1	gpu=kyty	Nanite shader-bundle compaction
+env	KYTY_SAROS_NANITE_RAW=1	gpu=kyty	Nanite raw raster parameters
+env	KYTY_SAROS_PROGRAM_CACHE=1	gpu=kyty	hand-shader and Nanite-raw programs kept in the program cache
+env	KYTY_SKIP_UNDECODABLE=1	gpu=kyty	an undecodable instruction skips the shader instead of aborting
+env	KYTY_GBCOPY_REMAP=auto	gpu=kyty	G-buffer copy at the scaled render size
+env	KYTY_IMAGE_CONTAINS=1	gpu=kyty	image containment lookup
+env	KYTY_DEPTH_GROW_RECREATE=1	gpu=kyty	a depth target narrower than the request is recreated
+env	KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1	gpu=kyty	a partial render-target rebuild moves only the blocks it owns
+env	KYTY_PIPELINE_TAKE_TIMEOUT_MS=8000	gpu=kyty	a draw waits at most 8 s for a pipeline build that never returns
+env	KYTY_CLOSE_SAVE_TIMEOUT_MS=5000	gpu=kyty	closing the window exits within 5 s
+env	KYTY_VRAM_BUDGET_MB=8000	gpu=kyty	GPU memory budget (the v1.3 memory-guard failure at 17.5 GB)
+env	KYTY_VRAM_IDLE_FRAMES=150	gpu=kyty	idle frames before GPU memory is trimmed
+env	NPS5_AVPLAYER_VT=1	-	video player timing (playbook row 179)
+env	NPS5_AVPLAYER_CLOSE_CALLER_CTX=1	-	video player close from the caller context
+env	NPS5_UNRESOLVED_RET0=1	-	unresolved imports return 0
+env	NPS5_SHADOW_FAULT_FAST=1	-	fast shadow-fault path
+env	NPS5_PTHREAD_EXIT_SCE=1	-	pthread exit through the SCE path
+env	NPS5_KK_IMAGE_INT64=1	gpu=kyty	64-bit image atomics in KosmicKrisp
+env	NPS5_KK_BUFFER_INT64=1	gpu=kyty	64-bit buffer atomics in KosmicKrisp
+env	NPS5_KK_RESIDENCY_LOCK=1	gpu=kyty	KosmicKrisp residency lock (patch 0039)
+env	NPS5_KK_SWITCH_TREE=1	gpu=kyty	KosmicKrisp switch tree
 env_required	NPS5_UECVAR_LIST	the Unreal console-variable list made from your own eboot (README step 4); without it the cvar fixes (Nanite compute culling, ray tracing and mesh raster off, r.LightFunctionQuality=1, resolution) silently do not apply: flicker, stalls and about 120 ms frames
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
 
