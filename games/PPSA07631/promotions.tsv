@@ -1,27 +1,37 @@
 format	nps5-promotions	1
 # title	word=value	verdict	evidence (doc name + run tags, no paths)	decided	status	owner	note
 # Register of validated (or rejected) settings. Rules: docs/promotion.md. Check: python3 -I scripts/nps5lib/profdrift.py check <title>
-PPSA07631	NPS5_UECVAR_SET[r.Nanite.PersistentThreadsCulling]=0	KEEP	playbook row 163 (sx_base2 / e1 / e4); learnings-2026-11-22-24 sec 2	2026-11-24	pending	v14rc	PTC off: flicker gone (USER eye)
-PPSA07631	NPS5_UECVAR_SET[r.RayTracing.Enable]=0	KEEP	playbook row 163; learnings-2026-11-22-24 sec 2	2026-11-24	pending	v14rc	RT off: -29..31 ms; the cvar list needs NPS5_UECVAR_LIST (env_required)
-PPSA07631	NPS5_UECVAR_SET_FOR=100000	KEEP	playbook row 163 / SKILL UE5 standard stack	2026-11-24	pending	v14rc	keeps the cvars applied past 120 s
-PPSA07631	KYTY_PREDICATION_NO_DRAIN=2	KEEP	playbook row 164 (sx_cp0 vs cp1)	2026-11-24	pending	v14rc	
-PPSA07631	KYTY_GDS_EOP_MODE=defer	KEEP	playbook row 164	2026-11-24	pending	v14rc	
-PPSA07631	KYTY_READBACK_EAGER_PAGES=1024	KEEP	playbook row 164	2026-11-24	pending	v14rc	
-PPSA07631	KYTY_READ_FAULT_PUBLISHED_BURST=8	KEEP	playbook row 164	2026-11-24	pending	v14rc	
-PPSA07631	KYTY_FAULT_AHEAD_ADAPT=0	KEEP	playbook row 166 (sx_sm3 vs sx_cp1); D99 (SAROS only)	2026-11-24	pending	v14rc	row 166 asks a second run before a profile line
-PPSA07631	KYTY_FAULT_AHEAD_KB=16	KEEP	playbook row 166; D99 (SAROS only)	2026-11-24	pending	v14rc	same
-PPSA07631	NPS5_UECVAR_SET[r.Nanite.PrimShaderRasterization]=0	KEEP	playbook row 168 (mt1 vs sm3, mt1b vs mt1a)	2026-11-24	pending	v14rc	-12 ms; ~17 fps
-PPSA07631	NPS5_UECVAR_SET[r.Nanite.MeshShaderRasterization]=0	KEEP	playbook row 168	2026-11-24	pending	v14rc	
-PPSA07631	KYTY_PS_UINT32_TARGETS=1	KEEP	playbook row 174 (sc_f1/f2, USER eyes); USER rule 11-24 all SAROS tests carry it	2026-11-24	pending	v14rc	ASTRO smoke with the switch on still owed before any ASTRO default
-PPSA07631	KYTY_BUNDLE_COMPACT=1	KEEP	SKILL UE5 standard stack; sarosbundle (FAST variant not kept)	2026-11-24	pending	v14rc	
-PPSA07631	NPS5_AVPLAYER_VT=1	KEEP	playbook row 179 (sx_vt0/vt1, n=1)	2026-11-24	pending	v14rc	NOTES sarosv13 lists AVPLAYER_VT=2 in the documented env: owner confirms the value
-PPSA07631	KYTY_BDA_REACH=1	KEEP	NOTES sarostilerexec (D0 control vs R2: p50 -5.6, p99 -10.2 ms, MFX720, n=1)	2026-11-24	pending	v14rc	R1 =verify 0 mismatches; sarosbundle later control also carried it (36 ms): same lever
-PPSA07631	NPS5_UECVAR_SET[r.ScreenPercentage]=33.3	KEEP	playbook row 190 (msc_a/b/c, -9.1 ms p50, n=1) = the MFX720 scene size	2026-11-24	pending	v14rc	plain float; also r.DynamicRes.Min/MaxScreenPercentage=33.3 and r.SecondaryScreenPercentage.GameViewport=100
-PPSA07631	NPS5_UECVAR_SET[r.DynamicRes.MinScreenPercentage]=33.3	KEEP	playbook row 190	2026-11-24	pending	v14rc	
-PPSA07631	NPS5_UECVAR_SET[r.DynamicRes.MaxScreenPercentage]=33.3	KEEP	playbook row 190	2026-11-24	pending	v14rc	
-PPSA07631	NPS5_UECVAR_SET[r.SecondaryScreenPercentage.GameViewport]=100	KEEP	playbook row 190	2026-11-24	pending	v14rc	
-PPSA07631	?MFX720-upscaler-words	KEEP	NOTES sarostilerexec / sarosbundle (MFX720 150 s runs, box launcher)	2026-11-24	pending	v14rc	the words the MetalFX 720 launcher sets are in a box script, not a public file: owner reads them and replaces this row
-PPSA07631	?sarosv13-documented-env	KEEP	NOTES sarosv13 (DCC_KNOWN_FILL_ALIASED, SHADOW_FAULT_FAST, PTHREAD_EXIT_SCE, VRAM_BUDGET_MB, VRAM_IDLE_FRAMES in the documented env)	2026-11-24	pending	v14rc	values not recorded in the notes: owner replaces with one row per word
+PPSA07631	NPS5_UECVAR_SET[r.Nanite.PersistentThreadsCulling]=0	KEEP	playbook row 163 (sx_base2 / e1 / e4); learnings-2026-11-22-24 sec 2	2026-11-24	landed a53899b	v14rc	PTC off: flicker gone (USER eye)
+PPSA07631	NPS5_UECVAR_SET[r.RayTracing.Enable]=0	KEEP	playbook row 163; learnings-2026-11-22-24 sec 2	2026-11-24	landed a53899b	v14rc	RT off: -29..31 ms; the cvar list needs NPS5_UECVAR_LIST (env_required)
+PPSA07631	NPS5_UECVAR_SET_FOR=100000	KEEP	playbook row 163 / SKILL UE5 standard stack	2026-11-24	landed a53899b	v14rc	keeps the cvars applied past 120 s
+PPSA07631	KYTY_PREDICATION_NO_DRAIN=2	KEEP	playbook row 164 (sx_cp0 vs cp1)	2026-11-24	landed a53899b	v14rc	
+PPSA07631	KYTY_GDS_EOP_MODE=defer	KEEP	playbook row 164	2026-11-24	landed a53899b	v14rc	
+PPSA07631	KYTY_READBACK_EAGER_PAGES=1024	KEEP	playbook row 164	2026-11-24	landed a53899b	v14rc	
+PPSA07631	KYTY_READ_FAULT_PUBLISHED_BURST=8	KEEP	playbook row 164	2026-11-24	landed a53899b	v14rc	
+PPSA07631	KYTY_FAULT_AHEAD_ADAPT=0	KEEP	playbook row 166 (sx_sm3 vs sx_cp1); D99 (SAROS only)	2026-11-24	optin	v14rc	playbook row 166 asks a second run before a profile line; not shipped in v1.4.0
+PPSA07631	KYTY_FAULT_AHEAD_KB=16	KEEP	playbook row 166; D99 (SAROS only)	2026-11-24	optin	v14rc	playbook row 166 asks a second run before a profile line; not shipped in v1.4.0
+PPSA07631	NPS5_UECVAR_SET[r.Nanite.PrimShaderRasterization]=0	KEEP	playbook row 168 (mt1 vs sm3, mt1b vs mt1a)	2026-11-24	landed a53899b	v14rc	-12 ms; ~17 fps
+PPSA07631	NPS5_UECVAR_SET[r.Nanite.MeshShaderRasterization]=0	KEEP	playbook row 168	2026-11-24	landed a53899b	v14rc	
+PPSA07631	KYTY_PS_UINT32_TARGETS=1	KEEP	playbook row 174 (sc_f1/f2, USER eyes); USER rule 11-24 all SAROS tests carry it	2026-11-24	landed a53899b	v14rc	ASTRO smoke with the switch on still owed before any ASTRO default
+PPSA07631	KYTY_BUNDLE_COMPACT=1	KEEP	SKILL UE5 standard stack; sarosbundle (FAST variant not kept)	2026-11-24	landed a53899b	v14rc	
+PPSA07631	NPS5_AVPLAYER_VT=1	KEEP	playbook row 179 (sx_vt0/vt1, n=1)	2026-11-24	landed a53899b	v14rc	NOTES sarosv13 lists AVPLAYER_VT=2 in the documented env: owner confirms the value
+PPSA07631	KYTY_BDA_REACH=1	KEEP	NOTES sarostilerexec (D0 control vs R2: p50 -5.6, p99 -10.2 ms, MFX720, n=1)	2026-11-24	landed a53899b	v14rc	R1 =verify 0 mismatches; sarosbundle later control also carried it (36 ms): same lever
+PPSA07631	NPS5_UECVAR_SET[r.ScreenPercentage]=33.3	KEEP	playbook row 190 (msc_a/b/c, -9.1 ms p50, n=1) = the MFX720 scene size	2026-11-24	optin	v14rc	T720 arm words (UE-side scene size); the shipped MFX720 stack uses the FSR3 slot instead (QualityMode=4)
+PPSA07631	NPS5_UECVAR_SET[r.DynamicRes.MinScreenPercentage]=33.3	KEEP	playbook row 190	2026-11-24	optin	v14rc	T720 arm words (UE-side scene size); the shipped MFX720 stack uses the FSR3 slot instead (QualityMode=4)
+PPSA07631	NPS5_UECVAR_SET[r.DynamicRes.MaxScreenPercentage]=33.3	KEEP	playbook row 190	2026-11-24	optin	v14rc	T720 arm words (UE-side scene size); the shipped MFX720 stack uses the FSR3 slot instead (QualityMode=4)
+PPSA07631	NPS5_UECVAR_SET[r.SecondaryScreenPercentage.GameViewport]=100	KEEP	playbook row 190	2026-11-24	optin	v14rc	T720 arm words (UE-side scene size); the shipped MFX720 stack uses the FSR3 slot instead (QualityMode=4)
+PPSA07631	KYTY_METALFX=temporal	KEEP	NOTES sarostilerexec / sarosbundle (ue2boot/upsaros_mfx.sh MFX720)	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_METALFX_UE=fsr3	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_METALFX_UE_SKIP=1	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_METALFX_MAX_IN_W=1920	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_METALFX_MV_SIGN=1	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_METALFX_JITTER_SIGN=-1	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_METALFX_DEPTH_REVERSED=1	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_DCC_KNOWN_FILL_ALIASED=1	KEEP	NOTES sarosv13 documented env / upsaros_mfx.sh	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	NPS5_SHADOW_FAULT_FAST=1	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	NPS5_PTHREAD_EXIT_SCE=1	KEEP	NOTES sarosv13 documented env	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_VRAM_BUDGET_MB=8000	KEEP	NOTES sarosv13 documented env (memory guard)	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
+PPSA07631	KYTY_VRAM_IDLE_FRAMES=150	KEEP	same	2026-11-25	landed a53899b	v14rc	from the best 2026-11-24 SAROS runs
 PPSA07631	KYTY_BDA_PAGETABLE_MB=64	LOSS	playbook row 183 (unsafe: UE GPU addresses reach ~200 GB)	2026-11-24	rejected	main	ASTRO KEEP, UE5 never
 PPSA07631	NPS5_UECVAR_SET[r.RDG.AsyncCompute]=0	LOSS	playbook row 169 (+24 ms)	2026-11-24	rejected	main	
 PPSA07631	NPS5_UECVAR_SET[r.Nanite.MinPixelsPerEdgeHW]=1000000	LOSS	playbook row 171 (+11-15 ms, artifacts)	2026-11-24	rejected	main	
