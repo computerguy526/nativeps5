@@ -47,6 +47,7 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
   `cbtime`, as for ASTRO BOT; before, the safety check refused the run) and refuses to run without the Unreal console-variable list
   `NPS5_UECVAR_LIST` (without it the profile's cvar fixes silently did not apply). Whether SAROS is playable on v1.4, and at what frame
   rate, is not yet verified: the status in the README and the game note stays "not playable" until a run on the merged tip says otherwise.
+- **SAROS (`PPSA07631`): a player's second session starts from the saved caches** (`nps5 run` keeps a per-player cache directory with the pipeline and shader journals, the program cache and the KosmicKrisp archive). In a 150 s run on an M5 Pro the first 100 pipelines needed 4 unoptimized builds instead of 94 and 95 of them hit the driver cache; draws waited on shader builds 17 s instead of 126 s (2 consecutive runs; the second reached a smaller part of the game in the same time, so the 120 s ratio is not the cleaner number).
 - **Cronos: The New Dawn (`PPSA24096`)** had the same refusal and gets the same override.
 - **Switches removed from the docs:** `KYTY_SAROS_HS_DYNIDX`, `KYTY_SAROS_ASYNC_CS` and `KYTY_SAROS_ASYNC_CS_WAIT_MS` do not exist in v1.4.
   `KYTY_SAROS_PROGRAM_CACHE=1` (hand-shader and Nanite-raw programs kept in the program cache; default off, so those programs recompile on
