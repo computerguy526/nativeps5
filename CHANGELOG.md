@@ -8,7 +8,7 @@ pinned commits are in [components.lock](components.lock).
 Draft: every number below was measured on a release-candidate build (M5 Pro, ASTRO BOT, the profile settings `nps5 run` composes); numbers marked PENDING are not claims yet.
 
 **Update:** all of `nativeps5-kyty`, `nativeps5-recomp` and `nativeps5-anyps5` move to `v1.4.0` (see [components.lock](components.lock)). Pull, check out the tags,
-rebuild (`scripts/build.sh`) and **rebuild KosmicKrisp** (`scripts/build.sh kosmickrisp`: patch 0041, `nps5_kk_archive_flush`, is new; 41 patches), then
+rebuild (`scripts/build.sh`) and **rebuild KosmicKrisp** (`scripts/build.sh kosmickrisp`: patches 0041 (`nps5_kk_archive_flush`) and 0042 (barrier memory modes, fixes 47 pipelines that failed to build on some toolchains) are new; 42 patches), then
 start the title. The first start on a v1.3.x cache prepares it once behind the loading card (see below); later starts are warm.
 
 - **Astro Bot: an upgraded shader cache is prepared once, then stays warm.** A cache left by v1.3.x holds entries for the old shader code
