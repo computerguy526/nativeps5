@@ -2,6 +2,6 @@
 # Release pins: the tag is annotated and must point at exactly the commit (fetch-components.sh refuses otherwise; CI checks the format).
 # Public components. scripts/fetch-components.sh clones these three; KosmicKrisp is built from kosmickrisp/ here.
 ps5recomp | GPL-2.0-only | https://github.com/wie-project/PS4Recomp.git | 65ac2fbb3c5bacce9e1cb69dc5acee4a71ea0cff | ${NPS5_FORK_BASE}/nativeps5-recomp | v1.4.0 | df4d858a0f92d766cf4209dcf0c1e8681371db40
-kyty      | GPL-2.0-only | https://github.com/Jetsku/KytyPS5.git        | 744705ee1df4b0acb1af382ff5c32ca4a20aa5f7 (tag u59-windows-20261024-int21) | ${NPS5_FORK_BASE}/nativeps5-kyty | v1.4.0 | 3b3f831d165641dc557422b995569d47bd38b074
+kyty      | GPL-2.0-only | https://github.com/Jetsku/KytyPS5.git        | 744705ee1df4b0acb1af382ff5c32ca4a20aa5f7 (tag u59-windows-20261024-int21) | ${NPS5_FORK_BASE}/nativeps5-kyty | v1.4.0 | 39e795805b1d753e9a25d143ba51dd113750b9ef
 anyps5    | GPL-2.0-only | https://github.com/boykopovar/AnyPS5.git    | ea0c471cbc04ff0b7e5e0f1f0f53777e5f71de5c | ${NPS5_FORK_BASE}/nativeps5-anyps5 | v1.4.0 | c2f5d4d9e38d32b163ac8506ea9ad654b084929c
 mesa      | MIT          | https://gitlab.freedesktop.org/mesa/mesa.git | see kosmickrisp/MESA_COMMIT              | (none: kosmickrisp/patches is applied on the pin) | - | tree in kosmickrisp/EXPECTED_TREE
