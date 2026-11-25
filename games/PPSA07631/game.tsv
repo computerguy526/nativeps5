@@ -1,4 +1,4 @@
-# STATUS v1.3.x: not playable (stalls ~1 fps with the hand shaders, background missing without them); support is coming in v1.4.
+# STATUS v1.3.x: not playable (stalls ~1 fps with the hand shaders, background missing without them). v1.4: pending SAROS verification run (no claim yet).
 # SAROS (PS5, Unreal Engine 5.5 line, AGC graphics). Schema: games/schema.tsv. See README.md for status, setup and known issues.
 # key<TAB>value, comments on their own lines. No game data: identifiers, counts and switches only.
 # The environment the title needs at run time is the translator profile ps5recomp/profiles/PPSA07631.json (baked into the translated
@@ -37,6 +37,7 @@ env	NPS5_WINDOW_TITLE_NAME=Saros	-	window title label
 env	NPS5_GPU=kyty	gpu=kyty	back end selector word
 env	NPS5_SELF_MEM_LIMIT_MB=17408	gpu=kyty	SAROS runs at 15-16 GB; the limit is a guard, never raised to make a scene pass
 env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	record-time clocks instead of the preset's counter-heap timestamps (refused by the env_forbidden row below)
+env_required	NPS5_UECVAR_LIST	the Unreal console-variable list made from your own eboot (README step 4); without it the cvar fixes (Nanite compute culling, ray tracing and mesh raster off, r.LightFunctionQuality=1, resolution) silently do not apply: flicker, stalls and about 120 ms frames
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
 
 # ---- Facts ----
