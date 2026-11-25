@@ -120,6 +120,19 @@ class T(unittest.TestCase):
         self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf + ["vs %s %s" % ("c" * 16, "9" * 32)]), {("cs", K1, D1), ("fs", K2, D2), ("vs", "4" * 16, "c" * 16)})
         self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf[:1]), {("cs", K1, D1)})        # a key with no digest hit stays unmapped
 
+    def test_baseline_waives_only_named_findings_and_shrinks(self):
+        base, bad = O.parse_baseline("# c\ncs:%s no local program\nword:KYTY_NATIVE_FMINMAX pending bisect\n" % ("a" * 16))
+        self.assertEqual((sorted(base), bad), (["cs:" + "a" * 16, "word:KYTY_NATIVE_FMINMAX"], []))
+        errs = ["cs override key %s has no guest hash in x" % ("a" * 16), "fs override key %s has no guest hash in x" % ("b" * 16),
+                "KYTY_NATIVE_FMINMAX=1: why; prove it", "KYTY_UNIFORM_BUFFERS=1: why; prove it"]
+        left, waived, stale = O.apply_baseline(errs, base)
+        self.assertEqual([m.split(" ")[0] for m in left], ["fs", "KYTY_UNIFORM_BUFFERS=1:"])      # new gaps still fail
+        self.assertEqual(len(waived), 2); self.assertEqual(stale, [])
+        left, waived, stale = O.apply_baseline(errs[1:], base)                                      # the cs gap was fixed: its entry is now an error
+        self.assertEqual(len(stale), 1); self.assertIn("cs:" + "a" * 16, stale[0])
+        self.assertEqual(O.apply_baseline([], {"word:KYTY_X": "r"}, words_checked=False)[2], [])   # word entries are not judged when words are not checked
+        self.assertTrue(O.parse_baseline("cs:zz why")[1] and O.parse_baseline("cs:%s" % ("a" * 16))[1])      # bad token / no reason
+
     def test_main_dispatches_every_command(self):
         # sidecar-xf was missing from main()'s command list (a real call printed the usage and returned 2)
         names = {"check": "cmd_check", "sidecar": "cmd_sidecar", "sidecar-xf": "cmd_sidecar_xf", "summary": "cmd_summary", "envdump": "cmd_envdump"}

@@ -132,6 +132,47 @@ def load_profile(d):
             read_rows(os.path.join(d, SIDECAR)), os.path.join(d, "fast-math-deny.txt"))
 
 
+BASELINE = "override-guard.baseline"
+
+
+def parse_baseline(text):
+    """-> ({token: reason}, [bad lines]). Line: `cs:<kk key>|fs:<kk key>|vs:<kk key>|word:<KYTY_NAME> <reason>`; the reason is required. Shrink-only: an entry
+    that no longer matches a finding is itself an error (remove it), and a new finding is never added here by the check."""
+    out, bad = {}, []
+    for n, l in enumerate(text.splitlines(), 1):
+        l = l.strip()
+        if not l or l.startswith("#"):
+            continue
+        tok, _, reason = l.partition(" ")
+        if not re.match(r"^((cs|fs|vs):[0-9a-f]{16}|word:KYTY_[A-Z0-9_]+)$", tok) or not reason.strip():
+            bad.append("line %d: expected `cs:<key>|fs:<key>|vs:<key>|word:<NAME> <reason>`" % n)
+        else:
+            out[tok] = reason.strip()
+    return out, bad
+
+
+def finding_token(msg):
+    m = re.match(r"^(cs|fs|vs) override key ([0-9a-f]{16})", msg)
+    if m:
+        return "%s:%s" % (m.group(1), m.group(2))
+    m = re.match(r"^(KYTY_[A-Z0-9_]+)=", msg)
+    return "word:%s" % m.group(1) if m else None
+
+
+def apply_baseline(errs, base, words_checked=True):
+    """-> (remaining errors, waived [(msg, reason)], stale errors). Only the keys/words the baseline names are waived."""
+    left, waived, hit = [], [], set()
+    for m in errs:
+        t = finding_token(m)
+        if t in base:
+            waived.append((m, base[t])); hit.add(t)
+        else:
+            left.append(m)
+    stale = ["baseline entry %s (%s) matches no finding any more: remove it (the baseline only shrinks)" % (t, r)
+             for t, r in sorted(base.items()) if t not in hit and (words_checked or not t.startswith("word:"))]
+    return left, waived, stale
+
+
 def cmd_check(args):
     strict, words = "--strict" in args, "--words" in args or "--strict" in args
     dirs = [a for a in args if not a.startswith("--")] or sorted(
@@ -148,6 +189,15 @@ def cmd_check(args):
         repo = os.path.dirname(os.path.dirname(os.path.abspath(d)))
         env = resolve_env(repo, os.path.basename(os.path.abspath(d)))
         e, w = check_profile(keys, sidecar, deny, env, strict, words)
+        bp = os.path.join(d, BASELINE)
+        if os.path.isfile(bp):
+            base, bad = parse_baseline(open(bp).read())
+            for b in bad:
+                e.append("%s: %s" % (BASELINE, b))
+            e, waived, stale = apply_baseline(e, base, words)
+            e += stale
+            for m, r in waived:
+                print("ovguard: %s: baseline: %s [%s]" % (d, m.split(":")[0][:60], r))
         for m in w:
             print("ovguard: %s: warning: %s" % (d, m))
         for m in e:
