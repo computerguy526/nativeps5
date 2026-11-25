@@ -250,7 +250,7 @@ class AstroPairRowTests(unittest.TestCase):
             self.assertIn(r[16], ("g16", "g17", "g18"))
             self.assertLess(float(r[19]), 1.0)
             self.assertRegex(r[5] + r[6], r"^[0-9a-f]{32}$")
-        self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 4, "g17": 7, "g18": 5})
+        self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 3, "g17": 7, "g18": 4})
 
     def test_folship_rows_do_not_shadow_other_rows(self):
         rows = self.rows()

@@ -2,8 +2,7 @@
 # GUEST SHADER HASHES ONLY (64-bit program hashes as Kyty logs them), no shader code. These are the shaders that our own Metal
 # translations replace (the 68 compute kernels of metal-shaders.tsv and the fragment stages of metal-gfx-pairs.tsv): they keep
 # exact math at every KYTY_GPU_ACCURACY, so KosmicKrisp's keys for them, and with them our verified texts, are the high tier's.
-# v1.4: complete list (153 hashes, 144 after valfix, 140 after shipgate): every compute guest of metal-shaders.tsv and every pixel-stage guest of metal-gfx-pairs.tsv, mapped from the
-# program digests with
+# v1.4: complete list (153, 140 now): every compute guest of metal-shaders.tsv and every pixel-stage guest of metal-gfx-pairs.tsv, mapped from the program digests with
 # kyty_msl_dump --xf-keys (the 86 earlier entries are kept). Three override digests (2 compute, 1 pair without a pixel stage) have no guest in the play caches.
 001028ba8efc6ae1
 0078153a1c1fb171
