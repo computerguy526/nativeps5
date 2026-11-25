@@ -173,6 +173,16 @@ def check_final(g, p, plan, secs, environ, gpu):
         for f in forb:
             if g.forbidden_match("%s=%s" % (k, v), f):
                 raise Refuse("%s=%s (%s) is refused by env_forbidden %s of %s" % (k, v, plan.layers[k], f, p.id))
+    for c in p.get("env_required"):
+        if not c:
+            continue
+        k = c[0]
+        v = plan.env.get(k, "")
+        why = c[1] if len(c) > 1 else ""
+        if not v:
+            raise Refuse("%s must be set for %s: %s (put it in titles/%s.env or pass --env %s=...)" % (k, p.id, why or "see the game README", p.id, k))
+        if v.startswith("/") and not os.path.isfile(v):
+            raise Refuse("%s=%s is not a file (%s): %s" % (k, v, plan.layers.get(k, "?"), why or "see the game README"))
     ban_on = (p.one("gpu_profile_ban", "on") or "on") != "off"
     prof = [k for k in PROFILE_BAN if plan.env.get(k, "0") not in ("", "0")]
     if plan.env.get("KYTY_EOP_TIMESTAMPS") == "gpu":

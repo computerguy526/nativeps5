@@ -105,6 +105,16 @@ class T(unittest.TestCase):
         self.assertEqual(self.plan(["--bin", "/y"]).sel["path"], "/y")
         self.assertEqual(self.plan(["--patch", "a"]).sel["patches"], "a")
 
+    def test_env_required(self):
+        # v1.4 review M18: a title that needs a user-made file (SAROS: the Unreal cvar list) refuses loudly instead of running without it
+        open(os.path.join(self.d, "games", "PPSA00001", "game.tsv"), "a").write("env_required\tNEED_LIST\tmade from your own eboot\n")
+        self.assertIn("NEED_LIST must be set", self.refused([]))
+        self.assertIn("made from your own eboot", self.refused(["--env", "NEED_LIST="]))
+        self.assertIn("is not a file", self.refused(["--env", "NEED_LIST=/nonexistent/x.list"]))
+        f = os.path.join(self.d, "x.list"); open(f, "w").close()
+        self.assertEqual(self.plan(["--env", "NEED_LIST=" + f]).env["NEED_LIST"], f)
+        self.titles('ENV="NEED_LIST=%s"\n' % f); self.assertEqual(self.plan([]).env["NEED_LIST"], f)
+
     # ---- refusals (exit 78 unless noted)
     def test_refusals(self):
         self.assertIn("env_forbidden", self.refused(["--env", "BAD_WORD=1"]))
@@ -444,8 +454,9 @@ class ShippedGames(unittest.TestCase):
         self.assertTrue(ids)
         env = dict(NPS5_GAMES_DIR=games, NPS5_PUBLIC_DIR=root, NPS5_SCRATCH=tempfile.mkdtemp(), NPS5_SELF_MEM_LIMIT_MB="18944", NPS5_RUN_REASON="shipped-title compose test",
                    NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew")
+        lst = os.path.join(env["NPS5_SCRATCH"], "cvars.list"); open(lst, "w").close()    # stands for the user's own NPS5_UECVAR_LIST
         for t in ids:
-            tid, opts = run.parse_args([t, "--bin", "/x/native"])
+            tid, opts = run.parse_args([t, "--bin", "/x/native", "--env", "NPS5_UECVAR_LIST=" + lst])
             try:
                 plan = run.compose(tid, opts, dict(env))
             except run.Refuse as e:
