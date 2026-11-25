@@ -106,5 +106,89 @@ class Real(unittest.TestCase):
         self.assertFalse(cz.is_compressed(p)); self.assertEqual(res["skipped"].get("in use"), 1)
 
 
+class Decision(unittest.TestCase):
+    """Prompt logic of `nps5 cache prepare` (synthetic: no TTY, no game, no real compression)."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp(); self.env = {"NPS5_DATA_STATE_DIR": os.path.join(self.d, "state")}
+        self.old = cz.DEFAULT_ON
+    def tearDown(self): cz.DEFAULT_ON = self.old; shutil.rmtree(self.d, ignore_errors=True)
+
+    def asker(self, ans, log):
+        def ask(q): log.append(q); return ans
+        return ask
+
+    def test_env_overrides_never_prompt(self):
+        asked = []
+        self.assertTrue(cz.want_compress(dict(self.env, NPS5_CACHE_COMPRESS="1"), True, self.asker("n", asked)))
+        self.assertFalse(cz.want_compress(dict(self.env, NPS5_CACHE_COMPRESS="0"), True, self.asker("y", asked)))
+        self.assertEqual(asked, [])
+
+    def test_non_tty_uses_default_without_prompt(self):
+        asked = []
+        cz.DEFAULT_ON = False; self.assertFalse(cz.want_compress(self.env, False, self.asker("y", asked)))
+        cz.DEFAULT_ON = True; self.assertTrue(cz.want_compress(self.env, False, self.asker("n", asked)))
+        cz.record_game_answer(self.env, True); cz.DEFAULT_ON = False
+        self.assertFalse(cz.want_compress(self.env, False, self.asker("y", asked)))   # non-interactive ignores the game answer
+        self.assertEqual(asked, [])
+
+    def test_tty_prompt_answers(self):
+        cz.DEFAULT_ON = False; q = []
+        self.assertTrue(cz.want_compress(self.env, True, self.asker("y", q), log=lambda *_: None))
+        self.assertTrue(cz.want_compress(self.env, True, self.asker("YES", q), log=lambda *_: None))
+        self.assertFalse(cz.want_compress(self.env, True, self.asker("n", q), log=lambda *_: None))
+        self.assertFalse(cz.want_compress(self.env, True, self.asker("", q), log=lambda *_: None))   # default [y/N]
+        self.assertIn("[y/N]", q[0])
+
+    def test_game_files_yes_makes_default_yes(self):
+        cz.DEFAULT_ON = False; q = []
+        cz.record_game_answer(self.env, True)
+        self.assertTrue(cz.want_compress(self.env, True, self.asker("", q), log=lambda *_: None)); self.assertIn("[Y/n]", q[0])
+        self.assertFalse(cz.want_compress(self.env, True, self.asker("n", q), log=lambda *_: None))   # still can say no
+        cz.record_game_answer(self.env, False)
+        self.assertFalse(cz.want_compress(self.env, True, self.asker("", q), log=lambda *_: None))
+        self.assertTrue(cz.want_compress(dict(self.env, NPS5_GAME_COMPRESS="1"), True, self.asker("", q), log=lambda *_: None))
+
+    def test_eof_takes_default(self):
+        def eof(_): raise EOFError
+        cz.DEFAULT_ON = True; self.assertTrue(cz.want_compress(self.env, True, eof, log=lambda *_: None))
+        cz.DEFAULT_ON = False; self.assertFalse(cz.want_compress(self.env, True, eof, log=lambda *_: None))
+
+    def test_game_running_refuses(self):
+        put(self.d, "cache/a.bin"); msgs = []
+        r = cz.maybe_compress(os.path.join(self.d, "cache"), dict(self.env, NPS5_CACHE_COMPRESS="1"), log=msgs.append,
+                              running=lambda: ["123 native_astro"])
+        self.assertIsNone(r); self.assertIn("game is running", msgs[0])
+
+    def test_ps_failure_refuses(self):
+        msgs = []
+        r = cz.maybe_compress(self.d, dict(self.env, NPS5_CACHE_COMPRESS="1"), log=msgs.append, running=lambda: ["ps failed: x"])
+        self.assertIsNone(r)
+
+    def test_game_regex(self):
+        self.assertTrue(cz.GAME_RE.search("/x/ue2boot/native_out3")); self.assertTrue(cz.GAME_RE.search("/opt/kyty"))
+        self.assertFalse(cz.GAME_RE.search("/usr/bin/python3"))
+
+
+class OverLimit(unittest.TestCase):
+    def setUp(self): self.d = tempfile.mkdtemp(); self.m, self.dm = cz.MAX_SIZE, cz.DITTO_MAX
+    def tearDown(self): cz.MAX_SIZE, cz.DITTO_MAX = self.m, self.dm; shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_over_2gib_counted_and_reported(self):
+        put(self.d, "big.bin"); put(self.d, "ok.bin", TEXT[:1000] * 10); cz.MAX_SIZE = 100000
+        res = cz.compress_dir(self.d, dry_run=True, open_set=frozenset(), log=lambda *_: None)
+        self.assertEqual(res["over_limit_files"], 1); self.assertEqual(res["over_limit_bytes"], len(TEXT))
+        self.assertIn("over the size limit", cz.report(res, True)); self.assertIn("1 file(s)", cz.report(res, True))
+
+    def test_ditto_limit_counted(self):
+        put(self.d, "big.bin"); cz.DITTO_MAX = 100000; old = cz._tool; cz._tool = lambda: ("ditto", "/usr/bin/ditto")
+        try: res = cz.compress_dir(self.d, dry_run=True, open_set=frozenset(), log=lambda *_: None)
+        finally: cz._tool = old
+        self.assertEqual(res["over_limit_files"], 1); self.assertEqual(res["files"], 0)
+
+    def test_nothing_over_limit_no_text(self):
+        put(self.d, "a.bin"); res = cz.compress_dir(self.d, dry_run=True, open_set=frozenset(), log=lambda *_: None)
+        self.assertNotIn("size limit", cz.report(res, True))
+
+
 if __name__ == "__main__":
     unittest.main()

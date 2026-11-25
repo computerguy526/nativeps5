@@ -870,6 +870,14 @@ def cmd_compress(folder, o, environ, out):
               "them; a file being written must not be replaced). Run the same command again in a minute." % recent, file=out)
     for p, d in errors[:20]:
         print("  failed (file unchanged): %s: %s" % (os.path.relpath(p, folder), d), file=out)
+    if not errors:
+        try:     # remembered so `nps5 cache prepare` defaults its "compress the shader cache too?" question to yes
+            import importlib.util
+            sp = importlib.util.spec_from_file_location("nps5_cachezip", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cachezip.py"))
+            cz = importlib.util.module_from_spec(sp); sp.loader.exec_module(cz)
+            cz.record_game_answer(environ, True)
+        except Exception:
+            pass
     return 1 if errors else (3 if recent else 0)
 
 

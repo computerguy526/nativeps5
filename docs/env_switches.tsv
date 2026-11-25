@@ -2079,7 +2079,7 @@ NPS5_AVPLAYER_VT_FORCE_SW	ps5recomp		pkg/runtime/modules/libSceAvPlayer/avplayer
 NPS5_BREW_PREFIX	nativeps5		scripts/build.sh
 NPS5_BUILD_JOBS	nativeps5		nps5.conf.example
 NPS5_BUILD_QOS	nativeps5	utility, background or maintenance: run the metallib compilers under taskpolicy -c at that QoS (default plain nice 5)	scripts/kk-libcache-build.sh
-NPS5_CACHE_COMPRESS	nativeps5	`1` makes `nps5 cache prepare` APFS-compress the finished cache folder, `0` forces off; default off	scripts/nps5lib/cachezip.py
+NPS5_CACHE_COMPRESS	nativeps5	`1` makes `nps5 cache prepare` APFS-compress the finished cache folder, `0` forces off; unset: asks on a terminal (default yes if the game files were compressed), no question without one (default off)	scripts/nps5lib/cachezip.py
 NPS5_CACHE_COMPRESS_MIN_AGE	nativeps5		scripts/nps5lib/cachezip.py
 NPS5_CACHE_DIR	nativeps5		scripts/nps5lib/run.py
 NPS5_CACHE_STABLE_DIR	nativeps5	1 = the cache dir is named by title, GPU and hardware class only (no stack key; a missing dir is an APFS clone of the newest older sibling, STACK.txt records the stack), 0 = off; unset = the profile's row	scripts/nps5lib/cache.py
@@ -2123,6 +2123,7 @@ NPS5_FRAMERATE_WARM	ps5recomp	frames without a rewrite after a freeze ends (defa
 NPS5_FUNC_HOLD_LOAD	nativeps5		scripts/nps5-env.sh
 NPS5_GAMES_DIR	nativeps5		games/game.py
 NPS5_GAMES_FIRST	nativeps5		games/game.py
+NPS5_GAME_COMPRESS	nativeps5	`1`/`0`: the answer to "compress the game files?"; makes the shader-cache question default to yes/no	scripts/nps5lib/cachezip.py
 NPS5_GPU	nativeps5	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	scripts/nps5lib/run.py
 NPS5_GPU	ps5recomp	`kyty` selects the Kyty GPU back end dylib instead of the AnyPS5 AGC driver	pkg/runtime/modules/libSceAnyPS5/nps5_kyty.c
 NPS5_GPU_ARCH	nativeps5		scripts/nps5lib/metal.py
