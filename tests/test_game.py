@@ -203,6 +203,23 @@ class EnvTests(Base):
         self.assertIn("KYTY_PIPELINE_JOURNAL", d) if os.path.isfile(os.path.join(game.REPO, "titles/kyty-preset.env")) else None
 
 
+class AstroProfileTests(unittest.TestCase):
+    """The shipped ASTRO BOT profile (real file): the v1.4 depth-compression word is on for Kyty only and a later --env row can switch it off."""
+    def compose(self, **kw):
+        p = game.Profile(os.path.join(game.REPO, "games", "PPSA21564"))
+        return {k: v for k, v, _ in game.compose_env(p, **kw)}
+
+    def test_depth_feedback_usage_off_for_kyty_only(self):
+        self.assertEqual(self.compose(gpu="kyty")["KYTY_DEPTH_FEEDBACK_USAGE"], "0")
+        self.assertNotIn("KYTY_DEPTH_FEEDBACK_USAGE", self.compose(gpu="anyps5"))
+
+    def test_best_run_words_not_in_the_profile(self):
+        d = self.compose(gpu="kyty")
+        for k in ("KYTY_MEMTRIM_BIG_WIDTH", "KYTY_FLIGHTREC", "NPS5_QOS_LOG"):   # test-rig words stay out of the shipped env
+            self.assertNotIn(k, d)
+        self.assertEqual(d["NPS5_QOS_GPU"], "rt")
+
+
 class SceneTests(Base):
     def test_lookup(self):
         p = self.prof(); rows = p.scenes()

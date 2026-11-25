@@ -109,6 +109,8 @@ env	KYTY_GPU_ACCURACY=low	gpu=kyty	fast math for pixel/compute shaders outside f
 env	KYTY_ALIAS_REBUILD_PARTIAL=1	gpu=kyty	a partly owned render target is rebuilt only in the blocks it does not own (Sky Garden tiler traffic 2.4 -> 1.8-2.0 GB/s)
 # v1.2.1 default (README "Options"; off: `--env KYTY_CP_LEAD_MAX_MS=0`)
 env	KYTY_CP_LEAD_MAX_MS=16	gpu=kyty	the command processor runs at most 16 ms ahead of the GPU (Sky Garden: moving mean -3.5 ms, p90 -6.5 ms, frames over 70 ms -55 %)
+# v1.4 default (README "Options on by default"; off: `--env KYTY_DEPTH_FEEDBACK_USAGE=1`)
+env	KYTY_DEPTH_FEEDBACK_USAGE=0	gpu=kyty	depth targets keep their lossless compression (about -2 ms GPU per frame in the rpass A/B/A; in every best-stack run since 2026-11-19); the Kyty default is on, so the word must be set
 # v1.2.2 defaults (README "Options on by default"; each off with `--env NAME=0`; all exact in our checks)
 env	KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1	gpu=kyty	a partial render-target rebuild moves only the blocks it owns (tiler bytes -14 %; bit-exact: 300 unit cases, 1,793 GPU compares)
 env	KYTY_COMPUTE_IMAGE_COPY=1	gpu=kyty	a guest compute pass proven to copy one whole surface becomes a native image copy (tiler traffic -31 %; bit-exact: 473 kernel + 289 image GPU compares)

@@ -205,6 +205,12 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   `NPS5_FONT_LAYOUT=hhea`.
 - **Command-processor lead bound** (v1.2.1, `KYTY_CP_LEAD_MAX_MS=16`): Kyty's command processor runs at most 16 ms ahead
   of the GPU (the wait is bounded and never fatal). Off: `KYTY_CP_LEAD_MAX_MS=0`.
+- **GPU threads at real-time priority** (v1.4, `NPS5_QOS_GPU=rt`, ASTRO BOT only): the threads that feed the GPU run at a real-time priority class.
+  Measured on an M5 Pro in Sky Garden (earlier v1.4 development libraries): mean frame time 41.7 / 38.9 / 41.1 ms in an A/B/A (-6.1 %), game speed 98-99 %.
+  Side effect: the guest's fault handling per frame rose from about 5 to about 25 ms (the frame time is still lower). **Release-candidate re-measurement: PENDING.**
+  Off: `--env NPS5_QOS_GPU=off`.
+- **Depth compression kept** (v1.4, `KYTY_DEPTH_FEEDBACK_USAGE=0`, ASTRO BOT on Kyty): depth images are created without the attachment feedback-loop usage, so KosmicKrisp keeps Metal's lossless depth compression
+  (about -2 ms GPU per frame in the rpass A/B/A on an M4 Pro; **not yet measured on the shipped composition on an M5**). Off: `--env KYTY_DEPTH_FEEDBACK_USAGE=1`.
 - **Faster Metal shaders per GPU class** (v1.2.1 - v1.2.4): the Metal lists carry rows for M4-family (`g16`, 176 graphics rows
   incl. 5 mesh pipelines + 2 kernels), M5-family (`g17`, 44 incl. 2 mesh) and M6-family (`g18`, 199 incl. 2 mesh + 2 kernels) GPUs,
   used only on that class; other Macs keep the shared rows (36 graphics pairs + 69 kernels). Mesh rows (v1.2.3) need KosmicKrisp
