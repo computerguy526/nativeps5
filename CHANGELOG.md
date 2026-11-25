@@ -3,10 +3,23 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.4 (in preparation, not released)
+## v1.4 (release candidate, not released)
 
-Placeholder text: nothing here is a claim until the v1.4 verification runs are done. The release notes are written from the merged v1.4 tip.
+Draft: the claims below are measured on the runs named in each line; the SAROS status stays "pending" until its first run on the release candidate has passed.
 
+- **Astro Bot: an upgraded shader cache is prepared once, then stays warm.** A cache left by v1.3.x holds entries for the old shader code
+  that only take room (the old replay limit stopped the pipeline replay after 85 builds and left 4,772 pipelines to compile in play). v1.4 stamps
+  the driver cache with the shader-code version. The first start on an older cache sets it aside, shows the loading card, and rebuilds it
+  from the pipeline list ("prepared"); later starts are warm (measured: 0 pipelines compiled in play on the warm start). The driver cache
+  cap is 1,024 MB with a replay limit of 896 MB. `KYTY_CACHE_UPGRADE=0` turns the upgrade off. The one-time preparation took three runs of about three
+  minutes on a cold machine cache.
+- **Astro Bot: pipeline list replaced** by a list of 1,090 shaders, 1,457 permutations and 2,456 pipelines (the 4,892 entries of the
+  v1.3.1 list were pairs that differ only in state the device decides; 2,446 were unique). Keys and hashes only; its no-game-code record is
+  `games/PPSA21564/pipelines.kyplst.verified`.
+- **Astro Bot: `NPS5_QOS_GPU=rt` is on by default** (the GPU-feeding threads at real-time priority): Sky Garden A/B/A on an M5, mean frame time
+  41.7 / 38.9 / 41.1 ms (-6.1 % against the A mean), game speed 98-99 %. Off with `--env NPS5_QOS_GPU=off`.
+- Upstream fixes taken (neutral in the Astro A/B): memory log no longer prints clamped buffer ranges (KytyPS5 #2540), `V_CMPX_NGE_F16` is decoded (#2532).
+  The IPO/PGO build switches exist and are off by default.
 - **SAROS (`PPSA07631`): pending SAROS verification run.** The v1.4 Kyty carries the generic indirect-image path, the Nanite raw raster
   parameters and the shader-bundle compaction, and `nps5 run PPSA07631` now starts (the preset's `KYTY_EOP_TIMESTAMPS=gpu` is overridden to
   `cbtime`, as for ASTRO BOT; before, the safety check refused the run) and refuses to run without the Unreal console-variable list

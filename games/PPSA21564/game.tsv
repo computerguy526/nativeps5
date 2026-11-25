@@ -120,13 +120,15 @@ env	KYTY_FAULT_HOST_READBACK=1	gpu=kyty	a write fault on GPU bytes whose writers
 env	KYTY_PIPELINE_TAKE_TIMEOUT_MS=8000	gpu=kyty	a draw waits at most 8 s for a pipeline build that never returns, then is skipped until it does (freeze seen once, 2026-11-22)
 env	KYTY_CLOSE_SAVE_TIMEOUT_MS=5000	gpu=kyty	closing the window exits within 5 s even if the pipeline cache save is stuck
 env	KYTY_FLIGHTREC_ALLTHREADS=1	gpu=kyty	flight-recorder dumps (only when KYTY_FLIGHTREC is on) backtrace every thread
+# v1.4 default (README "Options on by default"; off: `--env NPS5_QOS_GPU=off`)
+env	NPS5_QOS_GPU=rt	gpu=kyty	the GPU-feeding threads run at real-time priority (Sky Garden A/B/A on an M5: mean frame time 41.7 / 38.9 / 41.1 ms, -6.1 %, game speed 98-99 %)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps: kernel panic 2026-11-16
 env_forbidden	APS5_PROFILE_GPU	GPU timestamp counter-heap profiling
 env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
 
 # ---- Facts (for people and the README; no tool reads them) ----
 fact.display_buffer	3840x2160
-fact.pipeline_list_counts	shaders 886 (vertex 508, pixel 253, compute 125), permutations 949, pipelines 1608
+fact.pipeline_list_counts	shaders 1090 (vertex 639, pixel 321, compute 130), permutations 1457, pipelines 2456
 fact.pipeline_list_scenes	title, world map and 12 levels (first visits), plus play-test sessions
 fact.prepare	scripts/prepare-pipelines.sh PPSA21564
 fact.level_peak_gib	16.3-17.8
