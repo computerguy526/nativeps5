@@ -169,7 +169,9 @@ def deny_list_problem(env):
     """-> why KYTY_FAST_MATH_DENY is unusable under KYTY_GPU_ACCURACY != high ('' = fine). An unreadable path or a list without one hash
     leaves EVERY shader on fast math: the Metal override keys move and all overrides silently miss (v14 rekey: a laptop path in the
     env on a box that does not have it ran whole gate series with no list). KYTY_FAST_MATH_DENY_OPTIONAL=1 accepts it on purpose."""
-    if env.get("KYTY_GPU_ACCURACY", "high") == "high" or env.get("KYTY_FAST_MATH_DENY_OPTIONAL") == "1" or "KYTY_FAST_MATH_DENY" not in env:
+    fm = env.get("KYTY_FAST_MATH", "0")
+    fast = env.get("KYTY_GPU_ACCURACY", "high") in ("normal", "low") or (fm.isdigit() and int(fm) >= 1)   # as Kyty reads them (CodegenOptions.cpp)
+    if not fast or env.get("KYTY_FAST_MATH_DENY_OPTIONAL") == "1" or "KYTY_FAST_MATH_DENY" not in env:
         return ""
     v = env["KYTY_FAST_MATH_DENY"]
     if not v:
@@ -207,7 +209,7 @@ def check_final(g, p, plan, secs, environ, gpu):
         plan.env[k] = full
     why = deny_list_problem(plan.env) if gpu == "kyty" else ""
     if why:
-        raise Refuse("%s (%s) while KYTY_GPU_ACCURACY=%s: every shader would get fast math and the Metal overrides would silently miss; "
+        raise Refuse("%s (%s) while fast math is on (KYTY_GPU_ACCURACY=%s): every shader would get fast math and the Metal overrides would silently miss; "
                      "fix the path, or set KYTY_FAST_MATH_DENY_OPTIONAL=1 to run without the list on purpose"
                      % (why, plan.layers.get("KYTY_FAST_MATH_DENY", "?"), plan.env.get("KYTY_GPU_ACCURACY")))
     ban_on = (p.one("gpu_profile_ban", "on") or "on") != "off"

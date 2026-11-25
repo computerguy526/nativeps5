@@ -93,6 +93,9 @@ class T(unittest.TestCase):
         for bad in ("/no/such/file", empty, "", self.d):
             self.assertTrue(f(dict(low, KYTY_FAST_MATH_DENY=bad)), bad)
         self.assertEqual(f(dict(low, KYTY_FAST_MATH_DENY="/no/such", KYTY_FAST_MATH_DENY_OPTIONAL="1")), "")
+        self.assertTrue(f({"KYTY_GPU_ACCURACY": "normal", "KYTY_FAST_MATH_DENY": "/no/such"}))
+        self.assertTrue(f({"KYTY_FAST_MATH": "2", "KYTY_FAST_MATH_DENY": "/no/such"}))
+        self.assertEqual(f({"KYTY_FAST_MATH": "0", "KYTY_GPU_ACCURACY": "high", "KYTY_FAST_MATH_DENY": "/no/such"}), "")
 
     def test_deny_path_missing_refuses_at_plan(self):
         # the shipped composition with a deny path that does not exist (box 3) is refused, dry run included (same check_final)

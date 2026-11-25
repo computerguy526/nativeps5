@@ -76,6 +76,12 @@ The folder holds:
 - **`fast-math-deny.txt`** (optional, v1.1.2): 64-bit guest shader hashes, one per line, plus comments; nothing else
   (`scripts/check.sh`). `nps5 run` passes it as `KYTY_FAST_MATH_DENY` on the Kyty back end: these shaders keep exact math
   at every `KYTY_GPU_ACCURACY`, which keeps KosmicKrisp's keys (and the verified texts) of the shaders the Metal lists replace.
+- **`metal-guests.tsv`** (optional, ovguard): `format<TAB>nps5-metal-guests<TAB>1`, then `cs|fs|vs<TAB><KosmicKrisp key><TAB><guest shader hash>` rows, hashes only.
+  The invariant `scripts/nps5lib/ovguard.py check` enforces (CI, `.nps5-check-tests`): while the profile gives shaders fast math (`KYTY_GPU_ACCURACY` normal or low,
+  `KYTY_FAST_MATH>=1`; the vertex stage only with `KYTY_FAST_MATH_VS=1` or `KYTY_FAST_MATH>=3`), every override row's guest hash is in `fast-math-deny.txt`, because fast
+  math changes the SPIR-V and so the key the Metal override is looked up under (a miss logs nothing). Make the sidecar with `ovguard.py sidecar-xf games/<id> <kyty_msl_dump
+  --programs ... --xf-keys output>`; `check --strict` (the release gate) also fails on a missing sidecar and on codegen words no deny list covers. `nps5 run` refuses a
+  `KYTY_FAST_MATH_DENY` that is unreadable or empty under fast math (`KYTY_FAST_MATH_DENY_OPTIONAL=1` accepts it on purpose).
 - **`emitter`** line of both Metal lists: the Kyty commit and release tag the hashes were made with (components.lock pins
   the same commit). When texts do not reproduce, `nps5 cache prepare` names the Kyty it found and exits 3.
 

@@ -6,6 +6,9 @@
 # @osNN = macOS major), near-exact rule, verdict (faster on that class / shipped / slower = KosmicKrisp there), B/A on that class.
 # A class row is listed only where its text was verified AND timed faster on that class (cloud M6 -> g18, laptop M4 Pro -> g16).
 # A class is a GPU generation: rows timed on one model (M4 Pro, M6) apply to every Mac of that generation (M4, M4 Max, ...).
+# KEY INVARIANT (ovguard, scripts/nps5lib/ovguard.py): a row is found by KosmicKrisp's key of the SPIR-V Kyty emits. While the profile gives shaders fast math
+# (KYTY_GPU_ACCURACY normal|low, KYTY_FAST_MATH>=1, the vertex stage only with KYTY_FAST_MATH_VS or KYTY_FAST_MATH>=3) the guest hash of every row's
+# compute kernel must be in fast-math-deny.txt, or the key moves and the override silently misses. metal-guests.tsv maps key -> guest hash, new rows need one there.
 format	nps5-metal-keys	2
 title	PPSA21564	01.007.000
 emitter	c08648a2221712ace47798a8a74f19c67ff4bcc7	v1.2.3
