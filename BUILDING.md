@@ -83,8 +83,10 @@ build of only the `vulkan_kosmickrisp` and `kosmickrisp_mesa_icd` targets, and a
 VK_DRIVER_FILES=$NPS5_KK_ICD vulkaninfo --summary     # expect driverName = KosmicKrisp (this opens a GPU device)
 ```
 
-`kosmickrisp/EXPECTED_TREE` is the git tree hash of the patched source the maintainers build from, without the
-build script's stamp file `.nps5-patches`. To compare, in `$NPS5_KK_WORK/mesa`:
+`kosmickrisp/EXPECTED_TREE` is the git tree hash of the patched source: Mesa at `MESA_COMMIT` with every `patches/*.patch`
+applied and nothing else. To compare, use a checkout the build has not touched yet (right after the patches went in, before meson
+runs: meson downloads `subprojects/` and writes files into the source tree, which changes the hash; the values recorded before v1.4
+were taken from built trees and could not be reproduced on a clean checkout): in `$NPS5_KK_WORK/mesa`,
 `git add -A . && git rm -q --cached .nps5-patches && git write-tree` (then `git reset -q` to leave the index as it was).
 
 ## 4. Kyty GPU library
