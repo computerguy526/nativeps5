@@ -54,6 +54,31 @@ class T(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     # ---- identity
+    def test_replay_limit_follows_the_driver_cache_cap(self):
+        # v14prep M12: the replay limit is never above 7/8 of the cap that is passed to Kyty with it, in the prepare and the launch words
+        self.assertEqual(cache.replay_limit_mb({"limit_mb": "896"}), "896")
+        self.assertEqual(cache.replay_limit_mb({"limit_mb": "4000"}), str(cache.DRIVER_CACHE_CAP_MB // 8 * 7))
+        self.assertEqual(cache.replay_limit_mb({"limit_mb": "x"}), "896")
+        self.assertEqual(cache.replay_limit_mb({}), "896")
+        cx = self.ctx()
+        for words in (cache.prepare_words(cx, "/app0"), cache.launch_words(cx, "/app0")):
+            w = dict(words)
+            self.assertEqual(w["KYTY_DRIVER_CACHE_MAX_MB"], str(cache.DRIVER_CACHE_CAP_MB))
+            self.assertLessEqual(int(w["KYTY_PIPELINE_LIST_CACHE_LIMIT_MB"]), cache.DRIVER_CACHE_CAP_MB // 8 * 7)
+
+    def test_user_set_larger_cap_is_kept(self):
+        # round 2: the words never lower a user's own KYTY_DRIVER_CACHE_MAX_MB; the replay limit follows the cap that is passed
+        self.assertEqual(cache.driver_cap_mb({}), 1024)
+        self.assertEqual(cache.driver_cap_mb({"KYTY_DRIVER_CACHE_MAX_MB": "2048"}), 2048)
+        self.assertEqual(cache.driver_cap_mb({"KYTY_DRIVER_CACHE_MAX_MB": "512"}), 1024)
+        self.assertEqual(cache.driver_cap_mb({"KYTY_DRIVER_CACHE_MAX_MB": "99999"}), 3584)
+        self.assertEqual(cache.driver_cap_mb({"KYTY_DRIVER_CACHE_MAX_MB": "x"}), 1024)
+        self.assertEqual(cache.replay_limit_mb({"limit_mb": "1500"}, 2048), "1500")
+        self.assertEqual(cache.replay_limit_mb({"limit_mb": "1500"}, 1024), "896")
+        env = dict(self.env, KYTY_DRIVER_CACHE_MAX_MB="2048")
+        cx = cache.context("PPSA00001", env)
+        self.assertEqual(dict(cache.prepare_words(cx, "/app0"))["KYTY_DRIVER_CACHE_MAX_MB"], "2048")
+
     def test_progress_line(self):
         log = "x\nShader precompile: 89/893 (9%): 89 compiled\n[12:00:01] Pipeline replay: 512/1544 (33%): 500 built, 12 known, 0 failed, 21.0 s\nother\n"
         self.assertEqual(cache.progress_line(log), "Pipeline replay: 512/1544 (33%): 500 built, 12 known, 0 failed, 21.0 s")

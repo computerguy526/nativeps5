@@ -44,7 +44,7 @@ scene_tag_skip	ui_
 marker	worldmap	open:levels/worldmap/
 run_secs	default=90	max=180
 blank_fail_s	90
-cache	kind=kyplst	limit_mb=448	app_ver=01.007.000
+cache	kind=kyplst	limit_mb=896	app_ver=01.007.000
 
 # ---- Environment words (deltas over the preset; the reason for each is in README.md, "Canonical configuration and why") ----
 # Order matters: a later row for the same KEY wins. `when` is - or gpu=kyty|anyps5, build=, scene=, class=, and the hardware
