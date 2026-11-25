@@ -160,14 +160,24 @@ def context(tid, environ, commits=None, hw=None):
                hw or hw_key(environ), environ["NPS5_SCRATCH"], titles)
 
 
-def replay_limit_mb(opts):
-    """The replay's cache-size limit (game.tsv `cache limit_mb=`), never above 7/8 of DRIVER_CACHE_CAP_MB: the replay must stop before
-    the next start would discard the file."""
+def driver_cap_mb(environ):
+    """The driver cache cap handed to Kyty: ours, or the user's own KYTY_DRIVER_CACHE_MAX_MB when it is larger (a user who raised it
+    for a big cache keeps it; the env file is read after these words, so a smaller value would win otherwise)."""
+    try:
+        user = int((environ or {}).get("KYTY_DRIVER_CACHE_MAX_MB", "0"))
+    except ValueError:
+        user = 0
+    return min(max(DRIVER_CACHE_CAP_MB, user), 3584)
+
+
+def replay_limit_mb(opts, cap_mb=DRIVER_CACHE_CAP_MB):
+    """The replay's cache-size limit (game.tsv `cache limit_mb=`), never above 7/8 of the cap it is passed with: the replay must
+    stop before the next start would discard the file."""
     try:
         n = int(opts.get("limit_mb", "896"))
     except ValueError:
         n = 896
-    return str(min(max(n, 64), DRIVER_CACHE_CAP_MB // 8 * 7))
+    return str(min(max(n, 64), cap_mb // 8 * 7))
 
 
 def cache_opts(p):
@@ -209,7 +219,7 @@ def prepare_words(ctx, app0):
     o = cache_opts(ctx.p)
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_PREPARE", "1"),
             ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")), ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")),
-            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o)), ("KYTY_DRIVER_CACHE_MAX_MB", str(DRIVER_CACHE_CAP_MB)), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
+            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ))), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
             ("KYTY_HELPER_PREWARM", "1"),   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
             # v1.1.2: the profile defers KosmicKrisp's archive flush to exit for play; a prepare waits one flush period before it ends
             # (Kyty, pipelineCache.cpp), so it keeps KosmicKrisp's own 32 pipelines / 10 s.
@@ -225,7 +235,7 @@ def launch_words(ctx, app0):
     o = cache_opts(ctx.p)
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")),
             ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")), ("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1"),
-            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o)), ("KYTY_DRIVER_CACHE_MAX_MB", str(DRIVER_CACHE_CAP_MB))] + \
+            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ)))] + \
         metalmod.launch_words(ctx.dir, os.path.join(ctx.p.dir, metalmod.LIST_NAME), ctx.environ)[0]
 
 
