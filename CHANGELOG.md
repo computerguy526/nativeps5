@@ -23,8 +23,9 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
   `games/PPSA21564/pipelines.kyplst.verified`. On the release candidate the pre-build replays 1,505 shader permutations (0 skipped, 0 failed) and 2,431 pipelines (0 failed).
 - **Astro Bot: 25 more Metal rows for skinned-character and foliage shaders** (`g16` 12, `g17` 7, `g18` 6; graphics list 455 to 480 rows). Each is exact against KosmicKrisp on every pipeline of its key and was timed faster on that GPU class in every run (B/A 0.75-0.99 on the class; the numbers are in the list). They take effect after `nps5 cache prepare` regenerates the Metal rows from your own program cache. PENDING: in-game frame time on the shipped composition (the rows are per shader pair, not an end-to-end claim).
 - **Astro Bot: 110 Metal rows removed again** (graphics list 480 to 370 rows). A check of every row against the real-input level captures (not only Sky Garden) found output differences beyond the row's rule on 109 of them (76 on a real captured snapshot, 33 on sampled inputs only) and one row (`g18`) that is no faster than KosmicKrisp. Those shaders keep KosmicKrisp's own code, as before the rows existed. The 25 rows of the line above are 21 now. Hashes: `tests/data/valfix_dropped.tsv`.
-- **Astro Bot: `NPS5_QOS_GPU=rt` is on by default** (the GPU-feeding threads at real-time priority). Sky Garden on an M5 Pro, release candidate, warm cache, A/B/A:
-  mean frame time 36.5 / 39.0 / 37.9 ms (with / `NPS5_QOS_GPU=off` / with; -4.6 % against off on the mean of the two), game speed 90-99 % (the second run had a slow first minute). Off with `--env NPS5_QOS_GPU=off`. PENDING: rerun on the final profile.
+- **Astro Bot: `NPS5_QOS_GPU=rt` is on by default** (the GPU-feeding threads at real-time priority). Sky Garden on an M5 Pro, release candidate, warm cache:
+  mean frame time 36.9-37.2 ms at about 100 % game speed with the shipped settings. A/B/A of the switch alone: 36.5 / 39.0 / 37.9 ms (with / `NPS5_QOS_GPU=off` / with;
+  -4.6 % against off on the mean of the two). Off with `--env NPS5_QOS_GPU=off`. PENDING: rerun on the final release libraries.
 - Upstream fixes taken (neutral in the Astro A/B): memory log no longer prints clamped buffer ranges (KytyPS5 #2540), `V_CMPX_NGE_F16` is decoded (#2532).
   The IPO/PGO build switches exist and are off by default.
 
