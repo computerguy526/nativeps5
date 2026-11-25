@@ -492,6 +492,7 @@ def compose(tid, opts, environ=None, g=None):
     cache = arm["pieces"].get("cache")
     if cache:
         plan.put("NPS5_CACHE_DIR", cache if os.path.isabs(cache) else os.path.join(scratch, "cache", tid, cache), "arm")
+        plan.warnings.append(CACHE_ARM_WARNING % cache)
     # 4b. the shader cache of this stack (nps5 cache): a normal run on the Kyty back end uses the cache `nps5 cache prepare` fills and
     #     starts with the launch phase behind the loading card. Not prepared yet = the same phase compiles the list on this start
     #     (minutes, once; the card counts), so a first launch never sits on a blank window. An explicit cache arm (cache=, or --env
@@ -522,6 +523,46 @@ def compose(tid, opts, environ=None, g=None):
     plan.sel = select_binary(g, p, titles, arm, opts.get("bin"), opts.get("patch"), environ)
     plan.environ = environ
     return plan
+
+
+CACHE_ARM_WARNING = ("WARNING: --arm cache=%s is an EXPLICIT cache dir: nps5 adds NO KYTY_PIPELINE_LIST and NO cache-path words (programs, journal, known, "
+                     "driver cache, KK archive and libcache, Metal override dir), so the pipeline list and the cache words are SKIPPED and this start compiles cold. "
+                     "It is not the player path. Put the cache in the stack's DEFAULT cache dir instead (nps5 cache prepare / a copy there), or pass every word with --env")
+
+
+def guest_image_candidates(binpath):
+    """Where the runtime looks for guest_image.bin next to this binary, in its order (ps5recomp recomp_runtime.c recomp_init_runtime_file,
+    after the app root): <exe dir>/../SharedSupport, <exe dir>/../Resources, <exe dir>; then the cwd (the run's frames dir). The exe path is
+    resolved through symlinks first, like the runtime does."""
+    d = os.path.dirname(os.path.realpath(binpath))
+    return [os.path.join(d, "..", "SharedSupport", "guest_image.bin"), os.path.join(d, "..", "Resources", "guest_image.bin"), os.path.join(d, "guest_image.bin")]
+
+
+def guest_image_source(binpath):
+    """A guest_image.bin that belongs to a binary the runtime would not find it for (a patched copy in the native cache, a dev binary
+    beside an out/ folder): next to the binary, in out/, or in the folder above. None when there is none."""
+    d = os.path.dirname(os.path.realpath(binpath))
+    for c in guest_image_candidates(binpath) + [os.path.join(d, "out", "guest_image.bin"), os.path.join(d, "..", "guest_image.bin")]:
+        if os.path.isfile(c):
+            return os.path.normpath(c)
+    return None
+
+
+def guest_image_plan(sel):
+    """-> (found, source, note): found = the runtime finds guest_image.bin for the selected binary by itself; else `source` (or None) is
+    what execute links into the run's frames dir (the cwd), and `note` says what is wrong or done. Nothing is written here."""
+    path = sel.get("path")
+    if not path or not os.path.isfile(path):
+        return True, None, None
+    if any(os.path.isfile(c) for c in guest_image_candidates(path)):
+        return True, None, None
+    for b in (sel.get("src"), path):
+        if b and os.path.isfile(b):
+            src = guest_image_source(b)
+            if src:
+                return False, src, "guest_image.bin is not beside %s: linked from %s into the run's frames dir" % (path, src)
+    return False, None, ("WARNING: no guest_image.bin for %s (looked in ../SharedSupport, ../Resources and its folder): the runtime will stop with "
+                         "'Failed to open guest image file'. Use the translated program of `nps5 build` (build/native, or the .app's Contents/MacOS binary) as BIN" % path)
 
 
 def shader_cache_words(tid, environ, app0):
@@ -1050,6 +1091,8 @@ def run_interruptible(fn):
 def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, hasher=sha16, footprint=Footprint):
     """The real run. Returns the exit code. Ticket -> lock -> binary -> run -> manifest verify -> run.json."""
     warn, busy = preflight(plan)
+    for w in plan.warnings:
+        if w.startswith("WARNING"): print("nps5 run: " + w, file=sys.stderr)
     plan.warnings += warn
     for w in warn: print("nps5 run: warning: " + w, file=sys.stderr)
     if busy:
@@ -1080,6 +1123,12 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         if aside:
             print("nps5 run: note: tag %s was used before; the earlier run is now %s" % (plan.tag, os.path.basename(aside)), file=sys.stderr)
         os.makedirs(os.path.join(plan.run_dir, "frames"), exist_ok=True); os.makedirs(os.path.join(plan.workdir, "home"), exist_ok=True)
+        gfound, gsrc, gnote = guest_image_plan(plan.sel)
+        if not gfound:
+            if gsrc:
+                try: os.symlink(gsrc, os.path.join(plan.run_dir, "frames", "guest_image.bin"))
+                except OSError as e: gnote = "WARNING: could not link guest_image.bin (%s): %s" % (gsrc, e)
+            print("nps5 run: " + gnote, file=sys.stderr); plan.warnings.append(gnote)
         keep_cache_per_hardware(plan.env.get("PS4RECOMP_CACHE_DIR") or os.path.join(plan.workdir, "home", "cache"), environ.get("NPS5_HW_CACHE_KEY"))
         rj = new_run_json(plan, info, hasher(plan.sel["path"]), components(plan))
         rjp = os.path.join(plan.run_dir, "run.json")
@@ -1159,6 +1208,8 @@ def main(argv, environ=None):
                 try: info = verify_binary(None, plan.p, plan.sel, environ)
                 except Refuse as e: plan.warnings.append("binary: %s" % e)
             w, busy = preflight(plan); plan.warnings += w + busy
+            gfound, gsrc, gnote = guest_image_plan(plan.sel)
+            if not gfound and gnote: plan.warnings.append(gnote)
             sys.stdout.write(dry_run_text(plan, info)); return 0
         return run_interruptible(lambda: execute(plan, opts, environ))
     except Refuse as e:

@@ -387,6 +387,67 @@ class FakeQueue:
     def release(self): self.released = True
 
 
+class RehearseGuards(unittest.TestCase):
+    """Release-rehearsal guards (2026-11-25): an explicit cache= arm warns loudly; guest_image.bin is found where the runtime looks."""
+    titles = T.titles
+    setUp = T.setUp
+    plan = T.plan
+
+    def test_cache_arm_warns_loudly(self):
+        self.titles("APP0=/dump\nBIN=/b/native\n")
+        p = self.plan(["--arm", "x:cache=cache-x"])
+        w = [x for x in p.warnings if x.startswith("WARNING") and "cache=cache-x" in x]
+        self.assertEqual(len(w), 1)
+        self.assertIn("SKIPPED", w[0]); self.assertIn("KYTY_PIPELINE_LIST", w[0]); self.assertIn("not the player path", w[0])
+        self.assertEqual(p.layers["NPS5_CACHE_DIR"], "arm")
+
+    def test_no_cache_arm_no_warning(self):
+        self.titles("APP0=/dump\nBIN=/b/native\n")
+        self.assertFalse([x for x in self.plan(["--arm", "x:LAYER=1"]).warnings if "EXPLICIT cache" in x])
+
+    def _app(self, where):
+        root = tempfile.mkdtemp()
+        exe = os.path.join(root, "T.app", "Contents", "MacOS"); os.makedirs(exe)
+        open(os.path.join(exe, "nps5-title"), "w").write("b")
+        if where:
+            os.makedirs(os.path.join(root, "T.app", "Contents", where), exist_ok=True)
+            open(os.path.join(root, "T.app", "Contents", where, "guest_image.bin"), "w").write("i")
+        return os.path.join(exe, "nps5-title")
+
+    def test_app_bundle_layout_is_found(self):
+        for where in ("Resources", "SharedSupport"):      # `nps5 build` assembles Contents/Resources/guest_image.bin (pkg/pack/bundle.go)
+            b = self._app(where)
+            self.assertEqual(run.guest_image_plan(dict(path=b))[:2], (True, None), where)
+
+    def test_bin_beside_image_is_found(self):
+        d = tempfile.mkdtemp(); open(os.path.join(d, "native"), "w").write("b"); open(os.path.join(d, "guest_image.bin"), "w").write("i")
+        self.assertEqual(run.guest_image_plan(dict(path=os.path.join(d, "native")))[:2], (True, None))
+
+    def test_symlinked_bin_resolves_like_the_runtime(self):
+        b = self._app("Resources"); d = tempfile.mkdtemp(); ln = os.path.join(d, "title"); os.symlink(b, ln)
+        self.assertTrue(run.guest_image_plan(dict(path=ln))[0])
+
+    def test_bin_beside_out_dir_is_linked_not_found(self):
+        d = tempfile.mkdtemp(); os.makedirs(os.path.join(d, "out")); open(os.path.join(d, "native"), "w").write("b")
+        open(os.path.join(d, "out", "guest_image.bin"), "w").write("i")
+        found, src, note = run.guest_image_plan(dict(path=os.path.join(d, "native")))
+        self.assertFalse(found); self.assertEqual(os.path.realpath(src), os.path.realpath(os.path.join(d, "out", "guest_image.bin"))); self.assertIn("linked", note)
+
+    def test_patched_copy_takes_the_image_of_its_source(self):
+        s = tempfile.mkdtemp(); c = tempfile.mkdtemp()
+        open(os.path.join(s, "native_one"), "w").write("b"); open(os.path.join(s, "guest_image.bin"), "w").write("i"); open(os.path.join(c, "one+dr"), "w").write("b")
+        found, src, note = run.guest_image_plan(dict(path=os.path.join(c, "one+dr"), src=os.path.join(s, "native_one")))
+        self.assertFalse(found); self.assertEqual(os.path.realpath(src), os.path.realpath(os.path.join(s, "guest_image.bin")))
+
+    def test_no_image_anywhere_is_a_loud_warning(self):
+        d = tempfile.mkdtemp(); open(os.path.join(d, "native"), "w").write("b")
+        found, src, note = run.guest_image_plan(dict(path=os.path.join(d, "native")))
+        self.assertFalse(found); self.assertIsNone(src); self.assertTrue(note.startswith("WARNING")); self.assertIn("Failed to open guest image", note)
+
+    def test_missing_binary_is_not_this_checks_business(self):
+        self.assertEqual(run.guest_image_plan(dict(path="/nonexistent/native"))[:2], (True, None))
+
+
 class Exec(unittest.TestCase):
     """execute() with a fake child: run.json states, clean-up on failure, the binary's patch record."""
     titles = T.titles
@@ -414,6 +475,31 @@ class Exec(unittest.TestCase):
             return run.execute(plan, opts, plan.environ, queue_factory=FakeQueue, popen=lambda *a, **k: proc, hasher=lambda p: "abcd")
 
     def rj(self): return json.load(open(os.path.join(self.plan_.run_dir, "run.json")))
+
+    def test_guest_image_beside_out_is_linked_into_frames(self):
+        os.makedirs(os.path.join(self.d, "out")); open(os.path.join(self.d, "out", "guest_image.bin"), "w").write("i")
+        self.assertEqual(self.go([], FakeProc(124)), 0)
+        ln = os.path.join(self.plan_.run_dir, "frames", "guest_image.bin")
+        self.assertTrue(os.path.islink(ln)); self.assertTrue(os.path.isfile(ln))
+
+    def test_patched_copy_in_native_cache_gets_the_image_of_the_build_dir(self):
+        # BIN_DIR route (no explicit BIN): the run uses a patched COPY in native-cache; the image stays next to the build's native_<lineage>
+        bd = os.path.join(self.d, "build"); os.makedirs(bd)
+        open(os.path.join(bd, "native_lin1"), "w").write("bin"); open(os.path.join(bd, "guest_image.bin"), "w").write("img")
+        self.titles("APP0=%s\nBIN_DIR=%s\n" % (self.app0, bd))
+        def fake_build(sel, p, environ, runner=None):
+            os.makedirs(os.path.dirname(sel["path"]), exist_ok=True); open(sel["path"], "w").write("patched")
+        saved = run.build_patched; run.build_patched = fake_build
+        try:
+            rc = self.go([], FakeProc(124))
+        finally:
+            run.build_patched = saved
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.plan_.sel["source"], "cache")
+        self.assertIn("native-cache", self.plan_.sel["path"])
+        ln = os.path.join(self.plan_.run_dir, "frames", "guest_image.bin")
+        self.assertTrue(os.path.isfile(ln))
+        self.assertEqual(os.path.realpath(ln), os.path.realpath(os.path.join(bd, "guest_image.bin")))
 
     def test_fixed_run_and_schema(self):
         self.assertEqual(self.go([], FakeProc(124)), 0)
