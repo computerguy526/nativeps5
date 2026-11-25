@@ -3,6 +3,21 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.4 (in preparation, not released)
+
+Placeholder text: nothing here is a claim until the v1.4 verification runs are done. The release notes are written from the merged v1.4 tip.
+
+- **SAROS (`PPSA07631`): pending SAROS verification run.** The v1.4 Kyty carries the generic indirect-image path, the Nanite raw raster
+  parameters and the shader-bundle compaction, and `nps5 run PPSA07631` now starts (the preset's `KYTY_EOP_TIMESTAMPS=gpu` is overridden to
+  `cbtime`, as for ASTRO BOT; before, the safety check refused the run) and refuses to run without the Unreal console-variable list
+  `NPS5_UECVAR_LIST` (without it the profile's cvar fixes silently did not apply). Whether SAROS is playable on v1.4, and at what frame
+  rate, is not yet verified: the status in the README and the game note stays "not playable" until a run on the merged tip says otherwise.
+- **Cronos: The New Dawn (`PPSA24096`)** had the same refusal and gets the same override.
+- **Switches removed from the docs:** `KYTY_SAROS_HS_DYNIDX`, `KYTY_SAROS_ASYNC_CS` and `KYTY_SAROS_ASYNC_CS_WAIT_MS` do not exist in v1.4.
+  `KYTY_SAROS_PROGRAM_CACHE=1` (hand-shader and Nanite-raw programs kept in the program cache; default off, so those programs recompile on
+  every launch) works again. `KYTY_HTILE_PREFIX_REBIND=1` gates an upstream depth-array change (default off until an ASTRO and SAROS
+  regression has run).
+
 ## v1.3.1 (hotfix)
 
 Everything in v1.3.0. An ASTRO BOT fix for the shader pre-build, a larger pipeline list and honest SAROS text. **Update:** `nativeps5-kyty` moves to the new tag
@@ -38,7 +53,7 @@ check out the tags, rebuild everything (`scripts/build.sh recomp`, `kyty`, `anyp
 program cache and the pipeline cache of every title get a new key); run `nps5 cache prepare <id>` or expect one longer first launch.
 - **SAROS (`PPSA07631`, experimental) boots and plays from the release line.** Kyty decodes the flat-pointer shader operands UE5.5 uses
   (scalar sources `0xEB`-`0xEE`), lowers 64-bit atomics, and carries the SAROS hand shaders for its bindless lighting passes
-  (`KYTY_SAROS_HANDSHADERS`, with the `HS_DYNIDX` canonical groups), the Nanite raster parameter path (`KYTY_SAROS_NANITE_RAW`), the
+  (`KYTY_SAROS_HANDSHADERS`; the `HS_DYNIDX` canonical-group switch of that release was not carried into v1.4), the Nanite raster parameter path (`KYTY_SAROS_NANITE_RAW`), the
   shader-bundle compaction (`KYTY_BUNDLE_COMPACT`) and the command-processor switches found by the SAROS experiments. The recompiler has
   the packed-code discovery (`NPS5_SEED_AFTER_UD2`), `VFMADDSUB`/`VFMSUBADD`, and the SDK 11 shims the title imports. KosmicKrisp gains
   opt-in 64-bit image and buffer atomics (`NPS5_KK_IMAGE_INT64`, `NPS5_KK_BUFFER_INT64`), the switch tree (`NPS5_KK_SWITCH_TREE`) and the

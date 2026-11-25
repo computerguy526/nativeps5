@@ -1,6 +1,7 @@
 # SAROS (`PPSA07631`)
 
 Game note. No game data is here and none is accepted; you need your own dump ([CONTRIBUTING.md](../../CONTRIBUTING.md)).
+**v1.4: pending SAROS verification run (no playable claim yet).** The v1.4 Kyty and the profile of `nativeps5-recomp` are the candidate; the status below is the last verified one.
 **Status for v1.3.x: not playable.** With the SAROS hand shaders (`KYTY_SAROS_HANDSHADERS`, `KYTY_SAROS_NANITE_RAW`, `KYTY_BUNDLE_COMPACT`) on, the title stalls at about 1 fps; with them off the background is missing. No switch combination on the v1.3.0 Kyty gives a correct picture at a playable frame rate. Support is coming in v1.4. The rest of this note describes the bring-up configuration and is kept as the starting point for v1.4; do not expect a playable game from it on v1.3.x.
 
 - **Version:** 01.005.002 (SDK 11.00), eboot Build ID `6d383b3837ff06b8`.
@@ -23,10 +24,11 @@ Game note. No game data is here and none is accepted; you need your own dump ([C
    binds the system library to empty stubs and the game stops at its first file read. `nps5 build` picks the profile by title ID.
    Translating takes about six minutes and 3.3 GB of memory on an M5 Pro (about 625,000 functions) and the program is 730 MB.
 3. **Create `titles/PPSA07631.env`** from `titles/example.env`: `BIN` (the program `nps5 build` printed), `APP0` (your dump), `GPU=kyty`.
-4. **The Unreal console-variable list.** The profile's cvar settings (below) and `NPS5_TITLE_RESOLUTION` need the title's cvar list
-   (`NPS5_UECVAR_LIST`) made from your own eboot; without it the runtime logs `need NPS5_UECVAR_LIST` and sets nothing. Recipe from
-   `docs/m3/uecvar.md` in `nativeps5-recomp`: `uecvar xref -o x.json <eboot.bin>` then `uecvar dumplist x.json > saros.list`, and put
-   `NPS5_UECVAR_LIST=<path>` in the env file. (The recipe is documented, but no one has re-run it from a clean checkout for this
+4. **The Unreal console-variable list (required).** The profile's cvar settings (below) and `NPS5_TITLE_RESOLUTION` need the title's cvar
+   list (`NPS5_UECVAR_LIST`) made from your own eboot. `nps5 run PPSA07631` refuses to start (exit 78) when it is missing or not a file:
+   without it the runtime only logs `need NPS5_UECVAR_LIST` and sets nothing, which showed as flicker, stalls and about 120 ms frames.
+   Recipe from `docs/m3/uecvar.md` in `nativeps5-recomp`: `uecvar xref -o x.json <eboot.bin>` then `uecvar dumplist x.json > saros.list`,
+   and put `NPS5_UECVAR_LIST=<path>` in the env file. (The recipe is documented, but no one has re-run it from a clean checkout for this
    release: if the list comes out empty, open an issue.)
 5. **Run.** `scripts/nps5 run PPSA07631 --play`. The first minute is boot and intro (press Cross to skip). **The first start with an
    empty shader cache opens and closes a small warm-up window by itself; that is not a crash.** The title compiles most of its shaders
@@ -37,7 +39,7 @@ Game note. No game data is here and none is accepted; you need your own dump ([C
 
 | Setting | Why |
 |---|---|
-| `KYTY_SAROS_HANDSHADERS=1` | opens the bindless-lighting kernels (8 listed shader hashes) to the indirect-image path; without it the lighting passes are dark or dropped |
+| `KYTY_SAROS_HANDSHADERS=1` | marks the bindless-lighting kernels (8 listed shader hashes): extra logging, and their own program-cache key with `KYTY_SAROS_PROGRAM_CACHE=1`. Up to v1.3 it also opened them to the indirect-image path; in v1.4 the generic indirect-image path does that |
 | `KYTY_SAROS_NANITE_RAW=1` | Nanite hardware raster pixel shaders find their triangle from raw vertex masks; without it each pixel of a cluster is shaded with another triangle (a mosaic of normals and colour) |
 | `KYTY_BUNDLE_COMPACT=1` | compacts the shader bundles of the command processor |
 | `NPS5_KK_IMAGE_INT64`, `NPS5_KK_BUFFER_INT64`, `NPS5_KK_SWITCH_TREE`, `NPS5_KK_RESIDENCY_LOCK` | KosmicKrisp 64-bit atomics (Nanite visibility buffer), the switch tree and the residency lock |
@@ -58,8 +60,8 @@ scalability settings to 0 (`sg.*Quality=0` in the game user settings). Heavier s
 
 **Optional, off by default (all experimental):**
 
-- `KYTY_SAROS_HS_DYNIDX=1` and `KYTY_SAROS_PROGRAM_CACHE=1` (cheaper hand-shader permutations; the program cache keeps hand-shader
-  programs instead of recompiling them). DYNIDX once flickered with teal rectangles in an owner session; fixes landed, not re-confirmed.
+- `KYTY_SAROS_PROGRAM_CACHE=1`: keeps the hand-shader and Nanite-raw programs in the persistent program cache (the switch state is in the
+  key). Off by default, so those programs (the Nanite mesh programs among them) recompile on every launch; the saving has not been measured on v1.4.
 - **MetalFX in Unreal's third-party upscaler slot** (`KYTY_METALFX=temporal KYTY_METALFX_UE=fsr3 KYTY_METALFX_UE_SKIP=1
   KYTY_METALFX_MAX_IN_W=1920 KYTY_METALFX_JITTER_SIGN=-1 KYTY_METALFX_DEPTH_REVERSED=1` with the FSR3 cvars
   `r.FidelityFX.FSR3.Enabled=1`, `...CreateReactiveMask=0`, `...QualityMode=4`, `r.DynamicRes.OperationMode=0`). Owner verdicts on the
@@ -85,6 +87,7 @@ cache compression: [disk-space](../../docs/reference/disk-space.md).
   before v1.3.0, trigger unknown). Relaunch: it does not repeat on the next start.
 - The clay-like flat look of the main character (empty streaming-virtual-texture page table) is fixed by `KYTY_PS_UINT32_TARGETS=1`,
   which the profile sets; if the character is flat grey the switch is not reaching the game.
+- A decal pixel shader is known to render wrongly (open).
 - Frame dump and probe tools exist for development only and are off.
 - Audio, saves and trophies: not verified on this release.
 

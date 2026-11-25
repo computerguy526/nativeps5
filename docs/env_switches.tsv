@@ -1797,12 +1797,9 @@ KYTY_SAMPLER_MEMO	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_SAMPLER_REDUCTION	kyty		src/graphics/host_gpu/renderer/cache/samplerCache.cpp
 KYTY_SAMPLE_LOD_CLAMP	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_SAMPLE_OFFSETS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
-KYTY_SAROS_ASYNC_CS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-KYTY_SAROS_ASYNC_CS_WAIT_MS	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-KYTY_SAROS_HANDSHADERS	kyty	SAROS: `1` or a comma list of hashes opens the 8 listed bindless-lighting compute shaders to the indirect-image path; set by the PPSA07631 profile	src/graphics/host_gpu/renderer/renderCompute.cpp
+KYTY_SAROS_HANDSHADERS	kyty	SAROS: `1` or a comma list of hashes marks the 8 listed bindless-lighting compute shaders: extra logging (with KYTY_SAROS_HANDSHADERS_LOG) and, with KYTY_SAROS_PROGRAM_CACHE=1, their own program-cache key; since v1.4 the generic indirect-image path opens these kernels, the switch no longer does; set by the PPSA07631 profile	src/graphics/host_gpu/renderer/renderCompute.cpp
 KYTY_SAROS_HANDSHADERS	ps5recomp		pkg/pack/profile_test.go
 KYTY_SAROS_HANDSHADERS_LOG	kyty		src/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp
-KYTY_SAROS_HS_DYNIDX	kyty	SAROS: `1` one canonical image-slot layout for the hand shaders (needs KYTY_SAROS_HANDSHADERS); default off, experimental	src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAROS_KEYSTRIDE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SAROS_MAP_PAD	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_SAROS_NANITE_RAW	kyty	SAROS: `1` (or a hash list) gives Nanite raster pixel shaders their triangle from the raw vertex masks; set by the PPSA07631 profile	src/graphics/shader/recompiler/sarosHandShaders.h
@@ -1810,7 +1807,7 @@ KYTY_SAROS_NANITE_RAW	ps5recomp		pkg/pack/profile_test.go
 KYTY_SAROS_NANITE_RAW_AND	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAROS_NANITE_RAW_VERTS	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAROS_NANITE_SHADE_STATS	kyty		src/graphics/guest_gpu/command_processor/naniteShadeStats.h
-KYTY_SAROS_PROGRAM_CACHE	kyty	SAROS: `1` keeps hand-shader and Nanite-raw programs in the persistent program cache (default off = recompile)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+KYTY_SAROS_PROGRAM_CACHE	kyty	SAROS: `1` keeps the hand-shader and Nanite-raw programs in the persistent program cache with the switch state in the key (default off = those programs recompile every launch); with KYTY_SAROS_KEYSTRIDE and KYTY_SAROS_MAP_PAD	src/graphics/shader/recompiler/sarosProgramCache.h
 KYTY_SAROS_SAMPLE_DBG	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAROS_SAMPLE_FRACT	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAROS_SAMPLE_LOD0	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
