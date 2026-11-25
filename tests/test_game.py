@@ -246,7 +246,7 @@ class AstroPairRowTests(unittest.TestCase):
         fs = [r for r in self.rows() if r[14] == "autoval,folship"]
         self.assertEqual(len(fs), 16)
         for r in fs:
-            self.assertEqual((r[17], r[18]), ("exact", "faster"))
+            self.assertEqual(r[18], "faster"); self.assertIn(r[17], ("exact", "outprec:1"))  # relabel56: D9-class rows are outprec:1
             self.assertIn(r[16], ("g16", "g17", "g18"))
             self.assertLess(float(r[19]), 1.0)
             self.assertRegex(r[5] + r[6], r"^[0-9a-f]{32}$")
@@ -266,6 +266,24 @@ class AstroPairRowTests(unittest.TestCase):
         self.assertEqual(len(gone), 85)
         for r in self.rows():
             self.assertNotIn((r[7], r[8]), gone)
+
+    def test_relabel56_d9_rows_are_outprec1(self):
+        """relabel56: the 56 D9-class rows ship as outprec:1 (never exact); none of the 33 P7-only dropped rows ships."""
+        p = os.path.join(HERE, "data", "relabel56.tsv")
+        keys = {tuple(l.split("\t")) for l in open(p).read().splitlines() if l and not l.startswith("#")}
+        self.assertEqual(len(keys), 56)
+        rows = self.rows()
+        got = {(r[5], r[6], r[15], r[16]): r[17] for r in rows}
+        for k in keys:
+            self.assertEqual(got.get(k), "outprec:1", k)
+        p7 = [l.split("\t") for l in open(os.path.join(HERE, "data", "valfix_dropped.tsv")).read().splitlines()
+              if l and not l.startswith("#")]
+        p7 = [r for r in p7 if r[6] == "P7"]
+        self.assertEqual(len(p7), 33)
+        shipped = {(r[5], r[6], r[15], r[16]) for r in rows}
+        for r in p7:
+            self.assertNotIn((r[0], r[1], r[4], r[5]), shipped)
+            self.assertNotIn((r[2], r[3]), {(x[7], x[8]) for x in rows})
 
     def test_verified_record_matches_row_count(self):
         d = os.path.join(game.REPO, "games", "PPSA21564")
