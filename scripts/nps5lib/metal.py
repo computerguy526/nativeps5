@@ -233,6 +233,50 @@ def spec_key(spec):
     return hashlib.sha256(spec).hexdigest()[:16]
 
 
+# reprofix: the lists' spec keys are hashes of the specialization blob in the layout the verification caches hold (Kyty int21 /
+# v1.2.x: buffer records 13 bytes, image records 34 bytes = 8 x u32 + cube + fmask). Later Kyty builds write the same
+# specialization in a longer image record: v1.3.x adds a u32 indirect_group before cube (38 bytes), v1.4 adds bindless, runtime,
+# fmask_fragments (u32) and clamp_half_float after fmask (41 bytes). A v1.4 prepare / list upgrade re-encodes every record,
+# so a list key never matched a v1.4 programs.bin ("not in programs.bin" for ~90 % of the rows). legacy_spec() maps such a blob
+# back to the int21 bytes ONLY when the extra fields hold their defaults (no indirect group, all v1.4 extras zero), i.e. when it
+# names exactly the specialization that was verified; any other value keeps the blob without an alias (KosmicKrisp's shader).
+SPEC_BUF = 13
+SPEC_IMG_INT21 = 34
+SPEC_IMG_V13 = 38
+SPEC_IMG_V14 = 41
+NO_INDIRECT_IMAGE = b"\xff\xff\xff\xff"
+
+
+def legacy_spec(spec):
+    """A v1.3.x / v1.4 specialization blob -> the same specialization in the int21 layout (bytes), or None (already int21, no
+    image record, malformed, or a non-default extra field)."""
+    if len(spec) < 8:
+        return None
+    nb = struct.unpack_from("<I", spec, 0)[0]
+    o = 4 + SPEC_BUF * nb
+    if o + 4 > len(spec):
+        return None
+    ni = struct.unpack_from("<I", spec, o)[0]
+    rest = len(spec) - o - 4
+    if ni == 0 or rest % ni:
+        return None
+    size = rest // ni
+    out = [spec[:o + 4]]
+    for i in range(ni):
+        r = spec[o + 4 + size * i:o + 4 + size * (i + 1)]
+        if size == SPEC_IMG_V13:
+            if r[32:36] != NO_INDIRECT_IMAGE:               # an indirect image group: not a specialization any list was verified with
+                return None
+            out.append(r[:32] + r[36:])
+        elif size == SPEC_IMG_V14:
+            if any(r[SPEC_IMG_INT21:]):                     # bindless / runtime / fmask_fragments / clamp_half_float set
+                return None
+            out.append(r[:SPEC_IMG_INT21])
+        else:
+            return None
+    return b"".join(out)
+
+
 def read_perms(path, cursors=False):
     """Kyty's program cache (<id>.programs.bin): -> {(program digest hex, spec key): permutation index}. The index counts every
     record that is not a source record (kind 1), as kyty_msl_dump --perm does. The first record of a key wins.
@@ -258,10 +302,15 @@ def read_perms(path, cursors=False):
             if size >= 24:
                 sl = struct.unpack_from("<I", d, p + 20)[0]
                 if p + 24 + sl <= p + size:
-                    k = (d[p:p + 16].hex(), spec_key(d[p + 24:p + 24 + sl]))
-                    out.setdefault(k, idx)
-                    if cursors:
-                        out.setdefault(k + (struct.unpack_from("<I", d, p + 16)[0],), idx)
+                    blob = d[p + 24:p + 24 + sl]
+                    keys = [(d[p:p + 16].hex(), spec_key(blob))]
+                    old = legacy_spec(blob)                 # reprofix: a v1.3 / v1.4 blob is also found under its int21 key
+                    if old is not None:
+                        keys.append((keys[0][0], spec_key(old)))
+                    for k in keys:
+                        out.setdefault(k, idx)
+                        if cursors:
+                            out.setdefault(k + (struct.unpack_from("<I", d, p + 16)[0],), idx)
             idx += 1
         off = p + size
     return out

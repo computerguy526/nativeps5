@@ -809,5 +809,70 @@ class Mesh(unittest.TestCase):
             shutil.rmtree(d)
 
 
+
+# ---- reprofix: spec keys of v1.3 / v1.4 program caches (synthetic blobs; field values are arbitrary numbers, no game data)
+def spec_blob(images, size=34, group=b"\xff\xff\xff\xff", extra=b"\0" * 7, buffers=1):
+    """A specialization blob: `buffers` 13-byte buffer records, `images` image records in the int21 (34), v1.3 (38) or v1.4 (41) layout."""
+    out = struct.pack("<I", buffers) + b"".join(struct.pack("<IIIB", 16 + i, 0x22, 0x0123, i & 1) for i in range(buffers))
+    out += struct.pack("<I", images)
+    for i in range(images):
+        head = struct.pack("<8I", 3, 1 + i, 9, 0x4d, 0x0fac, 0, 0, 0)
+        tail = bytes([i & 1, 0])                                                 # cube, fmask
+        out += head + tail if size == 34 else head + group + tail if size == 38 else head + tail + extra
+    return out
+
+
+class SpecLayouts(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.dump = os.path.join(self.tmp, "kyty_msl_dump"); open(self.dump, "w").write(DUMP.replace("$HDR", HDR.replace("\n", "\\n")))
+        os.chmod(self.dump, 0o755)
+        self.env = dict(PATH=os.environ["PATH"], HOME=self.tmp, NPS5_MSL_TOOL=self.dump)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_v13_and_v14_blobs_map_to_the_int21_bytes(self):
+        for n in (1, 2, 5):
+            old = spec_blob(n)
+            self.assertEqual(metal.legacy_spec(spec_blob(n, 38)), old)
+            self.assertEqual(metal.legacy_spec(spec_blob(n, 41)), old)
+            self.assertIsNone(metal.legacy_spec(old))                          # already the list layout
+        self.assertIsNone(metal.legacy_spec(spec_blob(0)))                      # no image record: the layouts are identical
+        self.assertIsNone(metal.legacy_spec(spec_blob(2, 41)[:-1]))             # torn
+        self.assertIsNone(metal.legacy_spec(b"\x01"))
+
+    def test_non_default_fields_are_never_aliased(self):
+        self.assertIsNone(metal.legacy_spec(spec_blob(2, 38, group=struct.pack("<I", 0))))    # an indirect image group is set
+        self.assertIsNone(metal.legacy_spec(spec_blob(2, 38, group=struct.pack("<I", 7))))
+        for i in range(7):                                                      # bindless, runtime, fmask_fragments, clamp_half_float
+            e = bytearray(7); e[i] = 1
+            self.assertIsNone(metal.legacy_spec(spec_blob(2, 41, extra=bytes(e))))
+        mixed = spec_blob(2, 41)[:-1] + b"\x01"                                # only the LAST record is non-default: whole blob refused
+        self.assertIsNone(metal.legacy_spec(mixed))
+
+    def test_read_perms_finds_a_list_key_in_a_v13_or_v14_cache(self):
+        prog = os.path.join(self.tmp, "X.programs.bin")
+        programs(prog, [(DG[0], spec_blob(2, 41)), (DG[1], spec_blob(1, 38)), (DG[2], spec_blob(2, 38, group=b"\0" * 4)), (DG[3], spec_blob(0))])
+        p = metal.read_perms(prog, cursors=True)
+        self.assertEqual(p[(DG[0].hex(), metal.spec_key(spec_blob(2)))], 0)    # list key (int21) -> the v1.4 record
+        self.assertEqual(p[(DG[0].hex(), metal.spec_key(spec_blob(2, 41)))], 0)  # its own key still works
+        self.assertEqual(p[(DG[1].hex(), metal.spec_key(spec_blob(1)))], 1)
+        self.assertEqual(p[(DG[1].hex(), metal.spec_key(spec_blob(1)), 0)], 1)  # cursor form too
+        self.assertNotIn((DG[2].hex(), metal.spec_key(spec_blob(2))), p)        # grouped record: no alias
+        self.assertEqual(p[(DG[3].hex(), metal.spec_key(spec_blob(0)))], 3)
+
+    def test_reproduce_gate_full_count_on_v13_and_v14_caches(self):
+        """Gate: a list keyed on an int21 cache must reproduce N of N on the same programs re-encoded by v1.3 and by v1.4."""
+        rows = [row(DG[i], spec_blob(i % 3), "%x" % i * 16, b_text(i)) for i in (0, 1, 2, 5)]
+        lp = os.path.join(self.tmp, "metal-shaders.tsv"); open(lp, "w").write(keys_list(rows))
+        for size in (34, 38, 41):
+            prog = os.path.join(self.tmp, "P%d.programs.bin" % size)
+            programs(prog, [(DG[i], spec_blob(i % 3, size)) for i in range(6)])
+            work = tempfile.mkdtemp(dir=self.tmp)
+            res = metal.reproduce(lp, None, prog, None, self.env, work, out=io.StringIO())
+            self.assertEqual((res["rows"], res["reproduced"], res["failed"]), (4, 4, []), "layout %d" % size)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
