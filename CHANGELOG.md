@@ -3,9 +3,9 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
-## v1.4 (release candidate, not released)
+## v1.4.0 (2026-11-25)
 
-Draft: every number below was measured on a release-candidate build (M5 Pro, ASTRO BOT, the profile settings `nps5 run` composes); numbers marked PENDING are not claims yet.
+Every number below was measured on a release-candidate build (M5 Pro, ASTRO BOT, the profile settings `nps5 run` composes); numbers marked PENDING are not claims.
 
 **Update:** all of `nativeps5-kyty`, `nativeps5-recomp` and `nativeps5-anyps5` move to `v1.4.0` (see [components.lock](components.lock)). Pull, check out the tags,
 rebuild (`scripts/build.sh`) and **rebuild KosmicKrisp** (`scripts/build.sh kosmickrisp`: patches 0041 (`nps5_kk_archive_flush`) and 0042 (barrier memory modes, fixes 47 pipelines that failed to build on some toolchains) are new; 42 patches), then
@@ -18,7 +18,7 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
   "prepared" (0 failed, 0 beyond the cache limit), the set-aside copy was removed, and the next start was warm: 0 pipelines compiled in play and 2,207 libraries
   loaded in 0.4 s. The driver cache cap is 1,024 MB with a replay limit of 896 MB. `KYTY_CACHE_UPGRADE=0` turns the upgrade off. A cache is
   re-prepared only when the shader code or a switch that changes it changes (render scale, MetalFX, frame cap, window and QoS settings do not).
-- **Astro Bot: pipeline list replaced** by a list of 1,216 shaders, 1,596 permutations and 2,537 pipelines (the 4,892 entries of the
+- **Astro Bot: pipeline list replaced** by a list of 1,217 shaders, 1,597 permutations and 2,549 pipelines (the 4,892 entries of the
   v1.3.1 list were pairs that differ only in state the device decides; 2,446 were unique). Keys and hashes only; its no-game-code record is
   `games/PPSA21564/pipelines.kyplst.verified`. On the release candidate (box 3, M5 Pro, `nps5 run` on a prepared cache) the start replays the pipeline journal in 0.9 s (2,450 built, 0 failed) and plays with 0 live shader compiles (2,739 pipeline-archive hits, 0 compiled).
 - **Astro Bot: 25 more Metal rows for skinned-character and foliage shaders** (`g16` 12, `g17` 7, `g18` 6; graphics list 455 to 480 rows). Each is exact against KosmicKrisp on every pipeline of its key and was timed faster on that GPU class in every run (B/A 0.75-0.99 on the class; the numbers are in the list). They take effect after `nps5 cache prepare` regenerates the Metal rows from your own program cache. PENDING: in-game frame time on the shipped composition (the rows are per shader pair, not an end-to-end claim).
@@ -36,6 +36,10 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - First start after updating: the shader cache is rebuilt behind the loading card (several minutes, once). The OS Metal cache id is now per title and GPU/OS build, so later updates keep the compiled work of unchanged shaders.
 
 **Known issues (v1.4):**
+- ASTRO BOT: entering "Apes on the Loose" right after other levels can end the game with exit code 86 (the memory self-limit) on 24 GB Macs. Restart and enter the level from the world map. A fix is in progress.
+- The first start after installing or updating can crash once at the end of the loading card (an Apple Metal bug that is hit when MetalFX starts while the shader archive is being saved). Start the game again. Fixed in the next version.
+- The first start after updating rebuilds the shader cache behind the loading card (several minutes on ASTRO BOT).
+- ASTRO BOT: catching the ape very quickly at the end of "Apes on the Loose" can stop the level from finishing; let it run for a moment first.
 - With `NPS5_QOS_GPU=rt` the guest fault cost per frame is higher (about 8-13 ms against about 2 ms in the Sky Garden A/B/A); the frame time is still lower.
 - KosmicKrisp patch 0041: a failed archive write reports success, so with `KYTY_PREPARE_FLUSH_SYNC=1` the fallback wait is skipped; the switch stays off.
 - Closing the window can hit the 5-second save timeout, leaving about 20 Metal archive pipelines unflushed (they compile again next time).

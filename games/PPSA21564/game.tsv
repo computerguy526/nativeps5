@@ -132,7 +132,7 @@ env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
 
 # ---- Facts (for people and the README; no tool reads them) ----
 fact.display_buffer	3840x2160
-fact.pipeline_list_counts	shaders 1216 (vertex 645, pixel 322, compute 249), permutations 1596, pipelines 2537
+fact.pipeline_list_counts	shaders 1217 (vertex 646, pixel 322, compute 249), permutations 1597, pipelines 2549
 fact.pipeline_list_scenes	title, world map and 12 levels (first visits), plus play-test sessions
 fact.prepare	scripts/prepare-pipelines.sh PPSA21564
 fact.level_peak_gib	16.3-17.8
