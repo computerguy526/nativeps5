@@ -22,7 +22,7 @@ Identity is derived, never typed. stack key = 8 hex of sha256(list sha256, Kyty 
 NPS5_HW_CACHE_KEY of hwpresets). A commit is the checkout's HEAD, with +<hash of the uncommitted changes> when its tracked files
 differ (run.py commit_of); KosmicKrisp is read from $NPS5_KK_DIR, else $NPS5_KK_WORK or its mesa/ (the public layout, where the patch
 series is applied on the pinned commit without committing). cache dir = <scratch>/cache/<id>/<gpu>-<stack key>/; Metal cache id =
-com.nativeps5.<gpu>.<id>.<stack key>. A new list, a new KK / Kyty / ps5recomp commit or another GPU family / OS build gives a new
+com.nativeps5.<gpu>.<id>.<GPU family-OS build key> (stable across updates). A new list, a new KK / Kyty / ps5recomp commit or another GPU family / OS build gives a new
 key, so a stale cache is never reused silently. Compiled caches are never committed; only games/<id>/pipelines.kyplst and
 its .verified are. The runs go through `nps5 run` (title queue, memory limit, one GPU process); nothing here starts a game itself.
 KK_LIBCACHE_DIR (KK's library cache) is set to <cache dir>/kk-libcache. `prepare` is TWO-PASS: pass 1 collects the MSL of every shader,
@@ -111,7 +111,9 @@ class Ctx:
         self.key = stack_key(self.list_sha, commits["kyty"], self.kk_id, commits["ps5recomp"], hw, with_list=not self.incremental)
         self.root = os.path.join(scratch, "cache", tid)
         self.dir = os.path.join(self.root, "%s-%s" % (gpu, self.key))
-        self.metal = metal_id(gpu, tid, self.key)
+        # the OS Metal cache id is per title / GPU family / OS build, NOT per stack key: an update (new Kyty / KK commit) keeps the compiled MSL->AIR work of every
+        # unchanged shader text (upkeys 2026-11-25: about 29 % of the first-start card). `prepare` still removes the OS cache of this id before its passes.
+        self.metal = metal_id(gpu, tid, re.sub(r"[^A-Za-z0-9_-]", "_", hw) or "hw")
 
     def identity(self):
         return dict(list=self.list_sha, kyty=self.commits["kyty"], kk=self.kk_id, ps5recomp=self.commits["ps5recomp"], hw=self.hw)

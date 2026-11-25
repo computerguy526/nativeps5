@@ -32,6 +32,8 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - **Astro Bot: Metal shader rows follow your play.** After a session `nps5 run` regenerates our Metal kernels/pairs when `programs.bin` has grown (`NPS5_METAL_REFRESH=0` turns it off).
   A fresh prepare installs 30 of 70 kernels and 67 of 218 pairs on an M5 Pro (the list does not contain the other kernels' programs); they join as you play levels.
 
+- First start after updating: the shader cache is rebuilt behind the loading card (several minutes, once). The OS Metal cache id is now per title and GPU/OS build, so later updates keep the compiled work of unchanged shaders.
+
 **Known issues (v1.4):**
 - With `NPS5_QOS_GPU=rt` the guest fault cost per frame is higher (about 8-13 ms against about 2 ms in the Sky Garden A/B/A); the frame time is still lower.
 - KosmicKrisp patch 0041: a failed archive write reports success, so with `KYTY_PREPARE_FLUSH_SYNC=1` the fallback wait is skipped; the switch stays off.

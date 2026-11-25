@@ -112,7 +112,8 @@ class T(unittest.TestCase):
         self.env["NPS5_HW_CACHE_KEY"] = "g17-26A1"
         self.assertNotEqual(b.key, self.ctx().key)
         c = self.ctx()
-        self.assertEqual(c.metal, "com.nativeps5.kyty.PPSA00001." + c.key)
+        self.assertEqual(c.metal, "com.nativeps5.kyty.PPSA00001." + c.hw)        # per GPU family / OS build, not the stack key
+        self.assertNotIn(c.key, c.metal)
         self.assertTrue(c.dir.endswith("cache/PPSA00001/kyty-" + c.key))
 
     def test_no_kyplst_row_is_refused(self):
