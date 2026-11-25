@@ -220,6 +220,35 @@ class AstroProfileTests(unittest.TestCase):
         self.assertEqual(d["NPS5_QOS_GPU"], "rt")
 
 
+class AstroPairRowTests(unittest.TestCase):
+    """folship: the v1.4 foliage / skinned-bone rows (evidence autoval,folship) in the ASTRO Metal pair list."""
+    def rows(self):
+        p = os.path.join(game.REPO, "games", "PPSA21564", "metal-gfx-pairs.tsv")
+        return [l.split("\t") for l in open(p).read().splitlines() if l.startswith("gfx\t")]
+
+    def test_folship_rows_exact_and_faster(self):
+        fs = [r for r in self.rows() if r[14] == "autoval,folship"]
+        self.assertEqual(len(fs), 20)
+        for r in fs:
+            self.assertEqual((r[17], r[18]), ("exact", "faster"))
+            self.assertIn(r[16], ("g16", "g17", "g18"))
+            self.assertLess(float(r[19]), 1.0)
+            self.assertRegex(r[5] + r[6], r"^[0-9a-f]{32}$")
+        self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 7, "g17": 7, "g18": 6})
+
+    def test_folship_rows_do_not_shadow_other_rows(self):
+        rows = self.rows()
+        old = {(r[5], r[6], r[16]) for r in rows if r[14] != "autoval,folship"}
+        for r in rows:
+            if r[14] == "autoval,folship":
+                self.assertNotIn((r[5], r[6], r[16]), old | {(r[5], r[6], "*")})
+
+    def test_verified_record_matches_row_count(self):
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        rec = open(os.path.join(d, "metal-gfx-pairs.tsv.verified")).read()
+        self.assertIn("reproduced=%d of %d" % (len(self.rows()), len(self.rows())), rec)
+
+
 class SceneTests(Base):
     def test_lookup(self):
         p = self.prof(); rows = p.scenes()
