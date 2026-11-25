@@ -562,6 +562,54 @@ class T(unittest.TestCase):
         self.assertEqual(self.run_main(["frobnicate", "PPSA00001"])[0], 2)
         self.assertEqual(self.run_main(["status"])[0], 2)
 
+    # ---- Metal refresh after a session (programs.bin grew while the title was played)
+    def metal_ctx(self):
+        gd = os.path.join(self.tmp, "games", "PPSA00001")
+        open(os.path.join(gd, "metal-shaders.tsv"), "w").write("format\tnps5-metal-keys\t2\n")
+        c = self.ctx(); os.makedirs(os.path.join(c.dir, "metal-shaders"), exist_ok=True)
+        return c
+
+    def set_programs(self, c, n):
+        with open(os.path.join(c.dir, "PPSA00001.programs.bin"), "wb") as f: f.write(b"x" * n)
+
+    def test_metal_stale_and_refresh(self):
+        c = self.metal_ctx(); self.set_programs(c, 100)
+        self.assertFalse(cache.metal_stale(c))                              # never generated here: nothing to refresh
+        cache.stamp_programs(c)
+        self.assertEqual(open(os.path.join(c.dir, "metal-shaders", cache.PROGRAMS_STAMP)).read().strip(), "100")
+        self.assertFalse(cache.metal_stale(c))
+        self.assertIsNone(cache.metal_refresh("PPSA00001", dict(self.env), runner_cmd=[sys.executable, "-c", "raise SystemExit(7)"]))   # not grown: no run
+        self.set_programs(c, 250)
+        self.assertTrue(cache.metal_stale(c))
+        off = dict(self.env, NPS5_METAL_REFRESH="0")
+        self.assertIsNone(cache.metal_refresh("PPSA00001", off, runner_cmd=[sys.executable, "-c", "raise SystemExit(7)"]))
+        note = cache.metal_refresh("PPSA00001", dict(self.env), runner_cmd=[sys.executable, "-c", "raise SystemExit(0)"])
+        self.assertIn("refreshed", note); self.assertIn("rc 0", note)
+        slow = cache.metal_refresh("PPSA00001", dict(self.env), runner_cmd=[sys.executable, "-c", "import time; time.sleep(30)"], limit_s=1)
+        self.assertIn("timed out", slow)                                    # bounded
+        bad = cache.metal_refresh("PPSA00001", dict(self.env), runner_cmd=["/nonexistent/nps5-x"])
+        self.assertIn("skipped", bad)                                       # never raises
+
+    def test_run_refresh_hook(self):
+        import types
+        c = self.metal_ctx(); self.set_programs(c, 10); cache.stamp_programs(c); self.set_programs(c, 99)
+        runmod_called = []
+        orig = cache.metal_refresh
+        cache.metal_refresh = lambda tid, environ, **kw: runmod_called.append(tid) or "x"
+        try:
+            plan = types.SimpleNamespace(tid="PPSA00001", gpu="kyty", env={"KYTY_PROGRAM_CACHE_PATH": "p"}, tag="t", sel={}, secs=60, cls="func", scene=None, until=None)
+            self.assertEqual(runmod.refresh_metal_after_run(plan, dict(self.env)), "x")
+            plan.env = {}                                                   # an explicit cache (no default-cache words): never
+            self.assertIsNone(runmod.refresh_metal_after_run(plan, dict(self.env)))
+            plan.tag = "cache-warm-1"                                       # a prepare's own warm start: no nested refresh
+            self.assertIsNone(runmod.refresh_metal_after_run(plan, dict(self.env)))
+            plan.tag = "t"
+            plan.env = {"KYTY_PROGRAM_CACHE_PATH": "p"}; plan.gpu = "anyps5"
+            self.assertIsNone(runmod.refresh_metal_after_run(plan, dict(self.env)))
+        finally:
+            cache.metal_refresh = orig
+        self.assertEqual(runmod_called, ["PPSA00001"])
+
 
 if __name__ == "__main__":
     unittest.main()

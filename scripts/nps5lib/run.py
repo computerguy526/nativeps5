@@ -1115,6 +1115,8 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         try: print(_logsummary().write_run_summary(plan.run_dir, rj), end="")     # the run-end SUMMARY block, also run.summary.txt
         except Exception: pass
         print("nps5 run: %s rc=%s verdict=%s, output in %s" % (plan.tid, rc, rj["verdict"], plan.run_dir))
+        note = refresh_metal_after_run(plan, environ)
+        if note: print("nps5 run: " + note)
         if rj["verdict"] in ("EARLY_BLACK", "EARLY_STALL", "ENDED_EARLY"): return 1
         return 0 if rc in (0, 124) and rj["verdict"] in ("DONE_FIXED", "DONE_UNTIL", "TIMEOUT") else (rc if rc > 0 else 1)
     except BaseException as e:
@@ -1127,6 +1129,21 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         raise
     finally:
         q.release()
+
+
+def refresh_metal_after_run(plan, environ):
+    """The Metal rows come from programs.bin, which grows while the title is played: regenerate them once the title has exited (CPU only, bounded). Players only
+    (a kyty run on the default cache, not a prepare pass, not a dry run); NPS5_METAL_REFRESH=0 turns it off."""
+    try:
+        if is_prepare_run(plan) or plan.gpu != "kyty" or "KYTY_PROGRAM_CACHE_PATH" not in plan.env or str(plan.tag).startswith("cache-"):
+            return None                      # (the cache-* runs are prepare passes and its warm starts: the prepare owns the Metal step)
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import cache as cachemod
+        return cachemod.metal_refresh(plan.tid, environ)
+    except Exception:
+        return None
 
 
 def main(argv, environ=None):

@@ -1036,7 +1036,62 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
                 st["match"] = line
         except (metalmod.MetalError, OSError):
             pass
+    try:
+        stamp_programs(ctx)
+    except OSError:
+        pass
     return st
+
+
+# ---- refresh after a session: the Metal rows are generated from <cache>/<id>.programs.bin, which grows while the title is played (programs compiled live). The
+# step records the size it saw; `nps5 run` runs it again (CPU only, after the title exited, bounded) when the file has grown.
+PROGRAMS_STAMP = ".programs"
+
+
+def programs_size(ctx):
+    try:
+        return os.path.getsize(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid))
+    except OSError:
+        return None
+
+
+def stamp_programs(ctx):
+    n = programs_size(ctx)
+    d = os.path.join(ctx.dir, metalmod.OUT_NAME)
+    if n is not None and os.path.isdir(d):
+        with open(os.path.join(d, PROGRAMS_STAMP + ".tmp"), "w") as f:
+            f.write("%d\n" % n)
+        os.replace(os.path.join(d, PROGRAMS_STAMP + ".tmp"), os.path.join(d, PROGRAMS_STAMP))
+
+
+def metal_stale(ctx):
+    """True when the Metal step has run for this cache before (its output dir has the stamp) and programs.bin is larger than it was then."""
+    n = programs_size(ctx)
+    try:
+        with open(os.path.join(ctx.dir, metalmod.OUT_NAME, PROGRAMS_STAMP)) as f:
+            seen = int(f.read().strip() or "0")
+    except (OSError, ValueError):
+        return False                       # never generated here (a cache `nps5 cache prepare` has not been through): nothing to refresh
+    return n is not None and n > seen
+
+
+def metal_refresh(tid, environ, runner_cmd=None, limit_s=300):
+    """After a run: regenerate the Metal rows when programs.bin has grown (compiled live while playing). Quiet, bounded by limit_s, never raises.
+    -> a one-line note or None. NPS5_METAL_REFRESH=0 turns it off."""
+    if environ.get("NPS5_METAL_REFRESH", "1") == "0" or environ.get("NPS5_METAL_SHADERS", "1") == "0":
+        return None
+    try:
+        ctx = context(tid, environ)
+        if not (metal_list(ctx) or metal_gfx_list(ctx)) or not metal_stale(ctx):
+            return None
+        before = programs_size(ctx)
+        cmd = runner_cmd or [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nps5"), "cache", "metal", tid]
+        r = subprocess.run(cmd, env=dict(environ), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=limit_s, text=True)
+        return "metal rows refreshed after the session (programs.bin grew to %s bytes): rc %d" % (before, r.returncode)
+    except subprocess.TimeoutExpired:
+        return "metal refresh after the session timed out (%d s); `nps5 cache metal %s` finishes it" % (limit_s, tid)
+    except Exception as e:                  # an optimisation: never fails a run
+        return "metal refresh skipped: %s" % (str(e) or type(e).__name__)
 
 
 def metal_fields(st):

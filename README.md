@@ -211,6 +211,9 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   Off: `--env NPS5_QOS_GPU=off`.
 - **Depth compression kept** (v1.4, `KYTY_DEPTH_FEEDBACK_USAGE=0`, ASTRO BOT on Kyty): depth images are created without the attachment feedback-loop usage, so KosmicKrisp keeps Metal's lossless depth compression
   (about -2 ms GPU per frame in the rpass A/B/A on an M4 Pro; **not yet measured on the shipped composition on an M5**). Off: `--env KYTY_DEPTH_FEEDBACK_USAGE=1`.
+- **Metal shaders follow what you play** (v1.4, `NPS5_METAL_REFRESH=1`): our Metal kernels and pairs are generated from the programs your own cache has translated. A
+  fresh `nps5 cache prepare` knows only the programs of the shipped list (on an M5 Pro: 30 of 70 kernels and 67 of 218 pairs); programs compiled while you play join `programs.bin`, and when it has grown
+  `nps5 run` regenerates the Metal rows after the title has exited (CPU only, bounded to 5 minutes, one line in the run output). Off: `NPS5_METAL_REFRESH=0`; by hand: `nps5 cache metal PPSA21564`.
 - **Faster Metal shaders per GPU class** (v1.2.1 - v1.2.4): the Metal lists carry rows for M4-family (`g16`, 144 graphics rows
   incl. 5 mesh pipelines + 2 kernels), M5-family (`g17`, 46 incl. 2 mesh) and M6-family (`g18`, 146 incl. 2 mesh + 2 kernels) GPUs,
   used only on that class; other Macs keep the shared rows (34 graphics pairs + 69 kernels). Mesh rows (v1.2.3) need KosmicKrisp
