@@ -120,6 +120,21 @@ class T(unittest.TestCase):
         self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf + ["vs %s %s" % ("c" * 16, "9" * 32)]), {("cs", K1, D1), ("fs", K2, D2), ("vs", "4" * 16, "c" * 16)})
         self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf[:1]), {("cs", K1, D1)})        # a key with no digest hit stays unmapped
 
+    def test_main_dispatches_every_command(self):
+        # sidecar-xf was missing from main()'s command list (a real call printed the usage and returned 2)
+        names = {"check": "cmd_check", "sidecar": "cmd_sidecar", "sidecar-xf": "cmd_sidecar_xf", "summary": "cmd_summary", "envdump": "cmd_envdump"}
+        calls = []
+        saved = {n: getattr(O, n) for n in names.values()}
+        try:
+            for cmd, fn in names.items():
+                setattr(O, fn, lambda a, c=cmd: calls.append(c) or 0)
+                self.assertEqual(O.main([cmd, "x"]), 0, cmd)
+        finally:
+            for n, f in saved.items():
+                setattr(O, n, f)
+        self.assertEqual(calls, list(names))
+        self.assertEqual(O.main(["nope"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

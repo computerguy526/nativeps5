@@ -271,7 +271,7 @@ def usage():
 
 
 def main(argv):
-    if not argv or argv[0] not in ("check", "sidecar", "summary", "envdump"):
+    if not argv or argv[0] not in ("check", "sidecar", "sidecar-xf", "summary", "envdump"):
         return usage()
     return {"check": cmd_check, "sidecar": cmd_sidecar, "sidecar-xf": cmd_sidecar_xf, "summary": cmd_summary, "envdump": cmd_envdump}[argv[0]](argv[1:])
 
