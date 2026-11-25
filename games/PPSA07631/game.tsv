@@ -36,6 +36,7 @@ cache	kind=none
 env	NPS5_WINDOW_TITLE_NAME=Saros	-	window title label
 env	NPS5_GPU=kyty	gpu=kyty	back end selector word
 env	NPS5_SELF_MEM_LIMIT_MB=17408	gpu=kyty	SAROS runs at 15-16 GB; the limit is a guard, never raised to make a scene pass
+env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	record-time clocks instead of the preset's counter-heap timestamps (refused by the env_forbidden row below)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
 
 # ---- Facts ----

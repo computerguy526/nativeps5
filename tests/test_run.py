@@ -433,5 +433,25 @@ class Exec(unittest.TestCase):
             self.assertEqual(run.main(["PPSA00001", "--help"], dict(self.env)), 0)
 
 
+class ShippedGames(unittest.TestCase):
+    """Every shipped title's profile + preset must compose through check_final (v1.4 review B1: SAROS and Cronos were refused with
+    rc 78 because the preset's KYTY_EOP_TIMESTAMPS=gpu met their env_forbidden row with no override). No title is run."""
+
+    def test_every_shipped_title_composes(self):
+        root = os.path.abspath(os.path.join(HERE, ".."))
+        games = os.path.join(root, "games")
+        ids = sorted(t for t in os.listdir(games) if os.path.isfile(os.path.join(games, t, "game.tsv")))
+        self.assertTrue(ids)
+        env = dict(NPS5_GAMES_DIR=games, NPS5_PUBLIC_DIR=root, NPS5_SCRATCH=tempfile.mkdtemp(), NPS5_SELF_MEM_LIMIT_MB="18944", NPS5_RUN_REASON="shipped-title compose test",
+                   NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew")
+        for t in ids:
+            tid, opts = run.parse_args([t, "--bin", "/x/native"])
+            try:
+                plan = run.compose(tid, opts, dict(env))
+            except run.Refuse as e:
+                self.fail("%s is refused by check_final (rc %s): %s" % (t, e.code, e))
+            self.assertNotEqual(plan.env.get("KYTY_EOP_TIMESTAMPS"), "gpu", t)
+
+
 if __name__ == "__main__":
     unittest.main()

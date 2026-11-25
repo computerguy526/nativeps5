@@ -28,6 +28,7 @@ cache	kind=none
 env	NPS5_WINDOW_TITLE_NAME=Cronos	-	window title label
 env	NPS5_GPU=kyty	gpu=kyty	back end selector word
 env	NPS5_SELF_MEM_LIMIT_MB=18432	gpu=kyty	footprint guard for this title (17770 MiB was reached at about 8.5 min of a cold-cache session)
+env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	record-time clocks instead of the preset's counter-heap timestamps (refused by the env_forbidden row below)
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
 
 # ---- Facts ----
