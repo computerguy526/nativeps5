@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 20:00:00 +0000
+Subject: [PATCH] kosmickrisp: barrier memory modes map to MSL mem_flags without
+ undefined behaviour
+
+memory_modes_to_msl ended its switch in UNREACHABLE. Built with another toolchain, the optimiser turned the table
+lookup of a mode into a bare integer: threadgroup_barrier(4 | mem_flags::mem_threadgroup), which Metal rejects
+("invalid operands 'int' and 'metal::mem_flags'"), so every compute kernel with such a barrier failed to build (47 pipelines
+in the first v1.4 RC playtest on the macOS 26 laptop). kk_msl_mem_flag_for_mode is a total function (image -> texture,
+temporaries -> none, shared -> threadgroup, every other mode -> device, a safe superset). Test: kosmickrisp/tests/memflags.
+
+---
+diff --git a/src/kosmickrisp/compiler/kk_msl_memflags.h b/src/kosmickrisp/compiler/kk_msl_memflags.h
+new file mode 100644
+index 0000000..911101a
+--- /dev/null
++++ b/src/kosmickrisp/compiler/kk_msl_memflags.h
+@@ -0,0 +1,20 @@
++/* nps5: barrier / fence memory modes -> MSL mem_flags. A total function: every nir_variable_mode bit maps to a valid
++ * flag (the old switch ended in UNREACHABLE, so an unlisted mode was undefined behaviour and a toolchain could print a
++ * bare integer, "threadgroup_barrier(4 | mem_flags::mem_threadgroup)", which Metal rejects). */
++#ifndef KK_MSL_MEMFLAGS_H
++#define KK_MSL_MEMFLAGS_H
++
++static inline const char *
++kk_msl_mem_flag_for_mode(nir_variable_mode single_mode)
++{
++   if (single_mode == nir_var_image)
++      return "mem_flags::mem_texture";
++   if (single_mode == nir_var_function_temp || single_mode == nir_var_shader_temp)
++      return "mem_flags::mem_none";
++   if (single_mode == nir_var_mem_shared)
++      return "mem_flags::mem_threadgroup";
++   /* ssbo, global, ubo, constant, push constant and anything else: device memory (a safe superset) */
++   return "mem_flags::mem_device";
++}
++
++#endif
+diff --git a/src/kosmickrisp/compiler/nir_to_msl.c b/src/kosmickrisp/compiler/nir_to_msl.c
+index e295019..ae44011 100644
+--- a/src/kosmickrisp/compiler/nir_to_msl.c
++++ b/src/kosmickrisp/compiler/nir_to_msl.c
+@@ -11,6 +11,7 @@
+ #include "msl_private.h"
+ #include "msl_loop_cap.h"
+ #include "nir.h"
++#include "kk_msl_memflags.h"
+ #include "nir_builder.h"
+ 
+ static const char *
+@@ -1241,23 +1242,7 @@ memory_modes_to_msl(struct nir_to_msl_ctx *ctx, nir_variable_mode modes)
+       nir_variable_mode single_mode = (1 << i);
+       if (requires_or)
+          P(ctx, " | ");
+-      switch (single_mode) {
+-      case nir_var_image:
+-         P(ctx, "mem_flags::mem_texture");
+-         break;
+-      case nir_var_mem_ssbo:
+-      case nir_var_mem_global:
+-         P(ctx, "mem_flags::mem_device");
+-         break;
+-      case nir_var_function_temp:
+-         P(ctx, "mem_flags::mem_none");
+-         break;
+-      case nir_var_mem_shared:
+-         P(ctx, "mem_flags::mem_threadgroup");
+-         break;
+-      default:
+-         UNREACHABLE("bad_memory_mode");
+-      }
++      P(ctx, "%s", kk_msl_mem_flag_for_mode(single_mode));
+       requires_or = true;
+    }
+    if (!requires_or)
+-- 
+2.56.0
