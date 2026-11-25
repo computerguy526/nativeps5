@@ -79,7 +79,7 @@ PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
                  "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt",
-                 "metal-guests.tsv"}
+                 "metal-guests.tsv", "override-guard.baseline"}
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 # v1.2.1 (keys format 2, pairs format 3): per GPU class rows end with five short words: emitter mode, GPU class, near-exact rule,
@@ -196,6 +196,24 @@ def check_guests_list(data):
                 (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
             continue
         bad.append("line %d is not a `cs|fs|vs <kk key> <guest hash>` row, the format row or a comment" % n)
+        if len(bad) >= 3:
+            break
+    return bad
+
+
+# games/<title id>/override-guard.baseline (scripts/nps5lib/ovguard.py): shrink-only accepted findings, `cs|fs|vs:<kk key>` or `word:<KYTY_NAME>` + a reason. No code.
+BASELINE_ROW_RE = re.compile(rb"^(?:(?:cs|fs|vs):[0-9a-f]{16}|word:KYTY_[A-Z0-9_]+) [^{}\[\]]{3,300}$")
+
+
+def check_baseline_list(data):
+    """-> reasons a games/<id>/override-guard.baseline is refused: anything but short comments and `token reason` rows."""
+    if b"\0" in data or len(data) > (64 << 10):
+        return ["an override baseline is a short text file"]
+    bad = []
+    for n, line in enumerate(data.split(b"\n"), 1):
+        if not line or BASELINE_ROW_RE.match(line) or (line.startswith(b"#") and len(line) <= 300 and not re.search(rb"[{}]", line)):
+            continue
+        bad.append("line %d is not a `<cs|fs|vs>:<kk key>|word:<NAME> <reason>` row or a comment" % n)
         if len(bad) >= 3:
             break
     return bad
@@ -539,6 +557,10 @@ class Check:
             return
         if profile and profile.group(2) == "fast-math-deny.txt":
             for why in check_deny_list(data):
+                F(f": {why}")
+            return
+        if profile and profile.group(2) == "override-guard.baseline":
+            for why in check_baseline_list(data):
                 F(f": {why}")
             return
         if profile and profile.group(2) == "metal-guests.tsv":

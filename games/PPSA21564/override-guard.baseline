@@ -1,0 +1,9 @@
+# ovguard baseline (shrink-only): findings accepted for v1.4.0, each with its reason. A new finding is never added by the check, and an entry that no longer matches
+# a finding is an error (remove it). Tokens: cs:<kk key> | fs:<kk key> | vs:<kk key> | word:<KYTY_NAME>.
+cs:126d73d55c251115 no local program (digest e02dd709...) in any play cache: class or level not played yet; needs a cold run on that class to map its guest
+cs:4e5b13c9d031fb8f no local program (digest 890d929f...) in any play cache: class or level not played yet; needs a cold run on that class to map its guest
+fs:1d32563db057a71b no local program in any play cache: class or level not played yet; needs a cold run on that class to map its guest
+word:KYTY_CB_SHADER_MASK_EXPORTS pending the H2-H4 bisect and keyfit (does it move pair-FS keys of the override set)
+word:KYTY_NATIVE_FMINMAX pending the H2-H4 bisect (H0 showed it is not the cause of the compute misses) and keyfit
+word:KYTY_PS_PER_VERTEX pending the H2-H4 bisect and keyfit (25 pair rows still miss under the shipped words)
+word:KYTY_UNIFORM_BUFFERS pending the H2-H4 bisect and keyfit

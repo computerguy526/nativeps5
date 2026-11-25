@@ -333,5 +333,14 @@ class TestGuestSidecar(unittest.TestCase):
             self.assertTrue(C.check_guests_list(self.H + bad), bad)
 
 
+class TestOverrideBaseline(unittest.TestCase):
+    def test_baseline(self):
+        ok = b"# accepted\ncs:" + b"1" * 16 + b" no local program; needs a cold run\nword:KYTY_NATIVE_FMINMAX pending the bisect\n"
+        self.assertEqual(C.check_baseline_list(ok), [])
+        for bad in (b"cs:" + b"1" * 16 + b"\n", b"cs:" + b"1" * 15 + b" why not\n", b"word:notkyty why not\n", b"cs:" + b"1" * 16 + b" main() { return; }\n", b"a\0b"):
+            self.assertTrue(C.check_baseline_list(bad), bad)
+        self.assertTrue(C.PROFILE_RE.match("games/PPSA21564/override-guard.baseline"))
+
+
 if __name__ == "__main__":
     unittest.main()

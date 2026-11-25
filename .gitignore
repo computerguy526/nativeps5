@@ -28,6 +28,8 @@ __pycache__/
 !/games/*/metal-shaders.tsv
 !/games/*/metal-gfx-pairs.tsv
 !/games/*/metal-gfx-pairs.tsv.verified
+!/games/*/metal-guests.tsv
+!/games/*/override-guard.baseline
 !/games/*/metal-shaders.tsv.verified
 !titles/README.md
 # local data of the offline shader tools (tools/xray, tools/agxdis): dumps and outputs, never committed
