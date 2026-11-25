@@ -22,7 +22,7 @@
 #   forbidrow KEY[=VALUE] [why]; refused from any source (profile, preset, --env), exit 78
 #   marker    <name> <spec>; spec = log:<regex> | open:<regex> | present:<n>
 #   runsecs   default=<s> max=<s>
-#   cache     kind=kyplst|none [limit_mb=<n>] [app_ver=<x.y.z>]
+#   cache     kind=kyplst|journal|none [dir=player] [limit_mb=<n>] [app_ver=<x.y.z>]   (journal = no list: a stable per-player dir the title fills while played)
 #   addrbuild guest address (hex) [build=<version or eboot prefix>]
 #   stage     S0..S8 (evidence per stage is checked: see game.py STAGE_EVIDENCE)
 # Free keys: fact.<anything> is never read by a tool (people and the README only). Any other unknown key is an error.

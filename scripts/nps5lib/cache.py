@@ -101,7 +101,8 @@ def file_sha(path):
 
 class Ctx:
     """Everything one invocation needs. Built by context(); tests build it with explicit commits."""
-    def __init__(self, tid, environ, p, gpu, list_path, commits, hw, scratch, titles):
+    def __init__(self, tid, environ, p, gpu, list_path, commits, hw, scratch, titles, kind="kyplst"):
+        self.kind = kind
         self.tid, self.environ, self.p, self.gpu, self.list_path = tid, environ, p, gpu, list_path
         self.commits, self.hw, self.scratch, self.titles = commits, hw, scratch, titles
         self.list_sha = file_sha(list_path) if os.path.isfile(list_path) else "none"
@@ -111,6 +112,10 @@ class Ctx:
         self.key = stack_key(self.list_sha, commits["kyty"], self.kk_id, commits["ps5recomp"], hw, with_list=not self.incremental)
         self.root = os.path.join(scratch, "cache", tid)
         self.dir = os.path.join(self.root, "%s-%s" % (gpu, self.key))
+        # journal titles (no list) and `dir=player` rows: one stable dir per player, no stack key (Kyty's files reject themselves by header
+        # identity, the journal stores inputs and survives translator changes, KK's archive has its own stamp)
+        if kind == "journal" or "dir=player" in (p.one("cache", "") or "").split():
+            self.dir = os.path.join(self.root, "%s-player" % gpu)
         # the OS Metal cache id is per title / GPU family / OS build, NOT per stack key: an update (new Kyty / KK commit) keeps the compiled MSL->AIR work of every
         # unchanged shader text (upkeys 2026-11-25: about 29 % of the first-start card). `prepare` still removes the OS cache of this id before its passes.
         self.metal = metal_id(gpu, tid, re.sub(r"[^A-Za-z0-9_-]", "_", hw) or "hw")
@@ -143,7 +148,7 @@ def stack_commits(environ):
                 ps5recomp=pick("NPS5_STACK_RECOMP", e.get("NPS5_RECOMP_DIR")))
 
 
-def context(tid, environ, commits=None, hw=None):
+def context(tid, environ, commits=None, hw=None, kinds=("kyplst",)):
     environ = runmod.machine_env(environ)
     g = runmod._game()
     try:
@@ -151,7 +156,8 @@ def context(tid, environ, commits=None, hw=None):
     except g.Err as e:
         raise CacheError(str(e), 2)
     kind = (p.one("cache", "") or "").split()
-    if not any(w == "kind=kyplst" for w in kind):
+    row_kind = next((w.partition("=")[2] for w in kind if w.startswith("kind=")), "")
+    if row_kind not in kinds:
         raise CacheError("games/%s/game.tsv has no `cache kind=kyplst` row: this title has no pipeline-list cache" % tid, 2)
     tpath = os.path.join(environ.get("NPS5_PUBLIC_DIR", REPO), "titles", tid + ".env")
     titles = runmod.parse_titles_env(tpath, environ)
@@ -159,7 +165,12 @@ def context(tid, environ, commits=None, hw=None):
     if gpu not in ("kyty", "anyps5"):                 # it becomes part of folder names that are deleted and recreated
         raise CacheError("GPU must be kyty or anyps5 (titles/%s.env)" % tid, 2)
     return Ctx(tid, environ, p, gpu, os.path.join(p.dir, "pipelines.kyplst"), commits or stack_commits(environ),
-               hw or hw_key(environ), environ["NPS5_SCRATCH"], titles)
+               hw or hw_key(environ), environ["NPS5_SCRATCH"], titles, row_kind)
+
+
+def journal_words(ctx):
+    """Words of a `kind=journal` title: no pipeline list, the caches fill while it is played."""
+    return [("KYTY_PIPELINE_LIST", "0")]
 
 
 def driver_cap_mb(environ):

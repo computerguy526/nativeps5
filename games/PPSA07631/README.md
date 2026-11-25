@@ -71,10 +71,15 @@ scalability settings to 0 (`sg.*Quality=0` in the game user settings). Heavier s
 ## Shader cache
 
 There is no shipped pipeline list for SAROS: the game's shaders live in its Unreal containers, not in the executable, so the list
-tool cannot locate them. The caches build while you play: driver cache, program cache, KosmicKrisp archive, Metal libraries and the
-pipeline journal. A warm cache of a developer machine held about 12,400 Metal libraries, 173 archive segments and 2,930 program records;
-it is rebuilt on yours. The first start after a v1.3 update rebuilds every title's cache once (the shader recompiler changed). Optional
-cache compression: [disk-space](../../docs/reference/disk-space.md).
+tool cannot locate them. Instead the profile gives the title one stable cache folder per player (`cache kind=journal`):
+`<scratch>/cache/PPSA07631/kyty-player`. The caches build while you play and are saved every five minutes and on the way out: driver
+cache, program cache, KosmicKrisp archive, Metal libraries, the pipeline journal and the shader journal. **The first session compiles
+shaders while you play, as before (stutter for several minutes). Later sessions load these caches and start warm.** Quit with the
+window's close button so the caches are written. A warm cache of a developer machine held about 12,400 Metal libraries, 173 archive
+segments and 2,930 program records; it is rebuilt on yours. To start over, delete that folder (`nps5 run` makes it again).
+Limits: session 1 is as cold as before; a folder made by another machine or another build does not transfer. The first start after a
+v1.3 update rebuilds every title's cache once (the shader recompiler changed). Optional cache compression:
+[disk-space](../../docs/reference/disk-space.md).
 
 ## Known issues
 

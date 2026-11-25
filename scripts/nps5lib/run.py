@@ -498,7 +498,7 @@ def compose(tid, opts, environ=None, g=None):
     #     (minutes, once; the card counts), so a first launch never sits on a blank window. An explicit cache arm (cache=, or --env
     #     KYTY_PIPELINE_JOURNAL_PATH=..., as `nps5 cache record|prepare|check` pass) or NPS5_RUN_SHADER_CACHE=0 turns this off.
     explicit = cache or any(kv.startswith("KYTY_PIPELINE_JOURNAL_PATH=") for kv in opts.get("env", [])) or any(k == "KYTY_PIPELINE_JOURNAL_PATH" for k, _ in arm["env"])
-    if not explicit and environ.get("NPS5_RUN_SHADER_CACHE", "1") != "0" and "kind=kyplst" in (p.one("cache", "") or "") \
+    if not explicit and environ.get("NPS5_RUN_SHADER_CACHE", "1") != "0" and any(w in ("kind=kyplst", "kind=journal") for w in (p.one("cache", "") or "").split()) \
             and (titles.get("GPU") or p.one("gpu", "kyty")) == "kyty" and titles.get("APP0"):
         for k, v, note in shader_cache_words(tid, environ, titles["APP0"]):
             if k:
@@ -573,7 +573,14 @@ def shader_cache_words(tid, environ, app0):
         if here not in sys.path:
             sys.path.insert(0, here)
         import cache as cachemod
-        cx = cachemod.context(tid, environ)
+        cx = cachemod.context(tid, environ, kinds=("kyplst", "journal"))
+        if cx.kind == "journal":
+            fresh = not os.path.isdir(cx.dir) or not os.listdir(cx.dir)
+            os.makedirs(cx.dir, exist_ok=True)
+            out = [(k, v, None) for k, v in cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=False, environ=environ) + cachemod.journal_words(cx)]
+            if fresh:
+                out.append((None, None, "first session: shaders compile while you play; later sessions start from this cache (%s)" % cx.dir))
+            return out
         if not os.path.isfile(cx.list_path):
             return []
         words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")), environ=environ)

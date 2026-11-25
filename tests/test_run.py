@@ -5,6 +5,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("nps5run", os.path.join(HERE, "..", "scripts", "nps5lib", "run.py"))
 run = importlib.util.module_from_spec(spec); spec.loader.exec_module(run)
+sys.path.insert(0, os.path.join(HERE, "..", "scripts", "nps5lib"))
 
 GAME = """title_id\tPPSA00001
 name\tFixture
@@ -349,6 +350,99 @@ class T(unittest.TestCase):
         p = self.plan(["--scene", "scn", "--until", "marker:m+5,stall:20"])
         j = run._watch().judge_for(p)
         self.assertEqual((j.blank_fail, j.stall_fail, j.until["kind"], j.until["arg"], j.until["n"]), (33.0, 20.0, "log", "READY", 5.0))
+
+
+class CacheKinds(unittest.TestCase):
+    """uewarmC: `cache kind=journal` gives a stable per-player dir and no list words; kyplst and none plans are unchanged."""
+    BASE = GAME.replace("env\tLAYER=profile\n", "env\tLAYER=profile\n")
+
+    def mk(self, row):
+        d = tempfile.mkdtemp()
+        gd = os.path.join(d, "games", "PPSA00001"); os.makedirs(os.path.join(gd, "pad"))
+        open(os.path.join(gd, "game.tsv"), "w").write(self.BASE + (row + "\n" if row else "")
+                                                       + "env\tASTROHYBRID_CACHE_TITLE_ID=PPSA00001\tgpu=kyty\twhy\n")
+        open(os.path.join(gd, "scenes.tsv"), "w").write(SCENES)
+        open(os.path.join(gd, "pad", "pad.vpad"), "w").write("0:ly=1\n")
+        os.makedirs(os.path.join(d, "titles")); os.makedirs(os.path.join(d, "app0"))
+        open(os.path.join(d, "titles", "PPSA00001.env"), "w").write("APP0=%s\nBIN=/b/native\n" % os.path.join(d, "app0"))
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        env = dict(NPS5_GAMES_DIR=os.path.join(d, "games"), NPS5_SCRATCH=os.path.join(d, "s"), NPS5_PUBLIC_DIR=d, NPS5_SELF_MEM_LIMIT_MB="18944",
+                   NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew",
+                   NPS5_HW_CACHE_KEY="g16-25G83", NPS5_STACK_KYTY="aaaa111", NPS5_STACK_KK="bbbb222", NPS5_STACK_RECOMP="cccc333")
+        return d, env
+
+    def plan(self, row, extra=None, **kw):
+        d, env = self.mk(row); env.update(extra or {})
+        tid, opts = run.parse_args(["PPSA00001"] + kw.get("argv", []))
+        return d, env, run.compose(tid, opts, env)
+
+    CACHE_KEYS = ("KYTY_PROGRAM_CACHE_PATH", "KYTY_PIPELINE_JOURNAL_PATH", "KYTY_PIPELINE_KNOWN_PATH", "KYTY_PIPELINE_CACHE_PATH",
+                  "KYTY_SHADER_PRECOMPILE_PATH", "KK_PIPELINE_ARCHIVE_DIR", "KK_METAL_CACHE_ID")
+    LIST_KEYS = ("KYTY_PIPELINE_REPLAY_ALL", "KYTY_HELPER_PREWARM", "KK_LIBCACHE_DIR")
+
+    def test_journal_plan_has_the_cache_words_under_the_player_dir(self):
+        d, env, p = self.plan("cache\tkind=journal")
+        pdir = os.path.join(env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player")
+        for k in self.CACHE_KEYS:
+            self.assertIn(k, p.env, k); self.assertEqual(p.layers[k], "cache")
+        for k in self.CACHE_KEYS[:-1]:
+            self.assertTrue(p.env[k].startswith(pdir + "/") or p.env[k] == pdir + "/kk-archive" or p.env[k].startswith(pdir), (k, p.env[k]))
+        self.assertEqual(p.env["KK_METAL_CACHE_ID"], "com.nativeps5.kyty.PPSA00001.g16-25G83")
+        self.assertEqual(p.env["KYTY_PIPELINE_LIST"], "0")
+        self.assertEqual(p.env["ASTROHYBRID_CACHE_TITLE_ID"], "PPSA00001")
+        for k in self.LIST_KEYS:
+            self.assertNotIn(k, p.env, k)
+        self.assertTrue(os.path.isdir(pdir))
+        self.assertTrue([w for w in p.warnings if w.startswith("first session")])
+        # the second plan: the dir exists and holds files -> no first-session note
+        open(os.path.join(pdir, "x"), "w").close()
+        tid, opts = run.parse_args(["PPSA00001"]); p2 = run.compose(tid, opts, env)
+        self.assertFalse([w for w in p2.warnings if w.startswith("first session")]); self.assertEqual(p2.env["KYTY_PROGRAM_CACHE_PATH"], p.env["KYTY_PROGRAM_CACHE_PATH"])
+
+    def test_journal_plan_with_the_cache_off_has_none_of_it(self):
+        d, env, p = self.plan("cache\tkind=journal", dict(NPS5_RUN_SHADER_CACHE="0"))
+        for k in self.CACHE_KEYS + self.LIST_KEYS + ("KYTY_PIPELINE_LIST",):
+            self.assertNotIn(k, p.env, k)
+
+    def test_kyplst_without_a_list_and_none_plans_are_unchanged(self):
+        # kyplst: no pipelines.kyplst in the fixture -> no cache words at all (as before); none: nothing
+        for row in ("cache\tkind=kyplst", "cache\tkind=none", ""):
+            d, env, p = self.plan(row)
+            self.assertEqual([k for k, l in p.layers.items() if l == "cache"], [], row)
+            self.assertNotIn("KYTY_PIPELINE_LIST", p.env, row)
+            self.assertFalse(os.path.exists(os.path.join(env["NPS5_SCRATCH"], "cache")), row)
+
+    def test_kyplst_plan_matches_the_formula_of_the_list_path(self):
+        # a kyplst fixture with a list: the cache layer is exactly cache_env (+ libcache only when the dir has it) + launch_words, as before
+        d, env = self.mk("cache\tkind=kyplst")
+        open(os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"list")
+        tid, opts = run.parse_args(["PPSA00001"]); p = run.compose(tid, opts, env)
+        import cache as cm
+        cx = cm.context("PPSA00001", env)
+        want = dict(cm.cache_env("PPSA00001", cx.dir, cx.metal, with_libcache=False, environ=env)); want.update(dict(cm.launch_words(cx, os.path.join(d, "app0"))))
+        got = {k: v for k, v in p.env.items() if p.layers.get(k) == "cache"}
+        self.assertEqual(got, want)
+        self.assertTrue(cx.dir.endswith("kyty-" + cx.key)); self.assertNotIn("player", cx.dir)
+        self.assertEqual(got["KYTY_PIPELINE_LIST"], os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"))      # the list path, never the journal "0"
+
+    def test_astro_profile_cache_plan_is_unchanged(self):
+        # the shipped ASTRO profile (kind=kyplst with its list): same dir as the stack-key formula, same words, no journal word
+        root = os.path.abspath(os.path.join(HERE, ".."))
+        sc = tempfile.mkdtemp(); self.addCleanup(__import__("shutil").rmtree, sc, True)
+        app0 = os.path.join(sc, "app0"); os.makedirs(app0)
+        env = dict(NPS5_GAMES_DIR=os.path.join(root, "games"), NPS5_PUBLIC_DIR=sc, NPS5_SCRATCH=sc, NPS5_SELF_MEM_LIMIT_MB="18944", NPS5_KK_ICD="/kk/icd.json",
+                   NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew", NPS5_HW_CACHE_KEY="g16-25G83",
+                   NPS5_STACK_KYTY="aaaa111", NPS5_STACK_KK="bbbb222", NPS5_STACK_RECOMP="cccc333", NPS5_RUN_REASON="cache plan test")
+        os.makedirs(os.path.join(sc, "titles")); open(os.path.join(sc, "titles", "PPSA21564.env"), "w").write("APP0=%s\nBIN=/b/native\n" % app0)
+        out = run.shader_cache_words("PPSA21564", env, app0)
+        import cache as cm
+        cx = cm.context("PPSA21564", env)
+        self.assertEqual(cx.kind, "kyplst"); self.assertEqual(cx.dir, os.path.join(sc, "cache", "PPSA21564", "kyty-" + cx.key))
+        got = [(k, v) for k, v, _ in out if k]
+        want = cm.cache_env("PPSA21564", cx.dir, cx.metal, with_libcache=False, environ=env) + cm.launch_words(cx, app0)
+        self.assertEqual(got, want)
+        self.assertNotIn(("KYTY_PIPELINE_LIST", "0"), got)
+        self.assertFalse(os.path.exists(cx.dir))                                  # a kyplst plan creates no dir
 
 
 class EnvScript(unittest.TestCase):

@@ -30,7 +30,8 @@ gpu_profile_ban	on
 run_secs	default=150	max=300
 blank_fail_s	150
 stall_fail_s	180
-cache	kind=none
+# v1.4: no shipped list; one stable per-player cache dir (journal + programs + driver cache) the title fills while it is played, so session 2+ starts warm (README, Shader cache)
+cache	kind=journal
 
 # ---- Environment words (deltas over the preset; why: README.md, "What the profile needs") ----
 env	NPS5_WINDOW_TITLE_NAME=Saros	-	window title label
@@ -69,6 +70,11 @@ env	KYTY_DEPTH_GROW_RECREATE=1	gpu=kyty	a depth target narrower than the request
 env	KYTY_ALIAS_REBUILD_PRESERVE_TIGHT=1	gpu=kyty	a partial render-target rebuild moves only the blocks it owns
 env	KYTY_PIPELINE_TAKE_TIMEOUT_MS=8000	gpu=kyty	a draw waits at most 8 s for a pipeline build that never returns
 env	KYTY_CLOSE_SAVE_TIMEOUT_MS=5000	gpu=kyty	closing the window exits within 5 s
+env	ASTROHYBRID_CACHE_TITLE_ID=PPSA07631	gpu=kyty	cache files are named by the title id
+env	KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S=300	gpu=kyty	the shader caches are saved every 5 minutes while playing (not only on exit)
+env	KYTY_PIPELINE_CACHE_SAVE_QUIET_S=5	gpu=kyty	a save waits for 5 s without new compiles
+env	KYTY_PIPELINE_CACHE_SAVE_MIN_NEW=64	gpu=kyty	a periodic save needs at least 64 new entries
+env	KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1	gpu=kyty	caches saved when the process is terminated too
 env	KYTY_VRAM_BUDGET_MB=8000	gpu=kyty	GPU memory budget (the v1.3 memory-guard failure at 17.5 GB)
 env	KYTY_VRAM_IDLE_FRAMES=150	gpu=kyty	idle frames before GPU memory is trimmed
 env	NPS5_AVPLAYER_VT=1	-	video player timing (playbook row 179)

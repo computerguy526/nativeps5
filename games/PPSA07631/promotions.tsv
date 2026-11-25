@@ -36,3 +36,8 @@ PPSA07631	KYTY_BDA_PAGETABLE_MB=64	LOSS	playbook row 183 (unsafe: UE GPU address
 PPSA07631	NPS5_UECVAR_SET[r.RDG.AsyncCompute]=0	LOSS	playbook row 169 (+24 ms)	2026-11-24	rejected	main	
 PPSA07631	NPS5_UECVAR_SET[r.Nanite.MinPixelsPerEdgeHW]=1000000	LOSS	playbook row 171 (+11-15 ms, artifacts)	2026-11-24	rejected	main	
 PPSA07631	NPS5_UECVAR_SET[r.ReservedResources]=0	LOSS	playbook row 170 (memory guard)	2026-11-24	rejected	main	
+PPSA07631	ASTROHYBRID_CACHE_TITLE_ID=PPSA07631	KEEP	uewarm-2026-11-25 sec 0.4 / 3 (session 1 compiles live; 24/25 Nov box-3 sessions with the same words); measured numbers after uewarmC runs	2026-11-25	pending	uewarmC	per-player cache dir files
+PPSA07631	KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S=300	KEEP	uewarm-2026-11-25 sec 0.4 / 3 (session 1 compiles live; 24/25 Nov box-3 sessions with the same words); measured numbers after uewarmC runs	2026-11-25	pending	uewarmC	cache kind=journal: later sessions start warm
+PPSA07631	KYTY_PIPELINE_CACHE_SAVE_QUIET_S=5	KEEP	uewarm-2026-11-25 sec 0.4 / 3 (session 1 compiles live; 24/25 Nov box-3 sessions with the same words); measured numbers after uewarmC runs	2026-11-25	pending	uewarmC	cache kind=journal: later sessions start warm
+PPSA07631	KYTY_PIPELINE_CACHE_SAVE_MIN_NEW=64	KEEP	uewarm-2026-11-25 sec 0.4 / 3 (session 1 compiles live; 24/25 Nov box-3 sessions with the same words); measured numbers after uewarmC runs	2026-11-25	pending	uewarmC	cache kind=journal: later sessions start warm
+PPSA07631	KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1	KEEP	uewarm-2026-11-25 sec 0.4 / 3 (session 1 compiles live; 24/25 Nov box-3 sessions with the same words); measured numbers after uewarmC runs	2026-11-25	pending	uewarmC	cache kind=journal: later sessions start warm

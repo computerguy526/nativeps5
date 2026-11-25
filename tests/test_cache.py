@@ -123,6 +123,37 @@ class T(unittest.TestCase):
         rc, _, err = self.run_main(["status", "PPSA00001"])
         self.assertEqual(rc, 2); self.assertIn("no `cache kind=kyplst`", err)
 
+    def set_cache_row(self, row):
+        gp = os.path.join(self.tmp, "games", "PPSA00001", "game.tsv")
+        txt = open(gp).read().replace("cache\tkind=kyplst\tlimit_mb=448\tapp_ver=01.001.000", row)
+        open(gp, "w").write(txt)
+
+    def test_journal_kind_gets_one_stable_player_dir(self):
+        # uewarmC: `cache kind=journal` = no list, one dir per player, the same for any stack commit
+        self.set_cache_row("cache\tkind=journal")
+        both = ("kyplst", "journal")
+        a = cache.context("PPSA00001", dict(self.env), kinds=both)
+        b = cache.context("PPSA00001", dict(self.env), commits=dict(kyty="zzzz999", kk="yyyy888", ps5recomp="xxxx777"), kinds=both)
+        self.assertEqual(a.kind, "journal")
+        self.assertEqual(a.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player")); self.assertEqual(a.dir, b.dir)
+        self.assertEqual(cache.journal_words(a), [("KYTY_PIPELINE_LIST", "0")])
+
+    def test_journal_kind_is_refused_by_the_list_commands(self):
+        self.set_cache_row("cache\tkind=journal")
+        with self.assertRaises(cache.CacheError) as c:
+            self.ctx()
+        self.assertEqual(c.exception.code, 2); self.assertIn("no `cache kind=kyplst`", str(c.exception))
+        rc, _, err = self.run_main(["status", "PPSA00001"])
+        self.assertEqual(rc, 2); self.assertIn("no `cache kind=kyplst`", err)
+
+    def test_kyplst_dir_player_word_and_plain_kyplst_unchanged(self):
+        plain = self.ctx()
+        self.assertTrue(plain.dir.endswith("cache/PPSA00001/kyty-" + plain.key)); self.assertEqual(plain.kind, "kyplst")
+        self.set_cache_row("cache\tkind=kyplst\tdir=player\tlimit_mb=448")
+        pl = self.ctx()
+        self.assertEqual(pl.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player"))
+        self.assertEqual(pl.key, plain.key)                                   # the key itself is still computed (list identity)
+
     # ---- status
     def test_status_fresh_partial_prepared_stale(self):
         c = self.ctx()

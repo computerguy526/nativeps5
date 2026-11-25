@@ -193,11 +193,12 @@ def v_runsecs(v, a):
     if not w or not all(re.fullmatch(r"(default|max)=\d+", x) for x in w): return "default=<s> max=<s> expected"
 def v_cache(v, a):
     w = " ".join(v).split(); kv = dict(x.partition("=")[::2] for x in w)
-    if kv.get("kind") not in ("kyplst", "none"): return "kind=kyplst|none required"
+    if kv.get("kind") not in ("kyplst", "journal", "none"): return "kind=kyplst|journal|none required"
     for k, val in kv.items():
         if k == "limit_mb" and not val.isdigit(): return "limit_mb must be decimal"
         if k == "app_ver" and not re.fullmatch(r"\d+(\.\d+)+", val): return "app_ver must look like 01.007.000"
-        if k not in ("kind", "limit_mb", "app_ver"): return "unknown cache word %r" % k
+        if k == "dir" and val != "player": return "dir must be player"
+        if k not in ("kind", "limit_mb", "app_ver", "dir"): return "unknown cache word %r" % k
 def v_addrbuild(v, a):
     w = " ".join(v).split()
     if not w or not re.fullmatch(r"0x[0-9a-fA-F]+", w[0]): return "guest address (hex) first"

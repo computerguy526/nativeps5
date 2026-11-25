@@ -61,6 +61,22 @@ class CheckTests(Base):
         errs, warns = self.check()
         self.assertEqual(errs, [])
 
+    def test_cache_kinds(self):
+        # uewarmC: kind=journal is valid (with dir=player), kind=foo is still refused
+        for row, ok in (("cache\tkind=journal\n", True), ("cache\tkind=kyplst\tdir=player\tlimit_mb=448\n", True), ("cache\tkind=none\n", True),
+                        ("cache\tkind=foo\n", False), ("cache\tkind=journal\tdir=elsewhere\n", False)):
+            errs, _ = self.check(game_tsv=GAME + row)
+            self.assertEqual(errs == [], ok, (row, errs))
+
+    def test_saros_cache_rows(self):
+        p = game.Profile(os.path.join(game.REPO, "games", "PPSA07631"))
+        self.assertEqual(p.one("cache"), "kind=journal")
+        rows = {r[0] for r in p.get("env")}
+        for w in ("ASTROHYBRID_CACHE_TITLE_ID=PPSA07631", "KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S=300", "KYTY_PIPELINE_CACHE_SAVE_QUIET_S=5",
+                  "KYTY_PIPELINE_CACHE_SAVE_MIN_NEW=64", "KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1"):
+            self.assertIn(w, rows)
+        self.assertFalse([w for w in rows if w.startswith("KK_METAL_CACHE_ID")])
+
     def test_missing_required(self):
         errs, _ = self.check(game_tsv=GAME.replace("gpu\tkyty\n", ""))
         self.assertTrue(self.has(errs, "missing required key 'gpu'"))
