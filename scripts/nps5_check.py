@@ -183,7 +183,7 @@ def check_deny_list(data):
 
 
 # games/<title id>/metal-guests.tsv (scripts/nps5lib/ovguard.py): guest shader hash of each Metal override key. Hashes only.
-GUESTS_ROW_RE = re.compile(rb"^(?:cs|fs)\t[0-9a-f]{16}\t[0-9a-f]{16}$")
+GUESTS_ROW_RE = re.compile(rb"^(?:cs|fs|vs)\t[0-9a-f]{16}\t[0-9a-f]{16}$")
 
 
 def check_guests_list(data):
@@ -195,7 +195,7 @@ def check_guests_list(data):
         if not line or GUESTS_ROW_RE.match(line) or line == b"format\tnps5-metal-guests\t1" or \
                 (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
             continue
-        bad.append("line %d is not a `cs|fs <kk key> <guest hash>` row, the format row or a comment" % n)
+        bad.append("line %d is not a `cs|fs|vs <kk key> <guest hash>` row, the format row or a comment" % n)
         if len(bad) >= 3:
             break
     return bad

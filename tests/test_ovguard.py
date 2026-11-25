@@ -15,7 +15,7 @@ KEYS = O.override_keys(CS, GFX)
 
 class T(unittest.TestCase):
     def test_keys(self):
-        self.assertEqual(KEYS, {"cs": {K1}, "fs": {K2}})        # the `kk` class row (text '-') is not an override
+        self.assertEqual(KEYS, {"cs": {K1}, "fs": {K2}, "vs": {"4" * 16}})        # the `kk` class row (text '-') is not an override
 
     def test_high_accuracy_needs_nothing(self):
         self.assertEqual(O.check_profile(KEYS, None, set(), {}, strict=True, words=False), ([], []))
@@ -48,6 +48,30 @@ class T(unittest.TestCase):
         _, w = O.check_profile(KEYS, {("cs", K1): {D1}, ("fs", K2): {D2}, ("cs", "9" * 16): {D1}}, {D1, D2}, {"KYTY_GPU_ACCURACY": "low"})
         self.assertEqual(len(w), 1)
 
+    def test_normal_and_fast_math_levels_need_fs_cs(self):
+        side = {("cs", K1): {D1}, ("fs", K2): {D2}}
+        for env in ({"KYTY_GPU_ACCURACY": "normal"}, {"KYTY_FAST_MATH": "1"}, {"KYTY_FAST_MATH": "2"}):
+            self.assertEqual(len(O.check_profile(KEYS, side, {D1}, env, words=False)[0]), 1, env)       # fs guest D2 not denied
+            self.assertEqual(O.check_profile(KEYS, side, {D1, D2}, env, words=False), ([], []), env)
+        self.assertEqual(O.check_profile(KEYS, side, set(), {"KYTY_FAST_MATH": "0", "KYTY_GPU_ACCURACY": "high"}, words=False), ([], []))
+
+    def test_vertex_stage_only_with_fast_math_vs(self):
+        V = "4" * 16; DV = "d" * 16
+        side = {("cs", K1): {D1}, ("fs", K2): {D2}, ("vs", V): {DV}}
+        low = {"KYTY_GPU_ACCURACY": "low"}
+        # ACCURACY=low alone: the vertex guest need not be denied (and is not even required in the sidecar)
+        self.assertEqual(O.check_profile(KEYS, {("cs", K1): {D1}, ("fs", K2): {D2}}, {D1, D2}, low, words=False), ([], []))
+        self.assertEqual(O.check_profile(KEYS, side, {D1, D2}, low, words=False), ([], []))
+        for env in (dict(low, KYTY_FAST_MATH_VS="1"), {"KYTY_FAST_MATH": "3"}, dict(low, KYTY_FAST_MATH="3")):
+            e, _ = O.check_profile(KEYS, side, {D1, D2}, env, words=False)
+            self.assertEqual(len(e), 1, env); self.assertIn(DV, e[0])                                        # vs guest not denied
+            self.assertEqual(O.check_profile(KEYS, side, {D1, D2, DV}, env, words=False)[0], [], env)
+            e, _ = O.check_profile(KEYS, {("cs", K1): {D1}, ("fs", K2): {D2}}, {D1, D2}, env, words=False)
+            self.assertEqual(len(e), 1, env)                                                                 # vs key missing in the sidecar
+        # FAST_MATH_VS alone (accuracy high): cs/fs are untouched, only vs needs a deny
+        self.assertEqual(O.check_profile(KEYS, {("vs", V): {DV}}, {DV}, {"KYTY_FAST_MATH_VS": "1"}, words=False), ([], []))
+        self.assertEqual(len(O.check_profile(KEYS, {("vs", V): {DV}}, set(), {"KYTY_FAST_MATH_VS": "1"}, words=False)[0]), 1)
+
     def test_risky_words(self):
         env = {"KYTY_NATIVE_FMINMAX": "1", "KYTY_UNIFORM_BUFFERS": "1"}
         e, w = O.check_profile(KEYS, None, set(), env)
@@ -67,6 +91,7 @@ class T(unittest.TestCase):
         self.assertTrue(O.parse_sidecar([["cs", K1, D1]])[1])
         self.assertTrue(O.parse_sidecar([["format", "nps5-metal-guests", "1"], ["cs", "zz", D1]])[1])
         self.assertTrue(O.parse_sidecar([["format", "nps5-metal-guests", "1"], ["gs", K1, D1]])[1])
+        self.assertEqual(O.parse_sidecar([["format", "nps5-metal-guests", "1"], ["vs", K1, D1]])[1], [])
 
     def test_summary(self):
         log = ("[kk-mslinject] seen %s len=9 compute canon=%s\n[kk-mslinject] seen %s\n[kk-mslinject] override %s local_size 32 1 1\n"
@@ -92,6 +117,7 @@ class T(unittest.TestCase):
         xf = ["cs %s %s" % (D1, "0" * 32), "ps %s %s" % (D2, "7" * 32), "vs %s %s" % ("c" * 16, "8" * 32), "garbage"]
         gfx = [["gfx", "9" * 32, "x:0", "7" * 32, "y:0", "4" * 16, K2, "5" * 64, "6" * 64, "twin"]]
         self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf), {("cs", K1, D1), ("fs", K2, D2)})
+        self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf + ["vs %s %s" % ("c" * 16, "9" * 32)]), {("cs", K1, D1), ("fs", K2, D2), ("vs", "4" * 16, "c" * 16)})
         self.assertEqual(O.xf_sidecar_rows(CS, gfx, xf[:1]), {("cs", K1, D1)})        # a key with no digest hit stays unmapped
 
 

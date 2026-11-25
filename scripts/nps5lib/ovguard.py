@@ -8,7 +8,7 @@ compute kernel / fragment stage is in games/<id>/fast-math-deny.txt.
 
 Rows carry only KosmicKrisp keys, so the guest hash comes from a sidecar, games/<id>/metal-guests.tsv (hashes only, no code):
     format<TAB>nps5-metal-guests<TAB>1
-    cs|fs<TAB><kk key, 16 hex><TAB><guest hash, 16 hex>        (one row per pair; a key may map to several guests)
+    cs|fs|vs<TAB><kk key, 16 hex><TAB><guest hash, 16 hex>        (one row per pair; a key may map to several guests)
 Generate it from a cold run's guest -> KosmicKrisp key map (`stage guest kk [windows]` lines):
     python3 -I scripts/nps5lib/ovguard.py sidecar games/<id> MAP.tsv
 
@@ -45,13 +45,14 @@ def read_rows(path):
 
 def override_keys(shaders_rows, pairs_rows):
     """-> {'cs': {kk key}, 'fs': {kk key}} of rows that carry our own text (a `kk` class row has '-' hashes: KosmicKrisp's own shader)."""
-    out = {"cs": set(), "fs": set()}
+    out = {"cs": set(), "fs": set(), "vs": set()}
     for r in shaders_rows or ():
         if len(r) >= 4 and HEX32.match(r[0]) and HEX16.match(r[2]) and r[3] != "-":
             out["cs"].add(r[2])
     for r in pairs_rows or ():
         if len(r) >= 9 and r[0] == "gfx" and HEX16.match(r[6]) and r[8] != "-":
             out["fs"].add(r[6])
+            out["vs"].add(r[5])
     return out
 
 
@@ -61,8 +62,8 @@ def parse_sidecar(rows):
     if not rows or tuple(rows[0][:3]) != SIDECAR_HEAD:
         return m, ["first row must be: format<TAB>nps5-metal-guests<TAB>1"]
     for i, r in enumerate(rows[1:], 2):
-        if len(r) != 3 or r[0] not in ("cs", "fs") or not HEX16.match(r[1]) or not HEX16.match(r[2]):
-            bad.append("row %d: expected cs|fs <16 hex kk key> <16 hex guest hash>" % i)
+        if len(r) != 3 or r[0] not in ("cs", "fs", "vs") or not HEX16.match(r[1]) or not HEX16.match(r[2]):
+            bad.append("row %d: expected cs|fs|vs <16 hex kk key> <16 hex guest hash>" % i)
             continue
         m.setdefault((r[0], r[1]), set()).add(r[2])
     return m, bad
@@ -78,22 +79,30 @@ def check_profile(keys, sidecar, deny, env, strict=False, words=True):
     nkeys = len(keys["cs"]) + len(keys["fs"])
     if not nkeys:
         return errs, warns
+    # What alters SPIR-V (source: spirvEmitterAlu.cpp FastMathLevel/FastMathVertex, CodegenOptions.cpp): KYTY_GPU_ACCURACY normal|low and
+    # KYTY_FAST_MATH>=1 give pixel/compute shaders (cs, fs) fast math unless denied; the vertex stage only with KYTY_FAST_MATH_VS=1 or KYTY_FAST_MATH>=3.
     acc = env.get("KYTY_GPU_ACCURACY", "high")
-    if acc != "high":
-        if sidecar is None:
+    fm = _int(env.get("KYTY_FAST_MATH", "0"))
+    fsc = acc in ("normal", "low") or fm >= 1
+    vs = env.get("KYTY_FAST_MATH_VS", "0") not in ("", "0") or fm >= 3
+    kinds = (["cs", "fs"] if fsc else []) + (["vs"] if vs else [])
+    why = "ACCURACY=%s FAST_MATH=%s FAST_MATH_VS=%s" % (acc, fm, env.get("KYTY_FAST_MATH_VS", "0"))
+    if kinds:
+        need = sum(len(keys[k]) for k in kinds)
+        if need and sidecar is None:
             (errs if strict else warns).append(
-                "KYTY_GPU_ACCURACY=%s and %d override keys, but no %s: cannot prove the keys survive fast math" % (acc, nkeys, SIDECAR))
-        else:
-            for kind in ("cs", "fs"):
+                "%s and %d override keys of stages %s, but no %s: cannot prove the keys survive fast math" % (why, need, "/".join(kinds), SIDECAR))
+        elif need:
+            for kind in kinds:
                 for kk in sorted(keys[kind]):
                     g = sidecar.get((kind, kk))
                     if not g:
-                        errs.append("%s override key %s has no guest hash in %s (add it: every row needs one while ACCURACY=%s)" % (kind, kk, SIDECAR, acc))
+                        errs.append("%s override key %s has no guest hash in %s (add it: every row needs one while %s)" % (kind, kk, SIDECAR, why))
                     elif not g <= deny:
-                        errs.append("%s override key %s: guest %s is not in fast-math-deny.txt (ACCURACY=%s gives it fast math: the key moves, the override misses)"
-                                    % (kind, kk, ",".join(sorted(g - deny)), acc))
+                        errs.append("%s override key %s: guest %s is not in fast-math-deny.txt (%s gives it fast math: the key moves, the override misses)"
+                                    % (kind, kk, ",".join(sorted(g - deny)), why))
     if sidecar is not None:
-        known = {(k, v) for k in ("cs", "fs") for v in keys[k]}
+        known = {(k, v) for k in ("cs", "fs", "vs") for v in keys[k]}
         for k in sorted(set(sidecar) - known):
             warns.append("%s sidecar key %s has no override row (stale)" % k)
     if words:
@@ -101,6 +110,13 @@ def check_profile(keys, sidecar, deny, env, strict=False, words=True):
             if w in env and bad(env[w], env):
                 (errs if strict else warns).append("%s=%s: %s; prove it key-neutral for the override set or deny-cover it" % (w, env[w], why))
     return errs, warns
+
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
 
 
 def resolve_env(repo, gid):
@@ -149,9 +165,9 @@ def cmd_sidecar(args):
     rows = set()
     # map columns: stage guest kk [windows]
     for r in read_rows(mp) or ():
-        if len(r) >= 3 and r[0] in ("cs", "fs") and HEX16.match(r[1]) and HEX16.match(r[2]) and r[2] in keys[r[0]]:
+        if len(r) >= 3 and r[0] in ("cs", "fs", "vs") and HEX16.match(r[1]) and HEX16.match(r[2]) and r[2] in keys[r[0]]:
             rows.add((r[0], r[2], r[1]))
-    miss = {(k, v) for k in ("cs", "fs") for v in keys[k]} - {(a, b) for a, b, _ in rows}
+    miss = {(k, v) for k in ("cs", "fs", "vs") for v in keys[k]} - {(a, b) for a, b, _ in rows}
     write_sidecar(d, rows)
     print("ovguard: wrote %d rows; %d override keys have no guest hash yet" % (len(rows), len(miss)))
     return 0
@@ -203,7 +219,7 @@ def xf_sidecar_rows(compute_rows, gfx_rows, xf_lines):
     g = {}
     for l in xf_lines:
         f = l.split()
-        if len(f) == 3 and f[0] in ("cs", "ps") and HEX16.match(f[1]) and HEX32.match(f[2]):
+        if len(f) == 3 and f[0] in ("cs", "ps", "vs") and HEX16.match(f[1]) and HEX32.match(f[2]):
             g.setdefault((f[0], f[2]), set()).add(f[1])
     rows = set()
     for r in compute_rows or ():
@@ -212,6 +228,8 @@ def xf_sidecar_rows(compute_rows, gfx_rows, xf_lines):
     for r in gfx_rows or ():
         if len(r) >= 9 and r[0] == "gfx" and HEX32.match(r[3]) and HEX16.match(r[6]) and r[8] != "-":
             rows |= {("fs", r[6], x) for x in g.get(("ps", r[3]), ())}
+        if len(r) >= 9 and r[0] == "gfx" and HEX32.match(r[1]) and HEX16.match(r[5]) and r[7] != "-":
+            rows |= {("vs", r[5], x) for x in g.get(("vs", r[1]), ())}
     return rows
 
 
