@@ -110,12 +110,15 @@ class PrivacyGate(unittest.TestCase):
         self.assertTrue(C.check_promotions_list(b"format\tnps5-promotions\t1\nPPSA00001\tA=1\tKEEP\t/Users/x/doc\t2026-11-25\tpending\to\n"))
 
 
+EMPTY_OK = ("PPSA24096", "PPSA30552")
+
+
 class Shipped(unittest.TestCase):
     def test_registers_wellformed(self):
         for t in P.titles_with_register(REPO):
             rows, bad = P.read_register(REPO, t)
             self.assertEqual(bad, [], t)
-            self.assertTrue(rows)
+            self.assertTrue(rows or t in EMPTY_OK, t)         # the bring-up titles carry an empty register (header only) so strict mode does not skip them
 
     def test_compose_real_profile(self):
         for t in P.titles_with_register(REPO):
