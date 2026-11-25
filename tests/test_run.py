@@ -278,6 +278,9 @@ class T(unittest.TestCase):
         self.assertEqual(run.parse_arm("K=V")["label"], None); self.assertEqual(run.parse_arm(None)["env"], [])
         for bad in ("A:K", "A:bin=/a,bin=/b", "A:1x=2", "nothing"):
             with self.assertRaises(run.Refuse, msg=bad): run.parse_arm(bad)
+        for bad in ("A:lib=/x/kyty_gpu.dylib", "A:libs=/x/kyty_gpu.dylib"):      # lib=/libs= is the AnyPS5 folder, not the Kyty dylib (kyty=)
+            with self.assertRaises(run.Refuse, msg=bad): run.parse_arm(bad)
+        self.assertEqual(run.parse_arm("A:kyty=/x/kyty_gpu.dylib")["pieces"], {"kyty": "/x/kyty_gpu.dylib"})
 
     # ---- queue
     def test_queue_fifo_and_func_passes_held_perf(self):

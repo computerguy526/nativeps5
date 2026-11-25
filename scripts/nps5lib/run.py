@@ -127,6 +127,8 @@ def parse_arm(spec):
             raise Refuse("--arm %r: %r is not KEY=VALUE" % (spec, item), 2)
         if k in RESERVED:
             k = "libs" if k == "lib" else k
+            if k == "libs" and v.endswith(".dylib"):
+                raise Refuse("--arm %r: libs= (alias lib=) is the AnyPS5 libraries FOLDER; a .dylib is the Kyty library: use kyty=<path to kyty_gpu.dylib>" % spec, 2)
             if k in arm["pieces"]:
                 raise Refuse("--arm %r: %s given twice" % (spec, k), 2)
             arm["pieces"][k] = v
