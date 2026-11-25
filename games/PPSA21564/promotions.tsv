@@ -18,5 +18,5 @@ PPSA21564	KYTY_WAVE64_WARPS=1	NEUTRAL	D99 / playbook row 198	2026-11-25	optin	ma
 PPSA21564	KYTY_PIPELINE_SKIP_FAULT_BUFFER=1	NEUTRAL	D99 / playbook row 199	2026-11-25	optin	main	
 PPSA21564	KYTY_IDLE_FLUSH_REFRESH_US=200	NEUTRAL	D100 / playbook row 200	2026-11-25	optin	main	
 PPSA21564	KYTY_HOSTED_RETRIED_WRITES=1	NEUTRAL	D101 / playbook row 202	2026-11-25	optin	main	
-PPSA21564	KYTY_FOOTPRINT_GOVERNOR=1	KEEP	memgrow-2026-11-25 section 4 (safety net; unit-tested, no title run yet)	2026-11-25	pending	memgov	makes the exit-86 rarer, does not remove it; measure frame cost on Sky Garden + hero_ape_escape
-PPSA21564	KYTY_RSCALE_HOLD_ON_LOAD=1	KEEP	memgrow-2026-11-25 section 4 (unit-tested, no title run yet)	2026-11-25	pending	memgov	needs the recomp runtime with the hold (nps5 build again)
+PPSA21564	KYTY_FOOTPRINT_GOVERNOR=1	KEEP	memgrow-2026-11-25 section 4 (safety net; unit-tested, no title run yet)	2026-11-25	landed 30e51dd	memgov	makes the exit-86 rarer, does not remove it; measure frame cost on Sky Garden + hero_ape_escape
+PPSA21564	KYTY_RSCALE_HOLD_ON_LOAD=1	KEEP	memgrow-2026-11-25 section 4 (unit-tested, no title run yet)	2026-11-25	landed 30e51dd	memgov	needs the recomp runtime with the hold (nps5 build again)
