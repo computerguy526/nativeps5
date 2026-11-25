@@ -154,6 +154,184 @@ class T(unittest.TestCase):
         self.assertEqual(pl.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player"))
         self.assertEqual(pl.key, plain.key)                                   # the key itself is still computed (list identity)
 
+    # ---- T6: stable cache dir (cachekey)
+    def stable_env(self, **kw):
+        e = dict(self.env); e["NPS5_CACHE_STABLE_DIR"] = "1"; e.update(kw); return e
+
+    def sctx(self, env=None, **kw):
+        return cache.context("PPSA00001", env or self.stable_env(), **kw)
+
+    def mkdir_old(self, name, files=("PPSA00001.programs.bin",), hw=None, age=0, tid="PPSA00001", gpu_root=None):
+        d = os.path.join(self.env["NPS5_SCRATCH"], "cache", tid, name); os.makedirs(os.path.join(d, "kk-archive", "stamp1"))
+        for f in files:
+            open(os.path.join(d, f), "w").write("x" * 10)
+        open(os.path.join(d, "kk-archive", "stamp1", "seg-0.mtl4a"), "w").write("seg")
+        if hw: open(os.path.join(d, "prepared.tsv"), "w").write("key=aaaa\nrc=0\nhw=%s\nkyty=oldkyty\n" % hw)
+        t = time.time() - age
+        for dp, dn, fn in os.walk(d):
+            for n in dn + fn: os.utime(os.path.join(dp, n), (t, t))
+        os.utime(d, (t, t))
+        return d
+
+    def test_t6_stable_dir_name_ignores_commits_and_follows_hw(self):
+        a = self.sctx()
+        b = self.sctx(commits=dict(kyty="zzzz999", kk="yyyy888", ps5recomp="xxxx777"))
+        open(a.list_path, "ab").write(b"new list\n")
+        c = self.sctx()
+        self.assertTrue(a.stable_dir)
+        self.assertEqual(a.dir, b.dir); self.assertEqual(a.dir, c.dir)
+        self.assertEqual(a.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", cache.stable_name("kyty", "g16-25G83")))
+        self.assertTrue(os.path.basename(a.dir).startswith("kyty-stable-")); self.assertTrue(cache.STABLE_RE.match(os.path.basename(a.dir)))
+        e = self.stable_env(NPS5_HW_CACHE_KEY="g17-26A1")
+        d = self.sctx(env=e)
+        self.assertNotEqual(a.dir, d.dir)
+        self.assertNotEqual(a.key, b.key)                             # the real stack key is still computed (prepared.tsv, STACK.txt)
+        self.assertEqual(a.metal, b.metal)
+
+    def test_t6_gate_off_is_the_old_key_bit_for_bit(self):
+        plain = self.ctx()
+        self.assertFalse(plain.stable_dir)
+        self.assertTrue(plain.dir.endswith("cache/PPSA00001/kyty-" + plain.key))
+        off = self.sctx(env=self.stable_env(NPS5_CACHE_STABLE_DIR="0"))
+        self.assertEqual((off.dir, off.key), (plain.dir, plain.key))
+        self.assertEqual(self.sctx(env=self.stable_env(NPS5_CACHE_STABLE_DIR="")).dir, plain.dir)     # unset-like = off without a profile row
+        # unrelated switches that mention nothing: never the gate
+        self.assertEqual(cache.context("PPSA00001", dict(self.env, NPS5_CACHE_COMPRESS="1")).dir, plain.dir)
+
+    def test_t6_profile_env_row_turns_it_on_and_env_zero_beats_it(self):
+        gp = os.path.join(self.tmp, "games", "PPSA00001", "game.tsv")
+        open(gp, "a").write("env\tNPS5_CACHE_STABLE_DIR=1\tgpu=kyty\tcachekey\n")
+        on = cache.context("PPSA00001", dict(self.env))
+        self.assertTrue(on.stable_dir)
+        off = cache.context("PPSA00001", dict(self.env, NPS5_CACHE_STABLE_DIR="0"))
+        self.assertFalse(off.stable_dir); self.assertTrue(off.dir.endswith("kyty-" + off.key))
+
+    def test_t6_player_dir_rows_keep_their_name(self):
+        self.set_cache_row("cache\tkind=kyplst\tdir=player\tlimit_mb=448")
+        self.assertEqual(self.sctx().dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player"))
+
+    def test_t6_adoption_picks_newest_compatible_and_keeps_the_source(self):
+        old = self.mkdir_old("kyty-11111111", hw="g16-25G83", age=5000)
+        new = self.mkdir_old("kyty-22222222", hw="g16-25G83", age=100)
+        other_hw = self.mkdir_old("kyty-33333333", hw="g17-26A1", age=1)          # newest, but built for another hardware key
+        empty = os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-44444444"); os.makedirs(empty)
+        player = self.mkdir_old("kyty-player", age=1)                              # not a stack-keyed dir
+        cx = self.sctx()
+        self.assertEqual([os.path.basename(d) for _, d in cache.sibling_candidates(cx)], ["kyty-22222222", "kyty-11111111"])
+        before = cache.tree_manifest(new)
+        msgs = []
+        st, src = cache.adopt_sibling(cx, msgs.append)
+        self.assertEqual((st, src), ("adopted", "kyty-22222222"))
+        self.assertEqual(cache.tree_manifest(cx.dir), before)                      # verified clone
+        self.assertEqual(cache.tree_manifest(new), before)                          # source untouched
+        for d in (old, other_hw, empty, player): self.assertTrue(os.path.isdir(d))
+        self.assertFalse(os.path.lexists(cx.dir + ".adopting"))
+        # a second call never touches the existing stable dir
+        open(os.path.join(cx.dir, "mine"), "w").write("1")
+        self.assertEqual(cache.adopt_sibling(cx), ("have", None)); self.assertTrue(os.path.isfile(os.path.join(cx.dir, "mine")))
+
+    def test_t6_adoption_takes_dirs_that_do_not_say_their_hw_and_skips_empty_ones(self):
+        self.mkdir_old("kyty-aaaaaaaa")                                             # a player-filled dir: no prepared.tsv
+        self.assertEqual(cache.adopt_sibling(self.sctx())[0], "adopted")
+        s2 = os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001"); shutil.rmtree(os.path.join(s2, cache.stable_name("kyty", "g16-25G83")))
+        shutil.rmtree(os.path.join(s2, "kyty-aaaaaaaa")); os.makedirs(os.path.join(s2, "kyty-bbbbbbbb"))
+        self.assertEqual(cache.adopt_sibling(self.sctx()), ("empty", None))
+        self.assertFalse(os.path.exists(self.sctx().dir))
+
+    def test_t6_never_touches_other_titles_or_gpus(self):
+        other_title = self.mkdir_old("kyty-55555555", hw="g16-25G83", tid="PPSA99999")
+        other_gpu = self.mkdir_old("anyps5-66666666", hw="g16-25G83")
+        snap = (cache.tree_manifest(other_title), cache.tree_manifest(other_gpu))
+        cx = self.sctx()
+        self.assertEqual(cache.sibling_candidates(cx), [])
+        self.assertEqual(cache.adopt_sibling(cx), ("empty", None))
+        self.assertEqual(cache.prepare_stable_dir(cx), [])
+        self.assertEqual((cache.tree_manifest(other_title), cache.tree_manifest(other_gpu)), snap)
+        self.assertTrue(os.path.isdir(cx.dir))                                      # created empty, with STACK.txt only
+        self.assertEqual(sorted(os.listdir(cx.dir)), [cache.STACK_FILE])
+
+    def test_t6_failed_clone_leaves_nothing_and_the_source_alone(self):
+        src = self.mkdir_old("kyty-77777777", hw="g16-25G83")
+        cx = self.sctx(); snap = cache.tree_manifest(src)
+        real = cache.subprocess.run
+        class R: returncode = 1; stderr = b"no clone"
+        cache.subprocess.run = lambda *a, **k: R()
+        try:
+            self.assertEqual(cache.adopt_sibling(cx), ("failed", "kyty-77777777"))
+        finally:
+            cache.subprocess.run = real
+        self.assertFalse(os.path.exists(cx.dir)); self.assertFalse(os.path.lexists(cx.dir + ".adopting")); self.assertEqual(cache.tree_manifest(src), snap)
+        # a clone that differs from the source (verify catches it)
+        def bad(cmd, **k):
+            real(["cp", "-R", cmd[3], cmd[4]], capture_output=True); os.remove(os.path.join(cmd[4], "PPSA00001.programs.bin"))
+            class Ok: returncode = 0; stderr = b""
+            return Ok()
+        cache.subprocess.run = bad
+        try:
+            self.assertEqual(cache.adopt_sibling(cx)[0], "failed")
+        finally:
+            cache.subprocess.run = real
+        self.assertFalse(os.path.exists(cx.dir)); self.assertFalse(os.path.lexists(cx.dir + ".adopting"))
+
+    def test_t6_stack_txt_records_the_stack_and_history(self):
+        cx = self.sctx(); os.makedirs(cx.dir)
+        self.assertIsNone(cache.write_stack(cx))
+        kv = cache.read_kv(os.path.join(cx.dir, cache.STACK_FILE))
+        self.assertEqual((kv["kyty"], kv["kk"], kv["ps5recomp"], kv["hw"]), ("aaaa111", "bbbb222", "cccc333", "g16-25G83"))
+        cx2 = self.sctx(commits=dict(kyty="zzzz999", kk="bbbb222", ps5recomp="cccc333"))
+        self.assertEqual(cache.write_stack(cx2), "aaaa111")                          # the Kyty commit the dir saw before
+        cache.write_stack(cx2)                                                       # same stack again: no new history line
+        text = open(os.path.join(cx.dir, cache.STACK_FILE)).read()
+        self.assertEqual(text.count("history\t"), 2); self.assertIn("kyty=zzzz999", text)
+
+    def test_t6_metal_rows_are_set_aside_when_kyty_moved_and_kept_when_not(self):
+        cx = self.sctx(); os.makedirs(os.path.join(cx.dir, "metal-shaders")); open(os.path.join(cx.dir, "metal-shaders", "a.metal"), "w").write("m")
+        self.assertEqual(cache.prepare_stable_dir(cx), [])                           # first stamp, not adopted: left alone
+        self.assertTrue(os.path.isdir(os.path.join(cx.dir, "metal-shaders")))
+        self.assertEqual(cache.prepare_stable_dir(cx), [])                           # same Kyty: kept
+        self.assertTrue(os.path.isdir(os.path.join(cx.dir, "metal-shaders")))
+        cx2 = self.sctx(commits=dict(kyty="zzzz999", kk="bbbb222", ps5recomp="cccc333"))
+        notes = cache.prepare_stable_dir(cx2)
+        self.assertEqual(len(notes), 1); self.assertIn("nps5 cache metal PPSA00001", notes[0])
+        self.assertFalse(os.path.isdir(os.path.join(cx.dir, "metal-shaders"))); self.assertTrue(os.path.isfile(os.path.join(cx.dir, "metal-shaders.aside", "a.metal")))
+
+    def test_t6_adopted_dir_sets_metal_rows_aside_unless_the_same_kyty(self):
+        src = self.mkdir_old("kyty-88888888", hw="g16-25G83"); os.makedirs(os.path.join(src, "metal-shaders")); open(os.path.join(src, "metal-shaders", "a.metal"), "w").write("m")
+        cx = self.sctx()
+        notes = cache.prepare_stable_dir(cx)                                          # prepared.tsv says kyty=oldkyty, now aaaa111
+        self.assertTrue(any("regenerates" in n for n in notes)); self.assertTrue(any("clone of kyty-88888888" in n for n in notes))
+        self.assertTrue(os.path.isdir(os.path.join(src, "metal-shaders")))             # the old dir keeps its rows
+        src2 = self.mkdir_old("kyty-99999999", hw="g16-25G83", age=-50); shutil.rmtree(cx.dir); os.makedirs(os.path.join(src2, "metal-shaders"))
+        open(os.path.join(src2, "prepared.tsv"), "w").write("key=bbbb\nrc=0\nhw=g16-25G83\nkyty=aaaa111\n")
+        notes = cache.prepare_stable_dir(cx)
+        self.assertFalse(any("regenerates" in n for n in notes)); self.assertTrue(os.path.isdir(os.path.join(cx.dir, "metal-shaders")))
+
+    def test_t6_status_of_a_stable_dir_ignores_the_moved_stack(self):
+        cx = self.sctx(); os.makedirs(cx.dir)
+        with open(os.path.join(cx.dir, "prepared.tsv"), "w") as f:
+            f.write("key=oldkey\nrc=0\npipelines=1260\nhw=g16-25G83\nkyty=oldkyty\nkk=bbbb222\nps5recomp=cccc333\n")
+        st, lines = cache.status(cx)
+        self.assertEqual(st, "prepared"); self.assertIn("stable dir", "\n".join(lines)); self.assertIn("kyty", "\n".join(lines))
+        with open(os.path.join(cx.dir, "prepared.tsv"), "w") as f:
+            f.write("key=oldkey\nrc=0\nhw=g17-26A1\n")                                 # prepared for other hardware: not accepted
+        self.assertNotEqual(cache.status(cx)[0], "prepared")
+
+    def test_t6_run_path_adopts_only_when_not_a_dry_run(self):
+        self.mkdir_old("kyty-abcdef01", hw="g16-25G83")
+        gp = os.path.join(self.tmp, "games", "PPSA00001", "pipelines.kyplst")
+        e = self.stable_env()
+        cx = cache.context("PPSA00001", dict(e))
+        runmod.shader_cache_words("PPSA00001", dict(e), "/app0", adopt=False)
+        self.assertFalse(os.path.exists(cx.dir))
+        words = runmod.shader_cache_words("PPSA00001", dict(e), "/app0")
+        self.assertTrue(os.path.isdir(cx.dir)); self.assertTrue(os.path.isfile(os.path.join(cx.dir, cache.STACK_FILE)))
+        self.assertIn(("KYTY_PROGRAM_CACHE_PATH", cx.dir + "/PPSA00001.programs.bin", None), words)
+
+    def test_t6_every_store_has_a_documented_check(self):
+        names = " ".join(n for n, _ in cache.STABLE_DIR_CHECKS)
+        for store in ("<id>.bin", "programs.bin", "journal", "kk-archive", "kk-libcache", "metal-shaders"):
+            self.assertIn(store, names)
+
     # ---- status
     def test_status_fresh_partial_prepared_stale(self):
         c = self.ctx()

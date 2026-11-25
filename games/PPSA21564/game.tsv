@@ -66,6 +66,7 @@ env	NPS5_TS_POOL_MAX=48	gpu=kyty	timestamp pool size
 env	NPS5_KYTY_ALIAS_TRIM_MS=1000	gpu=kyty	alias views no longer count twice in the footprint
 env	KYTY_TEXTURE_RESIDENT_TRIM=1	gpu=kyty	memory
 env	KYTY_VRAM_BUDGET_MB=6144	gpu=kyty	24 GB Mac (measured; 7168 reaches the memory limit)
+env	NPS5_CACHE_STABLE_DIR=1	gpu=kyty	cache dir named by title + gpu + hardware class only: an update keeps the player's compiled caches (Kyty / KosmicKrisp revalidate their own stores) instead of opening an empty dir and preparing ~1300 pipelines again; a missing dir is cloned from the newest older one (cachekey-2026-11-25)
 env	KYTY_FOOTPRINT_GOVERNOR=1	gpu=kyty	footprint governor: above 86 % of the self memory limit the GC budget is scaled to 0.6 so stale resources go before the exit-86 guard (rc86, hero_ape_escape; memgrow-2026-11-25); the limit itself is never raised
 env	KYTY_RSCALE_HOLD_ON_LOAD=1	gpu=kyty	no automatic 720p -> 540p switch while a level streams (the switch re-creates targets + MetalFX at the worst moment; memgrow-2026-11-25)
 env	KYTY_VRAM_BUDGET_MB=4096	gpu=kyty,ram<=16	untested: 16 GB Mac, a quarter of RAM

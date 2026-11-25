@@ -22,7 +22,8 @@ Identity is derived, never typed. stack key = 8 hex of sha256(list sha256, Kyty 
 NPS5_HW_CACHE_KEY of hwpresets). A commit is the checkout's HEAD, with +<hash of the uncommitted changes> when its tracked files
 differ (run.py commit_of); KosmicKrisp is read from $NPS5_KK_DIR, else $NPS5_KK_WORK or its mesa/ (the public layout, where the patch
 series is applied on the pinned commit without committing). cache dir = <scratch>/cache/<id>/<gpu>-<stack key>/; Metal cache id =
-com.nativeps5.<gpu>.<id>.<GPU family-OS build key> (stable across updates). A new list, a new KK / Kyty / ps5recomp commit or another GPU family / OS build gives a new
+com.nativeps5.<gpu>.<id>.<GPU family-OS build key> (stable across updates). NPS5_CACHE_STABLE_DIR=1 (profile env row) names the dir <gpu>-stable-<hash of hw> instead: an update keeps it, a missing one is an APFS clone of the
+newest compatible stack-keyed sibling (never moved), STACK.txt records the stack, every store inside validates itself (STABLE_DIR_CHECKS). A new list, a new KK / Kyty / ps5recomp commit or another GPU family / OS build gives a new
 key, so a stale cache is never reused silently. Compiled caches are never committed; only games/<id>/pipelines.kyplst and
 its .verified are. The runs go through `nps5 run` (title queue, memory limit, one GPU process); nothing here starts a game itself.
 KK_LIBCACHE_DIR (KK's library cache) is set to <cache dir>/kk-libcache. `prepare` is TWO-PASS: pass 1 collects the MSL of every shader,
@@ -99,6 +100,31 @@ def file_sha(path):
     return h.hexdigest()
 
 
+STABLE_GATE = "NPS5_CACHE_STABLE_DIR"
+STACK_FILE = "STACK.txt"
+STABLE_RE = re.compile(r"^[a-z0-9]+-stable-[0-9a-f]{8}$")
+
+
+def stable_name(gpu, hw):
+    """Folder name of the stable cache dir: <gpu>-stable-<8 hex of the hardware class>. Never matches a stack-keyed sibling (<gpu>-<8 hex>)."""
+    return "%s-stable-%s" % (gpu, hashlib.sha256(("hw=%s" % hw).encode()).hexdigest()[:8])
+
+
+def stable_dir_on(environ, p, gpu):
+    """NPS5_CACHE_STABLE_DIR=1 / 0 in the environment wins; else the profile's own env row of that name (games/<id>/game.tsv, a promoted word)."""
+    v = (environ.get(STABLE_GATE) or "").strip()
+    if v in ("0", "1"):
+        return v == "1"
+    try:
+        g = runmod._game()
+        for k, val, _layer in g.compose_env(p, gpu=gpu):
+            if k == STABLE_GATE:
+                return str(val).strip() == "1"
+    except Exception:
+        pass
+    return False
+
+
 class Ctx:
     """Everything one invocation needs. Built by context(); tests build it with explicit commits."""
     def __init__(self, tid, environ, p, gpu, list_path, commits, hw, scratch, titles, kind="kyplst"):
@@ -114,8 +140,14 @@ class Ctx:
         self.dir = os.path.join(self.root, "%s-%s" % (gpu, self.key))
         # journal titles (no list) and `dir=player` rows: one stable dir per player, no stack key (Kyty's files reject themselves by header
         # identity, the journal stores inputs and survives translator changes, KK's archive has its own stamp)
+        self.stable_dir = False
         if kind == "journal" or "dir=player" in (p.one("cache", "") or "").split():
             self.dir = os.path.join(self.root, "%s-player" % gpu)
+        elif stable_dir_on(environ, p, gpu):
+            # cachekey (v1.4): the dir names (title, gpu, hardware class) only. An update (new Kyty / KK / ps5recomp commit or list) keeps the dir:
+            # every store inside it validates itself (see stable_dir_checks), and the commits go to STACK.txt for diagnostics.
+            self.stable_dir = True
+            self.dir = os.path.join(self.root, stable_name(gpu, hw))
         # the OS Metal cache id is per title / GPU family / OS build, NOT per stack key: an update (new Kyty / KK commit) keeps the compiled MSL->AIR work of every
         # unchanged shader text (upkeys 2026-11-25: about 29 % of the first-start card). `prepare` still removes the OS cache of this id before its passes.
         self.metal = metal_id(gpu, tid, re.sub(r"[^A-Za-z0-9_-]", "_", hw) or "hw")
@@ -334,6 +366,14 @@ def status(ctx):
     if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0" and ctx.incremental and prep.get("list") not in (None, ctx.list_sha):
         return "stale", lines + ["  STALE: the pipeline list changed since this cache was prepared (%s -> %s); an incremental prepare builds only what is new: "
                                  "nps5 cache prepare %s" % (prep["list"][:12], ctx.list_sha[:12], ctx.tid)]
+    if prep is not None and ctx.stable_dir and prep.get("rc") == "0" and prep.get("hw") in (None, ctx.hw):
+        # stable dir: the stack may have moved on since the prepare (STACK.txt keeps the history); Kyty / KK / the libcache judge their own files
+        ms = metalmod.index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
+        gs = metalmod.gfx_index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
+        mline = ["  Metal shaders: %d generated kernels, %d graphics pairs" % (ms, gs)] if ms or gs else []
+        moved = [k for k in KEY_FIELDS if k != "list" and prep.get(k) not in (None, ctx.identity()[k])]
+        return "prepared", lines + ["  prepared %s (%s pipelines): %s (stable dir%s)" % (prep.get("date", "?"), prep.get("pipelines", "?"), ctx.dir,
+                                    "; built by another " + "/".join(moved) + ": the stores revalidate themselves at the next start" if moved else "")] + mline
     if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0":      # no rc line = a torn or foreign file, not a pass
         ms = metalmod.index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
         gs = metalmod.gfx_index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
@@ -1176,6 +1216,172 @@ def libcache_builder(ctx):
     """The script that builds <KK_LIBCACHE_DIR>/msl into /lib: $NPS5_KK_LIBCACHE_BUILD, else scripts/kk-libcache-build.sh of this repo."""
     lc = ctx.environ.get("NPS5_KK_LIBCACHE_BUILD") or os.path.join(REPO, "scripts", "kk-libcache-build.sh")
     return lc if os.path.isfile(lc) else None
+
+
+# ---------------------------------------------------------------- stable dir: adoption, STACK.txt, store checks
+def tree_manifest(root):
+    """{relative path: size, or 'd' for a directory, 'l:<target>' for a link} of a tree (no content read)."""
+    out = {}
+    for dp, dn, fn in os.walk(root):
+        for n in dn + fn:
+            full = os.path.join(dp, n); rel = os.path.relpath(full, root)
+            if os.path.islink(full):
+                out[rel] = "l:" + os.readlink(full)
+            elif os.path.isdir(full):
+                out[rel] = "d"
+            else:
+                out[rel] = os.path.getsize(full)
+    return out
+
+
+def dir_age(d):
+    """Newest mtime of the dir and its top-level entries (the files Kyty rewrites in place do not touch the dir's own mtime)."""
+    t = 0.0
+    try:
+        t = os.stat(d).st_mtime
+        for n in os.listdir(d):
+            try:
+                t = max(t, os.lstat(os.path.join(d, n)).st_mtime)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return t
+
+
+def recorded_hw(d):
+    """The hardware key a cache dir says it was built for (prepared.tsv or STACK.txt), None when it does not say."""
+    for n in ("prepared.tsv", STACK_FILE):
+        kv = read_kv(os.path.join(d, n)) or {}
+        if kv.get("hw"):
+            return kv["hw"]
+    return None
+
+
+def sibling_candidates(ctx):
+    """-> [(mtime, path)] newest first: stack-keyed dirs (<gpu>-<8 hex>) of THIS title and GPU whose recorded hardware key is this one's or unrecorded
+    (a dir a player filled by playing carries no prepared.tsv; KosmicKrisp's stamp and Kyty's driver signature still reject another GPU / OS).
+    Never another title (the root is per title), another GPU back end (the prefix), a dir of another hardware key, or an empty dir."""
+    out = []
+    try:
+        names = os.listdir(ctx.root)
+    except OSError:
+        return out
+    pat = re.compile(r"^%s-[0-9a-f]{8}$" % re.escape(ctx.gpu))
+    for n in names:
+        d = os.path.join(ctx.root, n)
+        if not pat.match(n) or os.path.islink(d) or not os.path.isdir(d):
+            continue
+        hw = recorded_hw(d)
+        if hw is not None and hw != ctx.hw:
+            continue
+        if not any(os.path.exists(os.path.join(d, f % ctx.tid)) for f in ("%s.programs.bin", "%s.bin", "%s.pipelines.journal")) \
+                and not os.path.isdir(os.path.join(d, "kk-archive")):
+            continue
+        out.append((dir_age(d), d))
+    return sorted(out, key=lambda x: (-x[0], x[1]))
+
+
+def adopt_sibling(ctx, log=None):
+    """The stable dir does not exist yet: APFS-clone (cp -c -R) the newest compatible stack-keyed sibling into it, verify the clone against the
+    source (same tree, same sizes), then rename it into place. The source is never moved or deleted. -> (state, source name or None) with state
+    'have' (dir existed), 'adopted', 'empty' (no candidate), 'failed' (clone or verify failed: nothing left behind, starts empty)."""
+    say = log or (lambda m: None)
+    if os.path.isdir(ctx.dir):
+        return "have", None
+    cands = sibling_candidates(ctx)
+    if not cands:
+        return "empty", None
+    src = cands[0][1]
+    tmp = ctx.dir + ".adopting"
+    if os.path.lexists(tmp):
+        rmtree_inside(tmp, ctx.root)                          # a leftover of an interrupted adoption (ours)
+    os.makedirs(ctx.root, exist_ok=True)
+    r = subprocess.run(["cp", "-c", "-R", src, tmp], capture_output=True)   # APFS clone: instant, no extra disk (no plain-copy fallback: 1+ GB)
+    if r.returncode != 0 or tree_manifest(src) != tree_manifest(tmp):
+        rmtree_inside(tmp, ctx.root)
+        say("cache: could not clone %s into the stable cache dir (%s): starting empty" % (os.path.basename(src), (r.stderr or b"").decode(errors="replace").strip()[:120] or "clone differs"))
+        return "failed", os.path.basename(src)
+    os.rename(tmp, ctx.dir)
+    say("cache: stable cache dir %s adopted a clone of %s (the old one is kept)" % (os.path.basename(ctx.dir), os.path.basename(src)))
+    return "adopted", os.path.basename(src)
+
+
+def write_stack(ctx, adopted_from=None):
+    """STACK.txt: the full stack of the latest start (diagnostics only: nothing reads it for a decision except the Metal rows check below) and a
+    short history, one line per change of stack. -> the Kyty commit the dir saw before, None for a new dir."""
+    path = os.path.join(ctx.dir, STACK_FILE)
+    prev = read_kv(path) or {}
+    hist = [l.rstrip("\n") for l in open(path)] if os.path.isfile(path) else []
+    hist = [l for l in hist if l.startswith("history\t")]
+    ident = ctx.identity(); ident["kk"] = ctx.commits["kk"]
+    stack = " ".join("%s=%s" % (k, ident[k]) for k in KEY_FIELDS)
+    if not hist or not hist[-1].endswith(" " + stack):
+        hist.append("history\t%s %s" % (time.strftime("%Y-%m-%d", time.gmtime()), stack))
+    try:
+        with open(path + ".tmp", "w") as f:
+            f.write("# written by nps5 (cachekey); diagnostics only. The stores in this folder validate themselves.\n")
+            for k in KEY_FIELDS:
+                f.write("%s=%s\n" % (k, ident[k]))
+            f.write("title=%s\ngpu=%s\nkey=%s\n" % (ctx.tid, ctx.gpu, ctx.key))
+            if adopted_from or prev.get("adopted_from"):
+                f.write("adopted_from=%s\n" % (adopted_from or prev.get("adopted_from")))
+            for l in hist[-20:]:
+                f.write(l + "\n")
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+    return prev.get("kyty")
+
+
+def metal_rows_aside(ctx, prev_kyty, adopted_from):
+    """Our generated Metal rows (metal-shaders/) are verified against the emitter of the Kyty that wrote them (their `b_msl` hashes) and are keyed on
+    KosmicKrisp's MSL text, not on Kyty's code: a new Kyty emitter with an unchanged KK text would be served the old replacement. A stable dir
+    therefore sets them aside (one generation, `metal-shaders.aside`) when the Kyty commit moved; `nps5 cache metal <id>` regenerates them.
+    -> True when they were set aside."""
+    d = os.path.join(ctx.dir, metalmod.OUT_NAME)
+    if not os.path.isdir(d):
+        return False
+    if prev_kyty is not None and prev_kyty == ctx.commits["kyty"]:
+        return False
+    if prev_kyty is None and adopted_from is None:
+        return False                                            # a dir without a STACK.txt that was not just adopted (a manual prepare): left alone
+    aside = d + ".aside"
+    if os.path.lexists(aside):
+        rmtree_inside(aside, ctx.dir)
+    os.rename(d, aside)
+    return True
+
+
+def prepare_stable_dir(ctx, log=None):
+    """For a normal start with the stable dir on: adopt a sibling when the dir is missing, set the Metal rows aside when the Kyty commit moved,
+    refresh STACK.txt. -> list of notes for the run's warnings. Never raises (the cache is an optimisation)."""
+    notes = []
+    try:
+        state, src = adopt_sibling(ctx, log)
+        if state == "adopted":
+            notes.append("stable cache dir: started from a clone of %s (the old dir is kept; Kyty / KosmicKrisp reuse what still matches this build)" % src)
+        elif state == "failed":
+            notes.append("stable cache dir: could not clone %s: this start begins empty" % src)
+        os.makedirs(ctx.dir, exist_ok=True)
+        prev = write_stack(ctx, src if state == "adopted" else None)
+        if metal_rows_aside(ctx, prev if state != "adopted" else (read_kv(os.path.join(ctx.dir, "prepared.tsv")) or {}).get("kyty"), src if state == "adopted" else None):
+            notes.append("Metal shaders of this cache were made by another Kyty build and are set aside (metal-shaders.aside): `nps5 cache metal %s` regenerates them" % ctx.tid)
+    except (OSError, CacheError) as e:
+        notes.append("stable cache dir not prepared: %s" % e)
+    return notes
+
+
+# What validates each store of a cache dir (checked 2026-11-25 against the RC Kyty / KK sources; tests/test_cache.py T6 pins the list):
+STABLE_DIR_CHECKS = (
+    ("<id>.bin (driver pipeline cache)", "Kyty: header signature (vendor/device/driver/pipelineCacheUUID) + XXH3; <id>.cacheprep stamp codegen+fp+drv: another identity = Upgrade (old file set aside, full replay)"),
+    ("<id>.programs.bin (translated programs)", "Kyty programDiskCache: header identity = CodegenFingerprint (+ device); another identity = file not used, replaced at the next save"),
+    ("<id>.pipelines.journal / .shaders.journal", "Kyty: header identity (device, inputs only: guest code + state, never translator output); survives codegen changes by design"),
+    ("<id>.pipelines.known (default off)", "Kyty: driver signature + cold salt; dropped when the driver cache started empty"),
+    ("kk-archive/<stamp>/", "KosmicKrisp: <stamp> hashes format, KK version + mesa sha (or ARCHIVE_EPOCH), OS build, GPU: a new stamp = a new empty subdir; old stamp dirs stay as dead weight (see report)"),
+    ("kk-libcache/", "KosmicKrisp: content key (MSL text, options, KK stamp, GPU); a stale entry can only miss"),
+    ("metal-shaders/ (our generated rows)", "launcher: index sha of the lists + GPU class; NOT the emitter: set aside here when the Kyty commit moved (metal_rows_aside)"),
+)
 
 
 def clone_dir(src, dst):

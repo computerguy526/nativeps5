@@ -500,7 +500,7 @@ def compose(tid, opts, environ=None, g=None):
     explicit = cache or any(kv.startswith("KYTY_PIPELINE_JOURNAL_PATH=") for kv in opts.get("env", [])) or any(k == "KYTY_PIPELINE_JOURNAL_PATH" for k, _ in arm["env"])
     if not explicit and environ.get("NPS5_RUN_SHADER_CACHE", "1") != "0" and any(w in ("kind=kyplst", "kind=journal") for w in (p.one("cache", "") or "").split()) \
             and (titles.get("GPU") or p.one("gpu", "kyty")) == "kyty" and titles.get("APP0"):
-        for k, v, note in shader_cache_words(tid, environ, titles["APP0"]):
+        for k, v, note in shader_cache_words(tid, environ, titles["APP0"], adopt=not opts.get("dry")):
             if k:
                 plan.put(k, v, "cache")
             elif note:
@@ -565,7 +565,7 @@ def guest_image_plan(sel):
                          "'Failed to open guest image file'. Use the translated program of `nps5 build` (build/native, or the .app's Contents/MacOS binary) as BIN" % path)
 
 
-def shader_cache_words(tid, environ, app0):
+def shader_cache_words(tid, environ, app0, adopt=True):
     """-> [(key, value, None)] + [(None, None, warning)]: the environment that points a normal run at this stack's shader cache
     (nps5lib/cache.py: cache dir, Metal cache id, the pipeline list, the launch phase). Empty when the title has no list."""
     try:
@@ -583,11 +583,13 @@ def shader_cache_words(tid, environ, app0):
             return out
         if not os.path.isfile(cx.list_path):
             return []
+        stable_notes = cachemod.prepare_stable_dir(cx) if cx.stable_dir and adopt else []   # cachekey: adopt a sibling / STACK.txt (never in a dry run)
         words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")), environ=environ)
         out = [(k, v, None) for k, v in words + cachemod.launch_words(cx, app0)]
         mwarn = cachemod.metalmod.launch_words(cx.dir, os.path.join(cx.p.dir, cachemod.metalmod.LIST_NAME), environ)[1]
         if mwarn:
             out.append((None, None, mwarn))
+        out += [(None, None, n) for n in stable_notes]
         if cachemod.status(cx)[0] != "prepared":
             out.append((None, None, "the shader cache of this stack is not prepared: this start builds the whole list behind the loading card "
                                     "(\"PREPARING SHADERS X / T\", several minutes, once). `nps5 cache prepare %s` does it ahead, with prebuilt Metal libraries" % tid))
