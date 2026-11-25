@@ -228,13 +228,13 @@ class AstroPairRowTests(unittest.TestCase):
 
     def test_folship_rows_exact_and_faster(self):
         fs = [r for r in self.rows() if r[14] == "autoval,folship"]
-        self.assertEqual(len(fs), 20)
+        self.assertEqual(len(fs), 16)
         for r in fs:
             self.assertEqual((r[17], r[18]), ("exact", "faster"))
             self.assertIn(r[16], ("g16", "g17", "g18"))
             self.assertLess(float(r[19]), 1.0)
             self.assertRegex(r[5] + r[6], r"^[0-9a-f]{32}$")
-        self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 7, "g17": 7, "g18": 6})
+        self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 4, "g17": 7, "g18": 5})
 
     def test_folship_rows_do_not_shadow_other_rows(self):
         rows = self.rows()
@@ -242,6 +242,14 @@ class AstroPairRowTests(unittest.TestCase):
         for r in rows:
             if r[14] == "autoval,folship":
                 self.assertNotIn((r[5], r[6], r[16]), old | {(r[5], r[6], "*")})
+
+    def test_valfix_dropped_rows_stay_out(self):
+        """valfix: no row may carry the text of a row removed after the level-profile check (hashes in tests/data/valfix_dropped.tsv)."""
+        p = os.path.join(HERE, "data", "valfix_dropped.tsv")
+        gone = {tuple(l.split("\t")[2:4]) for l in open(p).read().splitlines() if l and not l.startswith("#")}
+        self.assertEqual(len(gone), 85)
+        for r in self.rows():
+            self.assertNotIn((r[7], r[8]), gone)
 
     def test_verified_record_matches_row_count(self):
         d = os.path.join(game.REPO, "games", "PPSA21564")

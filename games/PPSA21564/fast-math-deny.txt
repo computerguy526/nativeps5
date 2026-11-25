@@ -2,7 +2,7 @@
 # GUEST SHADER HASHES ONLY (64-bit program hashes as Kyty logs them), no shader code. These are the shaders that our own Metal
 # translations replace (the 68 compute kernels of metal-shaders.tsv and the fragment stages of metal-gfx-pairs.tsv): they keep
 # exact math at every KYTY_GPU_ACCURACY, so KosmicKrisp's keys for them, and with them our verified texts, are the high tier's.
-# v1.4: complete list (153 hashes): every compute guest of metal-shaders.tsv and every pixel-stage guest of metal-gfx-pairs.tsv, mapped from the program digests with
+# v1.4: complete list (153 hashes, 144 after valfix): every compute guest of metal-shaders.tsv and every pixel-stage guest of metal-gfx-pairs.tsv, mapped from the program digests with
 # kyty_msl_dump --xf-keys (the 86 earlier entries are kept). Three override digests (2 compute, 1 pair without a pixel stage) have no guest in the play caches.
 001028ba8efc6ae1
 0078153a1c1fb171
@@ -37,7 +37,6 @@
 47306eefdb1d6181
 47cfa37a404040d5
 48bc4ef05ebce9d4
-4b2ba1eaa4e42e47
 4bf3b92602fbe696
 4c2f796d5951b12e
 4d72ec7fd676ae4a
@@ -48,7 +47,6 @@
 53913e1a0e962495
 5401c2517a9b1b60
 55dcd484fab4c947
-5934ba5156b5421e
 5a34b303576ee324
 5bb5e709d757909d
 5c118936a885e49b
@@ -73,7 +71,6 @@
 86807cd06d68b01e
 87a2e221977813e8
 88ec57fde329c655
-8a0a3ff15da902a7
 8a3801cf3e2cee8a
 8b5e4eced20058a4
 8d2319190763817e
@@ -90,7 +87,6 @@
 9bd3d5efa201378d
 9e3c6093e9c20738
 9e8627388f138c1d
-9f4a96e9904a8a0a
 a45af05c008ab79d
 a4d6d1f9adcdc5c4
 a5315d3bb530aee7
@@ -101,7 +97,6 @@ a9dc9b4493a155f5
 aa83bf664326246b
 aba5381e7b4d42bc
 ac152188899c8f5b
-ace3da4d700b6dcc
 adc3c63fe205a870
 adccd589d87e88d3
 aef08e7e8c990db9
@@ -118,7 +113,6 @@ c143b6a6c71e7979
 c1af3275440b8419
 c44abf1b4003bd8d
 c4af37d762c4c8b9
-c6469900556a21f8
 c7c20668e89e84e9
 c7ea7d2027fa4a12
 c924afb0821b68c8
@@ -137,7 +131,6 @@ dca361d2a823ad25
 dd05e409b33d411c
 de77cfe4df77658e
 e0bf2e65895a477e
-e13e9ab3a8313693
 e14b4c0b0d70a885
 e197e307a5f2cb39
 e1a04689e0bb41ae
@@ -148,12 +141,10 @@ e7f1899003a34d74
 e9f49434bf837e1d
 ebb8fe37c1bd7a7a
 ee2207cbbcccb0be
-f17fb16c34614344
 f1bffeeccdd5faa8
 f47c0c097c598a36
 f53423194c2e0719
 f53f1c8aceb295d5
-fa23206819e321ce
 fb85cb2f81674146
 fb948a435a4e295e
 fb9a249e435e4cf0
