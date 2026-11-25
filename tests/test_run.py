@@ -114,6 +114,20 @@ class T(unittest.TestCase):
         f = os.path.join(self.d, "x.list"); open(f, "w").close()
         self.assertEqual(self.plan(["--env", "NEED_LIST=" + f]).env["NEED_LIST"], f)
         self.titles('ENV="NEED_LIST=%s"\n' % f); self.assertEqual(self.plan([]).env["NEED_LIST"], f)
+        # v14rev2: "~" and relative paths are checked too (and handed to the game as absolute paths)
+        import unittest.mock
+        home = unittest.mock.patch.dict(os.environ, {"HOME": self.d}); home.start(); self.addCleanup(home.stop)
+        self.assertIn("is not a file", self.refused(["--env", "NEED_LIST=~/definitely/not/here.list"]))
+        self.assertIn("is not a file", self.refused(["--env", "NEED_LIST=nope.list"]))
+        self.assertIn("is not a file", self.refused(["--env", "NEED_LIST=" + self.d]))  # a directory is not a file
+        self.titles("")
+        open(os.path.join(self.d, "home.list"), "w").close()
+        self.assertEqual(self.plan(["--env", "NEED_LIST=~/home.list"]).env["NEED_LIST"], os.path.join(self.d, "home.list"))
+        old = os.getcwd(); os.chdir(self.d)
+        try:
+            self.assertEqual(self.plan(["--env", "NEED_LIST=x.list"]).env["NEED_LIST"], os.path.abspath("x.list"))
+        finally:
+            os.chdir(old)
 
     # ---- refusals (exit 78 unless noted)
     def test_refusals(self):
