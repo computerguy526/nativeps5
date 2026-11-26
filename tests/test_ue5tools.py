@@ -262,6 +262,8 @@ case $1 in
  merge) shift; while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --allow-partial|--producer) shift;; *) cat "$1" >> "$out.in"; shift;; esac; done; cat "$out.in" > "$out"; rm "$out.in";;
  check) echo "check: ok"; echo "runtime: 6 resolved, ${STUB_PENDING:-1} pending"; [ -n "$STUB_MISMATCH" ] && exit 2; [ -n "$STUB_FAIL_CHECK" ] && exit 1; exit 0;;
  info) echo "  title PPSA00009, version 1.0, 1 things"; echo "  shaders 3 (vertex 1, pixel 1, compute 1); permutations 4"; echo "  permutations 4, pipelines 5";;
+ drop) while [ $# -gt 0 ]; do case $1 in --list) l=$2; shift 2;; --out) o=$2; shift 2;; --dropped) d=$2; shift 2;; --hashes) h=$2; shift 2;; *) shift;; esac; done
+   cp "$l" "$o"; printf '# hash\\tkind\\tcode\\treason\\n0x1\\tcompute\\truntime\\tx\\n' > "$d"; echo "drop: $(grep -c 0x "$h") hashes named, 1 shaders dropped, 1 permutations, 0 of 5 pipelines; wrote $o";;
  verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "verify: FOUND code"; exit 1; }
    # the real tool: the result line, then (when the list has <runtime> shaders) a LAST line with the coverage
    echo "  file: 100 bytes, 0 code windows"; echo "verify: no shader code in the list"
@@ -336,6 +338,21 @@ class Harvest(unittest.TestCase):
         chk = [l for l in open(self.log).read().splitlines() if l.startswith("check")][0]
         self.assertIn("--code-store /x/s.codestore", chk); self.assertIn("--require-runtime 100", chk)
 
+    def test_drop_hashes_removes_programs_before_check_and_records_them(self):
+        h = os.path.join(self.tmp, "h.txt"); open(h, "w").write("0x5dcf90f23ef02c81\tSPIR-V validation failed\n0xb1b98482d67c466b\tBVH\n")
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--drop-hashes", h, self.dirs[0])
+        self.assertEqual(rc, 0, out)
+        log = open(self.log).read().splitlines()
+        i_drop = [i for i, l in enumerate(log) if l.startswith("drop")]; i_chk = [i for i, l in enumerate(log) if l.startswith("check")]
+        self.assertTrue(i_drop and i_chk and i_drop[0] < i_chk[0]); self.assertIn("--hashes " + h, log[i_drop[0]])
+        self.assertIn("drop: 2 hashes named, 1 shaders dropped", out)
+        self.assertIn("dropped: drop: 2 hashes named", open(os.path.join(self.out_dir(), "counts.txt")).read())
+        self.assertTrue(os.path.isfile(os.path.join(self.out_dir(), "dropped.tsv")))
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--drop-hashes", os.path.join(self.tmp, "nope"), self.dirs[0])
+        self.assertEqual(rc, 2); self.assertIn("is not a file", out)
+        rc, out = self.run_h("PPSA00009", "--game", self.game, self.dirs[0])             # without the option: no drop call, no stale dropped.tsv
+        self.assertEqual(rc, 0); self.assertFalse(os.path.exists(os.path.join(self.out_dir(), "dropped.tsv")))
+
     def test_failed_check_and_verify_adopt_nothing(self):
         rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", "--code-store", "/x/s", "--require-runtime", "100", self.dirs[0], env=dict(STUB_FAIL_CHECK="1"))
         self.assertEqual(rc, 1); self.assertIn("check FAILED", out)
@@ -369,3 +386,22 @@ class Harvest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProbeHashes(unittest.TestCase):
+    def run_p(self, *args):
+        r = subprocess.run(["bash", os.path.join(REPO, "scripts", "ue5_probe_hashes.sh")] + list(args), capture_output=True, text=True)
+        return r.returncode, r.stdout, r.stderr
+
+    def test_validation_failures_and_rt_kernels(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        a = os.path.join(d, "run.out"); b = os.path.join(d, "run.err")
+        open(a, "w").write("noise\nKYTY_RT_SOFTWARE: CS shader 0x5dcf90f23ef02c81 has 2 BVH intersection instruction(s), first at pc=0x00000368.\n"
+                           "SPIR-V validation failed: hash=0x5dcf90f23ef02c81 stage=4 reason=writable FLAT/GLOBAL addresses require GPU ownership tracking\n")
+        open(b, "w").write("KYTY_RT_STUB: CS shader 0x91eca6e9b0627e97 has 1 BVH intersection instruction(s), first at pc=0x0000044c; every ray misses.\n"
+                           "KYTY_RT_STUB: CS shader 0x0123456789abcdef has 0 BVH intersection instruction(s)\n")
+        rc, out, err = self.run_p(a, b)
+        self.assertEqual(rc, 0, err); self.assertEqual([l.split("\t")[0] for l in out.splitlines()], ["0x5dcf90f23ef02c81"])    # failures only
+        rc, out, err = self.run_p("--rt", a, b)
+        self.assertEqual(rc, 0, err); self.assertEqual([l.split("\t")[0] for l in out.splitlines()], ["0x5dcf90f23ef02c81", "0x91eca6e9b0627e97"])
+        self.assertEqual(self.run_p(os.path.join(d, "missing"))[0], 2); self.assertEqual(self.run_p()[0], 2)
