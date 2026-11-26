@@ -795,6 +795,7 @@ KK_BARYCENTRIC_EXT	kosmickrisp		vulkan/kk_physical_device.c
 KK_COMPILE_STATS	kosmickrisp		bridge/mtl_compiler.m
 KK_DISPATCH_CLAMP	kosmickrisp	indirect dispatch counts above this many thread groups dispatch nothing; default 4194304, `0` = off	vulkan/kk_safety.c
 KK_FENCE_POLL	kosmickrisp		vulkan/kk_sync.c
+KK_FX_PLAIN_COMPILER	kosmickrisp	1 (default) = the MetalFX scalers and the motion-vector pass compile on a second MTL4Compiler that has no archive serializer (Metal crashes when a compile starts while the serializer writes the archive); 0 = the old single compiler	bridge/mtl_compiler.m
 KK_GPU_BUSY_LOG	kosmickrisp	diagnostic: GPU busy share and time per commit from Metal commit feedback; no counter heaps	vulkan/kk_queue.c
 KK_GPU_WATCHDOG_S	kosmickrisp	seconds a committed command buffer may stay incomplete before submissions stop, a flight summary is printed and the process exits 70; default 4, `0` = off	vulkan/kk_safety.c
 KK_LIBCACHE_DIR	kosmickrisp		bridge/mtl_compiler.m
@@ -1971,6 +1972,7 @@ KYTY_UNIFORM_BUFFERS	nativeps5		titles/kyty-preset.env
 KYTY_UNIFORM_LANE_READS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_UNITY_WARMUP_NOSKIP	kyty		src/graphics/host_gpu/renderer/renderDraw.cpp
 KYTY_UNMAP_STATS	kyty		src/graphics/host_gpu/renderer/renderContext.cpp
+KYTY_UPGRADE_FLUSH_HELD	kyty	1 (default) = after a cache upgrade the launch hold is released only after the replay-completion save (KK archive flush, driver cache, cache stamp) is written, so no frame (and no MetalFX compile) runs during the serialize; 0 = release first (old order)	src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_UPLOAD_BATCH	kyty		src/graphics/host_gpu/renderer/context.cpp
 KYTY_UPLOAD_BATCH_SCOPED_FLUSH	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
 KYTY_UPLOAD_COPY_OUTSIDE_LOCK	kyty		src/graphics/host_gpu/renderer/cache/bufferCache.cpp
