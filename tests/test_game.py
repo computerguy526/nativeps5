@@ -97,7 +97,7 @@ class CheckTests(Base):
         # ue5fix M2/m7: code=ue5 must carry the fence cvar, SET_FOR and the cvar-list requirement; app_ver names a build; no repeated words
         base = self.UE5C + self.UE5
         fence, setfor, lst = self.UE5ENV.splitlines(keepends=True)
-        for what, rows, msg in (("no fence", base + setfor + lst, "TimeoutForBlockOnRenderFence"), ("no SET_FOR", base + fence + lst, "NPS5_UECVAR_SET_FOR"),
+        for what, rows, msg in (("no fence", base + setfor + lst, "TimeoutForBlockOnRenderFence"), ("no SET_FOR", base + fence + lst, "NPS5_UECVAR_SET_FOR=<seconds>"),   # unit is seconds (ue5fix2 n-n3)
                                 ("no list", base + fence + setfor, "NPS5_UECVAR_LIST"),
                                 ("no app_ver", self.UE5C.replace("app_ver=01.001\t", "") + self.UE5 + self.UE5ENV, "app_ver"),
                                 ("app_ver not a build", self.UE5C.replace("01.001", "09.009") + self.UE5 + self.UE5ENV, "not a build row"),
@@ -106,6 +106,8 @@ class CheckTests(Base):
             errs, _ = self.check(game_tsv=GAME + rows)
             self.assertTrue(self.has(errs, msg), (what, errs))
         self.assertEqual(self.check(game_tsv=GAME + base + self.UE5ENV)[0], [])
+        # ue5fix2 n-n2: env_advised satisfies the list rule too (a title that must run without the list)
+        self.assertEqual(self.check(game_tsv=GAME + base + fence + setfor + lst.replace("env_required", "env_advised"))[0], [])
 
     def test_shipped_ue5_profiles_carry_the_cvar_machinery(self):
         for tid in ("PPSA07631", "PPSA24096"):
@@ -113,8 +115,9 @@ class CheckTests(Base):
             envs = [r[0] for r in p.get("env")]
             self.assertTrue([e for e in envs if e.startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=" in e], tid)
             self.assertTrue([e for e in envs if e.startswith("NPS5_UECVAR_SET_FOR=")], tid)
-            self.assertIn("NPS5_UECVAR_LIST", [r[0] for r in p.get("env_required")], tid)
+            self.assertIn("NPS5_UECVAR_LIST", [r[0] for r in p.get("env_required") + p.get("env_advised")], tid)
             self.assertEqual(game.check_profile(p, self.schema)[0], [], tid)
+        self.assertIn("NPS5_UECVAR_LIST", [r[0] for r in game.Profile(os.path.join(game.REPO, "games", "PPSA24096")).get("env_advised")])
 
     def test_cronos_cache_row_is_the_journal_cache_until_a_list_ships(self):
         # M3 (decision: keep): Cronos is a code=ue5 journal cache (kyplst + dir=player), not kind=none; its footprint is a WP8 check

@@ -1637,6 +1637,8 @@ KYTY_PIPELINE_LIST_APP_VER	kyty		src/graphics/host_gpu/renderer/pipeline/pipelin
 KYTY_PIPELINE_LIST_APP_VER	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_CACHE_LIMIT_MB	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIST_CACHE_LIMIT_MB	nativeps5		scripts/nps5lib/cache.py
+KYTY_PIPELINE_LIST_CODE_STORE	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
+KYTY_PIPELINE_LIST_CODE_STORE	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_EXE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_PIPELINE_LIST_EXE	nativeps5		scripts/nps5lib/cache.py
 KYTY_PIPELINE_LIST_PREPARE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -1966,6 +1968,15 @@ KYTY_TRANSLATION_CACHE	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCac
 KYTY_TRANSLATION_CACHE_MB	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_TRANSLATION_CACHE_VERIFY	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
 KYTY_TSHARP_DATA_WORDS	kyty		src/graphics/shader/recompiler/ir/passes/ResourceTracking.cpp
+KYTY_UE5_CODE	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
+KYTY_UE5_CODE_MAX_S	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
+KYTY_UE5_DECODER	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
+KYTY_UE5_DECODER	nativeps5		scripts/nps5lib/cache.py
+KYTY_UE5_DECODER_ABI	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
+KYTY_UE5_DECODER_ABI	nativeps5		scripts/nps5lib/cache.py
+KYTY_UE5_DECODER_FP	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
+KYTY_UE5_DECODER_FP	nativeps5		scripts/nps5lib/cache.py
+KYTY_UE5_LAYOUT	kyty		src/graphics/host_gpu/renderer/pipeline/ue5CodeWarm.h
 KYTY_UFFD_WP	kyty		src/common/platform/uffdWriteWatch.cpp
 KYTY_UNIFORM_BUFFERS	kyty		src/graphics/shader/recompiler/CodegenOptions.cpp
 KYTY_UNIFORM_BUFFERS	nativeps5		titles/kyty-preset.env
@@ -2359,7 +2370,9 @@ NPS5_TSO_STRICT_FUNCS	ps5recomp		pkg/lifter/arm64_lifter.go
 NPS5_TS_POOL_MAX	anyps5		core/libs/prx/libSceAgcDriver/Execution/src/SelfGuard.cpp
 NPS5_UECVAR_AT	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_UECVAR_DUMP	ps5recomp		pkg/runtime/core/nps5_uecvar.c
+NPS5_UECVAR_LIST	nativeps5		games/game.py
 NPS5_UECVAR_LIST	ps5recomp		pkg/runtime/core/nps5_uecvar.c
+NPS5_UECVAR_SET	nativeps5		tests/test_profdrift.py
 NPS5_UECVAR_SET	ps5recomp	Unreal Engine titles: `name=value[,..]` console variables applied at start (PPSA30552)	pkg/pack/profile_test.go
 NPS5_UECVAR_SET_FOR	ps5recomp		pkg/runtime/core/nps5_uecvar.c
 NPS5_UEMALLOC_POISON	ps5recomp		pkg/runtime/modules/libSceUeMalloc/nps5_uemalloc.c

@@ -101,6 +101,19 @@ class Zip(unittest.TestCase):
                 self.assertIn(n, out)                              # the list is printed
             self.assertLess(z.getinfo("log.err.txt").file_size, 2000)
 
+    def test_codestore_and_journals_never_reach_the_bug_report(self):
+        # ue5fix2 m11: the player's code store holds game code; it is not on the allow-list, wherever it sits
+        with tempfile.TemporaryDirectory() as root:
+            d = make_run(root)
+            for n in ("PPSA00000.codestore", "PPSA00000.shaders.journal"): open(os.path.join(d, n), "wb").write(b"GAMECODE" + HOME.encode())
+            dest = os.path.join(root, "out.zip")
+            rc, out = run_main(["t1", "--out", dest], {"NPS5_RUNS_ROOT": root, "NPS5_SCRATCH": root})
+            self.assertEqual(rc, 0, out)
+            z = zipfile.ZipFile(dest)
+            self.assertFalse([n for n in z.namelist() if "codestore" in n or "journal" in n])
+            self.assertNotIn("GAMECODE", "".join(z.read(n).decode(errors="replace") for n in z.namelist()))
+            self.assertFalse([a for a in br.ALLOWED if "codestore" in a])
+
     def test_dry_run_writes_nothing(self):
         with tempfile.TemporaryDirectory() as root:
             make_run(root)

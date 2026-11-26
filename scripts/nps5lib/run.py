@@ -209,6 +209,16 @@ def check_final(g, p, plan, secs, environ, gpu):
         if not os.path.isfile(full):
             raise Refuse("%s=%s is not a file (%s): %s" % (k, v, plan.layers.get(k, "?"), why or "see the game README"))
         plan.env[k] = full
+    for c in p.get("env_advised"):
+        if not c:
+            continue
+        k, v = c[0], plan.env.get(c[0], "")
+        full = os.path.abspath(os.path.expanduser(v)) if v else ""
+        if full and os.path.isfile(full):
+            plan.env[k] = full
+        else:      # the title runs without it (it must not break): say once what is inert and how to make the file
+            plan.warnings.append("WARNING: %s is %s, so the settings that need it are inert for %s: %s" % (
+                k, "not a file (%s)" % v if v else "not set", p.id, c[1] if len(c) > 1 else "see the game README"))
     why = deny_list_problem(plan.env) if gpu == "kyty" else ""
     if why:
         raise Refuse("%s (%s) while fast math is on (KYTY_GPU_ACCURACY=%s): every shader would get fast math and the Metal overrides would silently miss; "

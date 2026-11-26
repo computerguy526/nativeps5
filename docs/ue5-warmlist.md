@@ -11,7 +11,7 @@ per title or per UE version is a row in `games/<id>/game.tsv`; adding a title or
 2. **Write the rows.** `cache kind=kyplst dir=player code=ue5 app_ver=<x.y.z> limit_mb=<n>`, then
    `ue5 decoder=0x<vaddr> fp=<16 hex> abi=oodlelz14`, and the cvar row
    `env NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000`, `env NPS5_UECVAR_SET_FOR=100000` (the cvars are otherwise applied only
-   for 120 s) and `env_required NPS5_UECVAR_LIST` (the console-variable list made from the player's own eboot: `uecvar xref -o x.json
+   for 120 s) and `env_required NPS5_UECVAR_LIST` (or `env_advised NPS5_UECVAR_LIST` for a title that must keep running without a list, e.g. Cronos: a warning, the fence cvar is inert; the console-variable list made from the player's own eboot: `uecvar xref -o x.json
    <eboot.bin>` then `uecvar dumplist x.json > <title>.list`; without it `NPS5_UECVAR_SET` sets nothing). `scripts/check.sh` refuses a
    `code=ue5` profile without those three rows, without `app_ver`, or with an `app_ver` that is not a build row / the package version.
    `nps5 run` then adds the code store, decoder, fingerprint and abi
@@ -27,7 +27,12 @@ per title or per UE version is a row in `games/<id>/game.tsv`; adding a title or
 
 `KYTY_UE5_CODE=0` turns the extraction off. `nps5 cache prepare` is optional for these titles: it passes the same UE5 words (code store,
 decoder, fingerprint, abi), extracts the code at guest_ready, compiles and exits; it never deletes the player's journals or code store
-(`dir=player`). `nps5 cache share` exports with `--runtime-code` and the player's code store.
+(`dir=player`). `nps5 cache share` exports with `--runtime-code` and the player's code store (the `*.codestore` itself is never written to a contribution or a bug report).
+
+A prepare of a `code=ue5` title runs in the player's own cache dir, so it replays the player's journals (`KYTY_PIPELINE_JOURNAL_PATH`) as well
+as the list: that is intended (prewarm everything the player has seen), at the cost of a longer prepare. The player's journals and code
+store are moved to `<dir>.playerkeep` (with a marker file) while the dir is wiped and moved back after; an interrupted prepare leaves
+them there and the next prepare restores them first. Nothing deletes that keep dir while it holds a file.
 
 ## Open checks for WP8
 
