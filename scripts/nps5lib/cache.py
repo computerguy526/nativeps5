@@ -290,6 +290,31 @@ def inside(path, root):
     return os.path.realpath(path).startswith(r + os.sep)
 
 
+PLAYERKEEP_MARK = ".nps5-playerkeep"
+
+
+def restore_playerkeep(dirpath, pkeep):
+    """Put the player's journals / code store back from a keep dir a prepare left behind (interrupted between the move and the
+    restore). The keep dir is never rmtree'd: it is removed (marker, then rmdir) only once every file is verified in place."""
+    if not os.path.isdir(pkeep):
+        return
+    mark = os.path.join(pkeep, PLAYERKEEP_MARK)
+    if not os.path.isfile(mark):
+        raise CacheError("%s exists but is not a keep dir of nps5 (no %s): move it away" % (pkeep, PLAYERKEEP_MARK))
+    os.makedirs(dirpath, exist_ok=True)
+    for f in sorted(os.listdir(pkeep)):
+        if f == PLAYERKEEP_MARK:
+            continue
+        src, dst = os.path.join(pkeep, f), os.path.join(dirpath, f)
+        if os.path.exists(dst):
+            raise CacheError("cannot restore %s: %s already exists; both stay where they are, resolve by hand" % (src, dst))
+        os.replace(src, dst)
+        if not os.path.isfile(dst):
+            raise CacheError("restoring %s failed" % dst)
+    os.remove(mark)
+    os.rmdir(pkeep)
+
+
 def rmtree_inside(path, root):
     if not inside(path, root):
         raise CacheError("refusing to delete %s: not inside %s" % (path, root))
@@ -353,7 +378,9 @@ def status(ctx):
                      "NPS5_STACK_KK / NPS5_STACK_RECOMP to an identity): the key does not track them, so a cache built by another build of them "
                      "would be reused" % ", ".join(unk))
     if ue5_row(ctx.p) and ctx.list_sha != "none":
-        return "prepared", lines + ["  " + UE5_NOTE + " (cache dir %s)" % ctx.dir]
+        store = os.path.join(ctx.dir, ctx.tid + ".codestore")
+        held = "code store %d bytes" % os.path.getsize(store) if os.path.isfile(store) else "no code store yet (it is written by the first start)"
+        return "prepared", lines + ["  " + UE5_NOTE + ": " + held + " (cache dir %s)" % ctx.dir]
     if ctx.list_sha == "none":
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
@@ -837,17 +864,19 @@ def cmd_prepare(ctx, o, runner):
             shutil.rmtree(keep, ignore_errors=True); os.replace(lcdir, keep)
         if keep_libcache and os.path.isdir(mdir):
             shutil.rmtree(mkeep, ignore_errors=True); os.replace(mdir, mkeep)
-        # the player's own data in a dir=player cache (journals = harvest input, the code store) is never deleted by a prepare
-        pkeep = ctx.dir + ".playerkeep"; kept = []
+        # the player's own data in a dir=player cache (journals = harvest input, the code store) is never deleted by a prepare. It is
+        # moved to a sibling keep dir that carries a marker, moved back after the wipe and the keep dir is removed only when it is
+        # empty (rmdir): an interrupted prepare leaves the files in the keep dir and the next prepare restores them first (ue5fix2 n-n1).
+        pkeep = ctx.dir + ".playerkeep"
+        restore_playerkeep(ctx.dir, pkeep)
         if ue5_row(ctx.p) and os.path.isdir(ctx.dir):
-            shutil.rmtree(pkeep, ignore_errors=True); os.makedirs(pkeep)
+            os.makedirs(pkeep)
+            open(os.path.join(pkeep, PLAYERKEEP_MARK), "w").write("files moved out of %s by `nps5 cache prepare`; the next prepare restores them\n" % os.path.basename(ctx.dir))
             for f in os.listdir(ctx.dir):
                 if f.endswith(".journal") or f.endswith(".codestore"):
-                    os.replace(os.path.join(ctx.dir, f), os.path.join(pkeep, f)); kept.append(f)
+                    os.replace(os.path.join(ctx.dir, f), os.path.join(pkeep, f))
         rmtree_inside(ctx.dir, ctx.root); os.makedirs(ctx.dir)
-        for f in kept:
-            os.replace(os.path.join(pkeep, f), os.path.join(ctx.dir, f))
-        shutil.rmtree(pkeep, ignore_errors=True)
+        restore_playerkeep(ctx.dir, pkeep)
         if os.path.isdir(keep):
             os.replace(keep, lcdir)
         if os.path.isdir(mkeep):

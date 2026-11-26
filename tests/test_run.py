@@ -139,6 +139,16 @@ class T(unittest.TestCase):
         self.assertEqual(self.plan(["--bin", "/y"]).sel["path"], "/y")
         self.assertEqual(self.plan(["--patch", "a"]).sel["patches"], "a")
 
+    def test_env_advised_warns_once_and_does_not_refuse(self):
+        # ue5fix2 n-n2: an advised file (Cronos cvar list) that is missing is a warning, never exit 78; a present one is made absolute
+        open(os.path.join(self.d, "games", "PPSA00001", "game.tsv"), "a").write("env_advised\tNEED_LIST\tmade from your own eboot\n")
+        w = [x for x in self.plan([]).warnings if "NEED_LIST" in x]
+        self.assertEqual(len(w), 1); self.assertTrue(w[0].startswith("WARNING")); self.assertIn("made from your own eboot", w[0]); self.assertIn("inert", w[0])
+        self.assertEqual(len([x for x in self.plan(["--env", "NEED_LIST=/nonexistent/x.list"]).warnings if "NEED_LIST" in x]), 1)
+        f = os.path.join(self.d, "x.list"); open(f, "w").close()
+        p = self.plan(["--env", "NEED_LIST=" + f]); self.assertEqual(p.env["NEED_LIST"], f)
+        self.assertEqual([x for x in p.warnings if "NEED_LIST" in x], [])
+
     def test_env_required(self):
         # v1.4 review M18: a title that needs a user-made file (SAROS: the Unreal cvar list) refuses loudly instead of running without it
         open(os.path.join(self.d, "games", "PPSA00001", "game.tsv"), "a").write("env_required\tNEED_LIST\tmade from your own eboot\n")
@@ -742,6 +752,20 @@ class Exec(unittest.TestCase):
 class ShippedGames(unittest.TestCase):
     """Every shipped title's profile + preset must compose through check_final (v1.4 review B1: SAROS and Cronos were refused with
     rc 78 because the preset's KYTY_EOP_TIMESTAMPS=gpu met their env_forbidden row with no override). No title is run."""
+
+    def test_cronos_runs_without_a_cvar_list_with_a_warning(self):
+        # ue5fix2 n-n2: the shipped Cronos profile must not break a run when no cvar list was made (no exit 78); SAROS keeps requiring it
+        root = os.path.abspath(os.path.join(HERE, ".."))
+        env = dict(NPS5_GAMES_DIR=os.path.join(root, "games"), NPS5_PUBLIC_DIR=root, NPS5_SCRATCH=tempfile.mkdtemp(), NPS5_SELF_MEM_LIMIT_MB="18944",
+                   NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew", NPS5_RUN_REASON="test")
+        tid, opts = run.parse_args(["PPSA24096", "--bin", "/x/native"])
+        plan = run.compose(tid, opts, dict(env))                      # raises Refuse (78) when the list is required
+        w = [x for x in plan.warnings if "NPS5_UECVAR_LIST" in x]
+        self.assertEqual(len(w), 1); self.assertIn("inert", w[0]); self.assertIn("uecvar", w[0])
+        tid, opts = run.parse_args(["PPSA07631", "--bin", "/x/native"])
+        with self.assertRaises(run.Refuse) as c:
+            run.compose(tid, opts, dict(env))
+        self.assertEqual(c.exception.code, 78)
 
     def test_every_shipped_title_composes(self):
         root = os.path.abspath(os.path.join(HERE, ".."))

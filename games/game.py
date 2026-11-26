@@ -309,9 +309,9 @@ def check_profile(p, schema):
         if not any(e.startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=" in e for e in envs):
             E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET=...g.TimeoutForBlockOnRenderFence=<ms>` row")
         if not any(e.startswith("NPS5_UECVAR_SET_FOR=") for e in envs):
-            E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET_FOR=<ms>` row (the cvars are re-applied only 120 s by default)")
-        if not any(c and c[0] == "NPS5_UECVAR_LIST" for c in p.get("env_required")):
-            E("game.tsv", None, "code=ue5 needs `env_required NPS5_UECVAR_LIST` (without the cvar list NPS5_UECVAR_SET sets nothing)")
+            E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET_FOR=<seconds>` row (the cvars are re-applied only 120 s by default)")
+        if not any(c and c[0] == "NPS5_UECVAR_LIST" for c in p.get("env_required") + p.get("env_advised")):
+            E("game.tsv", None, "code=ue5 needs `env_required NPS5_UECVAR_LIST` (or `env_advised` where the title must run without it: without the cvar list NPS5_UECVAR_SET sets nothing)")
     tid = p.one("title_id")
     if tid and tid != p.id: E("game.tsv", None, "title_id %s does not match folder name %s" % (tid, p.id))
     builds = p.builds()

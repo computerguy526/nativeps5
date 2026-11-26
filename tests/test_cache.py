@@ -231,6 +231,59 @@ class T(unittest.TestCase):
             self.assertIn(w, cmd)
         self.assertNotIn("KYTY_PIPELINE_LIST_EXE", cmd)
 
+    def test_interrupted_prepare_keeps_the_players_files_and_the_next_one_restores_them(self):
+        # ue5fix2 n-n1: the player's journals / code store only ever move to a marked keep dir; an interruption between the move and the
+        # restore leaves them there, never deleted, and the next prepare puts them back first (no rmtree of a keep dir)
+        self.set_cache_row(self.UE5ROWS)
+        c = self.ctx(); os.makedirs(c.dir)
+        keep = ["PPSA00001.shaders.journal", "PPSA00001.session_a.pipelines.journal", "PPSA00001.codestore"]
+        for f in keep + ["stale.bin"]: open(os.path.join(c.dir, f), "w").write(f)
+        def runner(cmd, env=None, capture=False):
+            return (0, "  shaders 1\n  permutations 2, pipelines 3\n") if capture else 0
+        real = cache.rmtree_inside
+        def boom(path, root): raise KeyboardInterrupt()
+        cache.rmtree_inside = boom
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_main(["prepare", "PPSA00001"], runner)
+        finally:
+            cache.rmtree_inside = real
+        pk = c.dir + ".playerkeep"
+        for f in keep: self.assertEqual(open(os.path.join(pk, f)).read(), f, f)          # still there, in the marked keep dir
+        self.assertTrue(os.path.isfile(os.path.join(pk, cache.PLAYERKEEP_MARK)))
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
+        self.assertEqual(rc, 0, err)
+        for f in keep: self.assertEqual(open(os.path.join(c.dir, f)).read(), f, f)
+        self.assertFalse(os.path.exists(pk)); self.assertFalse(os.path.exists(os.path.join(c.dir, "stale.bin")))
+
+    def test_restore_never_deletes_a_keep_dir_it_cannot_restore(self):
+        d = os.path.join(self.tmp, "c"); pk = d + ".playerkeep"; os.makedirs(d); os.makedirs(pk)
+        with self.assertRaises(cache.CacheError):                                        # no marker: not ours, left alone
+            cache.restore_playerkeep(d, pk)
+        open(os.path.join(pk, cache.PLAYERKEEP_MARK), "w").write("m"); open(os.path.join(pk, "a.journal"), "w").write("old"); open(os.path.join(d, "a.journal"), "w").write("new")
+        with self.assertRaises(cache.CacheError):                                        # both copies exist: neither is touched
+            cache.restore_playerkeep(d, pk)
+        self.assertEqual(open(os.path.join(pk, "a.journal")).read(), "old"); self.assertEqual(open(os.path.join(d, "a.journal")).read(), "new")
+
+    def test_prepare_replays_the_players_journals_by_design(self):
+        # ue5fix2 n-n4: a code=ue5 prepare runs in the player's dir, so KYTY_PIPELINE_JOURNAL_PATH is the player's own journal (prewarm
+        # everything seen); documented in docs/ue5-warmlist.md
+        self.set_cache_row(self.UE5ROWS)
+        c = self.ctx(); w = dict(cache.cache_env(c.tid, c.dir, c.metal))
+        self.assertEqual(w["KYTY_PIPELINE_JOURNAL_PATH"], c.dir + "/PPSA00001.pipelines.journal")
+        self.assertIn("journal", open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "ue5-warmlist.md")).read().split("replays")[1][:300])
+
+    def test_ue5_status_says_what_the_store_holds(self):
+        # ue5fix2 m10: the state stays "prepared" (nothing is required: exit 0, no "not prepared" warning at run), but the text says what
+        # the code store holds instead of calling the cache prepared
+        self.set_cache_row(self.UE5ROWS)
+        c = self.ctx(); os.makedirs(c.dir)
+        st, lines = cache.status(c); txt = "\n".join(lines)
+        self.assertEqual(st, "prepared"); self.assertIn("no code store yet", txt); self.assertNotIn("prepared %s" % c.tid, txt)
+        open(os.path.join(c.dir, "PPSA00001.codestore"), "w").write("x" * 10)
+        txt = "\n".join(cache.status(self.ctx())[1])
+        self.assertIn("code store 10 bytes", txt)
+
     def test_non_ue5_prepare_words_unchanged(self):
         self.assertIn("KYTY_PIPELINE_LIST_EXE", dict(cache.prepare_words(self.ctx(), "/app0")))
         self.assertNotIn("KYTY_UE5_DECODER", dict(cache.prepare_words(self.ctx(), "/app0")))

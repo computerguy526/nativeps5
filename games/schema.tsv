@@ -55,6 +55,7 @@ preset	relpath	no	one	-	-	run	env preset file for the default back end (titles/k
 env	envrow	no	many	-	-	run	env delta over the preset, optionally conditional
 env_forbidden	forbidrow	no	many	-	-	run	refused wherever it comes from
 env_required	forbidrow	no	many	-	-	run	KEY must be set in the final env (titles/<id>.env or --env) and, when it is a path, name an existing file; else refused, exit 78
+env_advised	forbidrow	no	many	-	-	run	KEY should be set (like env_required) but the run goes on without it: a warning names the reason once
 gpu_profile_ban	enum	no	one	on|off	on	run	GPU counter profiling refused (a profile can only keep it on)
 window	wxh	no	one	-	-	run	window size
 title_resolution	wxh_opt	no	one	-	-	run	NPS5_TITLE_RESOLUTION

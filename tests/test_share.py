@@ -137,6 +137,11 @@ class T(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         ex = [c for c in self.calls if len(c) > 1 and c[1] == "export"][0]
         self.assertIn("--runtime-code", ex); self.assertEqual(ex[ex.index("--code-store") + 1], store)
+        # ue5fix2 m11: the store is an INPUT of the export; no contribution file carries it
+        for root, _d, fs in os.walk(self.gd):
+            for f in fs:
+                self.assertFalse(f.endswith(".codestore"), f)
+                self.assertNotIn(b"PPSA00001.codestore", get(os.path.join(root, f), "rb"), f)
 
     def test_non_ue5_export_has_no_runtime_words(self):
         d = self.journals("a", "S:vertex:3\nM:3\nP:3")

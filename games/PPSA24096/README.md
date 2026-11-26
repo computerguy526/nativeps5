@@ -37,3 +37,13 @@ Same as [SAROS](../PPSA07631/README.md#set-it-up): pack the dump first, translat
 the SAROS profile's KosmicKrisp 64-bit atomics (`NPS5_KK_IMAGE_INT64=1 NPS5_KK_BUFFER_INT64=1 NPS5_KK_SWITCH_TREE=1 NPS5_KK_RESIDENCY_LOCK=1`),
 `NPS5_PTHREAD_EXIT_SCE=1`, and the Nanite, ray-tracing and mesh-raster cvars off. Press Cross at the first screens; scroll the agreement
 with the stick and accept it.
+
+**Unreal console-variable list (optional, recommended).** The profile sets the render-fence cvar (`g.TimeoutForBlockOnRenderFence`, so a
+cold first start that compiles the warm list does not trip the 120 s fence timeout), but the game only honours it when it has the list
+of the engine's cvar slots, which is made from your own eboot (the same two steps as SAROS):
+
+    uecvar xref -o x.json <your eboot.bin>
+    uecvar dumplist x.json > titles/PPSA24096.list
+
+then add `NPS5_UECVAR_LIST=<full path of that list>` to `titles/PPSA24096.env` (or pass `--env NPS5_UECVAR_LIST=...`). Without it Cronos
+still runs: `nps5 run` prints one warning that the fence cvar is inert, and a cold first start may hit the fence timeout.
