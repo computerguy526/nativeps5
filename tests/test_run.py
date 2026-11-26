@@ -438,7 +438,7 @@ class CacheKinds(unittest.TestCase):
         self.assertEqual(got["KYTY_PIPELINE_LIST"], os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"))      # the list path, never the journal "0"
 
     UE5ROWS = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.005.002\tlimit_mb=448\nue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14"
-    UE5_KEYS = ("KYTY_PIPELINE_LIST_CODE_STORE", "KYTY_UE5_DECODER", "KYTY_UE5_DECODER_FP", "KYTY_UE5_DECODER_ABI")
+    UE5_KEYS = ("KYTY_PIPELINE_LIST_CODE_STORE", "KYTY_UE5_DECODER", "KYTY_UE5_DECODER_FP", "KYTY_UE5_DECODER_ABI", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY")
 
     def test_ue5_plan_has_the_code_words_and_no_eboot_reader(self):
         d, env = self.mk(self.UE5ROWS)
@@ -453,6 +453,7 @@ class CacheKinds(unittest.TestCase):
             self.assertIn(k, p.env, k)
         self.assertEqual(p.env["KYTY_PIPELINE_LIST_APP_VER"], "01.005.002")
         self.assertNotIn("KYTY_PIPELINE_LIST_EXE", p.env)
+        self.assertEqual(p.env["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
         self.assertTrue(p.env["KYTY_PROGRAM_CACHE_PATH"].startswith(pdir + "/"))           # the player dir = the uewarmC dir
         self.assertFalse([w for w in p.warnings if "not prepared" in w])                   # nothing to prepare ahead
         # with the cache off none of it is set

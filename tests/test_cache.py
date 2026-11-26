@@ -169,9 +169,9 @@ class T(unittest.TestCase):
         self.assertEqual((w["KYTY_UE5_DECODER"], w["KYTY_UE5_DECODER_FP"], w["KYTY_UE5_DECODER_ABI"]), ("0x926510", "1f82e44a65371db3", "oodlelz14"))
         self.assertEqual(w["KYTY_PIPELINE_REPLAY_ALL"], "1")
         st, lines = cache.status(c)
-        self.assertEqual(st, "prepared"); self.assertIn("nothing to prepare ahead", "\n".join(lines))
-        rc, out, _ = self.run_main(["prepare", "PPSA00001"])
-        self.assertEqual(rc, 0); self.assertIn("nothing to prepare ahead", out)
+        self.assertEqual(st, "prepared"); self.assertIn("optional", "\n".join(lines))
+        self.assertEqual(w["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
+        self.assertNotIn("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", dict(cache.launch_words(plain, app0)))
 
     # ---- status
     def test_status_fresh_partial_prepared_stale(self):

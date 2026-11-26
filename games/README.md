@@ -118,7 +118,7 @@ binary. The back end reads a shader's code from your copy of the game and uses i
 The list holds `<runtime>` shaders: keys and hashes, no code. The code comes from the game's own shader library on your Mac: the
 first start reads it (seconds, "PREPARING SHADERS X / T"), then compiles the list; later starts skip the reading. `nps5 run` adds
 `KYTY_PIPELINE_LIST_CODE_STORE`, `KYTY_UE5_DECODER`, `KYTY_UE5_DECODER_FP` and `KYTY_UE5_DECODER_ABI` and drops
-`KYTY_PIPELINE_LIST_EXE`; `KYTY_UE5_CODE=0` turns the reading off. There is nothing to prepare ahead (`nps5 cache prepare` says so).
+`KYTY_PIPELINE_LIST_EXE`; `KYTY_UE5_CODE=0` turns the reading off. `nps5 cache prepare` is optional for these titles: it reads the library, compiles and exits (it also produces the code store the harvest gate checks). A run also sets `KYTY_LAUNCH_WAIT_BEFORE_ENTRY=1`, so the game starts after the compile.
 `tools/ue5/ue5_locate_decoder.py <build>` finds the decoder row; `scripts/harvest_ue5.sh <title id> --game <app0> <cache dir>...`
 builds and verifies the list from play-session journals.
 

@@ -83,6 +83,14 @@ class CheckTests(Base):
             errs, _ = self.check(game_tsv=GAME + rows)
             self.assertEqual(errs == [], good, (rows, errs))
 
+    def test_ue5_title_rows_with_the_fence_cvar_and_launch_knob(self):
+        # T1/T5: the per-version knobs are data rows; a new UE 5.x needs only these (cvar row and decoder row), no code
+        rows = self.UE5C + self.UE5 + "env\tNPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000\t-\tfence timeout\n"
+        errs, _ = self.check(game_tsv=GAME + rows)
+        self.assertEqual(errs, [])
+        p = self.prof(game_tsv=GAME + rows)
+        self.assertIn("NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000", [r[0] for r in p.get("env")])
+
     def test_saros_cache_rows(self):
         p = game.Profile(os.path.join(game.REPO, "games", "PPSA07631"))
         self.assertEqual(p.one("cache"), "kind=journal")

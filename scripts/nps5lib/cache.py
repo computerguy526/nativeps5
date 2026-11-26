@@ -240,7 +240,7 @@ def prepare_words(ctx, app0):
         ([("KYTY_PREPARE_FLUSH_SYNC", "1")] if gate(ctx.environ, "FLUSH_SYNC") or gate(ctx.environ, "COMPACT") else [])   # compaction is written by that flush
 
 
-UE5_NOTE = "shaders come from the game's library at start; nothing to prepare ahead"
+UE5_NOTE = "shaders come from the game's library at start; `nps5 cache prepare` is optional (it reads the library, compiles and exits)"
 
 
 def ue5_row(p):
@@ -256,7 +256,8 @@ def ue5_words(ctx):
     if not u:
         return []
     return [("KYTY_PIPELINE_LIST_CODE_STORE", os.path.join(ctx.dir, ctx.tid + ".codestore")), ("KYTY_UE5_DECODER", u["decoder"]),
-            ("KYTY_UE5_DECODER_FP", u["fp"]), ("KYTY_UE5_DECODER_ABI", u["abi"])]
+            ("KYTY_UE5_DECODER_FP", u["fp"]), ("KYTY_UE5_DECODER_ABI", u["abi"]),
+            ("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", "1")]      # the game starts after the compile, as on ASTRO
 
 
 def launch_words(ctx, app0):
@@ -801,8 +802,6 @@ class ProgressTail(threading.Thread):
 
 
 def cmd_prepare(ctx, o, runner):
-    if ue5_row(ctx.p):
-        print("prepare: " + UE5_NOTE); return 0
     app0 = app0_of(ctx, o["dry"])
     if not os.path.isfile(ctx.list_path):
         raise CacheError("no %s" % ctx.list_path, 2)

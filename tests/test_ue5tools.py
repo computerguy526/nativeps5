@@ -72,6 +72,64 @@ class Locate(unittest.TestCase):
         self.assertIn("decoder=0x%x lea=+0x%x callers=2 fp=%s" % (dec, lea_off, fp), out)
         self.assertIn("ue5\tdecoder=0x%x\tfp=%s\tabi=oodlelz14" % (dec, fp), out)
 
+    def test_region_table_shift_is_applied(self):
+        # NPS5IMG header: one region {vaddr 0x400000, size, file offset 0x1690}: vaddr = file position - 0x1690 + 0x400000
+        data, dec, lea_off, _ = image()
+        shift = 0x1690
+        hdr = loc.MAGIC + b"\0" * 8 + struct.pack("<QQQ", 0x400000, len(data), shift)
+        # the body keeps rip-relative displacements, so only its position moves: rebuild with the offset in mind
+        body = bytearray(b"\x00" * (shift - len(hdr)))
+        pre = len(hdr) + len(body)
+        img = bytearray(hdr) + body + bytearray(data)
+        # fix up lea/call displacements: they were computed for a flat image and stay valid (both ends move together)
+        rc, out, _ = self.run_main([self.build(bytes(img))])
+        self.assertEqual(rc, 0, out)
+        want = 0x400000 + dec
+        self.assertIn("decoder=0x%x " % want, out); self.assertIn("callers=2", out)
+        fp = "%016x" % loc.fnv1a64(bytes(img[pre + dec:pre + dec + 64]))
+        self.assertIn("fp=" + fp, out)
+        self.assertNotEqual(want, pre + dec)
+
+    def test_two_regions_map_by_containing_region(self):
+        data, dec, _, _ = image()
+        r1 = (0x400000, 0x2000, 0x40); r2 = (0x900000, len(data), 0x2040)
+        img = bytearray(loc.MAGIC + b"\0" * 8 + struct.pack("<QQQ", *r1) + struct.pack("<QQQ", *r2))
+        img += b"\0" * (0x2040 - len(img)) + data
+        rc, out, _ = self.run_main([self.build(bytes(img))])
+        self.assertEqual(rc, 0, out); self.assertIn("decoder=0x%x " % (0x900000 + dec), out)
+
+    def test_header_and_flat_images_agree_on_fp(self):
+        # the same code with and without the NPS5IMG header: same fingerprint and caller count, vaddr differs only by the mapping
+        data, dec, _, _ = image()
+        hdr = loc.MAGIC + b"\0" * 8 + struct.pack("<QQQ", 0x400000, len(data), 0x1600)
+        img = hdr + b"\0" * (0x1600 - len(hdr)) + data
+        a = loc.locate(data)[0]; b = loc.locate(img)[0]
+        self.assertEqual((a["fp"], a["callers"], a["lea"]), (b["fp"], b["callers"], b["lea"]))
+        self.assertEqual((a["vaddr"], b["vaddr"]), (dec, 0x400000 + dec))
+
+    def test_decoy_xrefs_and_prologue_variants(self):
+        # decoy: a function that mentions only S1 and another only S2 are not the decoder; a second real decoder with another
+        # prologue is told apart by --prologue; one string repeated in data (two copies) still resolves
+        img = bytearray(b"\0" * 0x80)
+        s1 = len(img); img += S1; s1b = len(img); img += S1; s2 = len(img); img += S2; img += b"\xcc" * 8
+        def func(prol, *targets):
+            nonlocal img
+            f = len(img); img += prol
+            for t in targets:
+                img += lea(len(img), t)
+            img += b"\xc3" + b"\xcc" * 8
+            return f
+        decoy1 = func(PROLOGUE, s1); decoy2 = func(PROLOGUE, s2)
+        alt = bytes.fromhex("4883ec28") + b"\x90" * 12
+        d1 = func(PROLOGUE, s1b, s2); d2 = func(alt, s1, s2)
+        found = loc.locate(bytes(img))
+        both = sorted(d["vaddr"] for d in found if d["both"])
+        self.assertEqual(both, [d1, d2]); self.assertNotIn(decoy1, both); self.assertNotIn(decoy2, both)
+        b = self.build(bytes(img))
+        self.assertEqual(self.run_main([b])[0], 1)                                            # ambiguous without a filter
+        rc, out, _ = self.run_main([b, "--prologue", alt.hex()]); self.assertEqual(rc, 0); self.assertIn("decoder=0x%x " % d2, out)
+        rc, out, _ = self.run_main([b, "--prologue", PROLOGUE[:6].hex()]); self.assertEqual(rc, 0); self.assertIn("decoder=0x%x " % d1, out)
+
     def test_row_is_accepted_by_the_profile_schema(self):
         sys.path.insert(0, os.path.join(REPO, "games"))
         import game
@@ -131,7 +189,7 @@ echo "$@" >> "$STUB_LOG"
 case $1 in
  export) while [ $# -gt 0 ]; do [ "$1" = --out ] && out=$2; shift; done; echo "list" > "$out"; echo "exported: 7 kept as runtime code";;
  merge) shift; while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --allow-partial|--producer) shift;; *) cat "$1" >> "$out.in"; shift;; esac; done; cat "$out.in" > "$out"; rm "$out.in";;
- check) echo "check: ok"; echo "runtime: 6 resolved, ${STUB_PENDING:-1} pending"; [ -n "$STUB_FAIL_CHECK" ] && exit 1; exit 0;;
+ check) echo "check: ok"; echo "runtime: 6 resolved, ${STUB_PENDING:-1} pending"; [ -n "$STUB_MISMATCH" ] && exit 2; [ -n "$STUB_FAIL_CHECK" ] && exit 1; exit 0;;
  info) echo "  title PPSA00009, version 1.0, 1 things"; echo "  shaders 3 (vertex 1, pixel 1, compute 1); permutations 4"; echo "  permutations 4, pipelines 5";;
  verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "verify: FOUND code"; exit 1; }; echo "verify: no shader code in the list";;
 esac
@@ -150,6 +208,8 @@ class Harvest(unittest.TestCase):
             d = os.path.join(t, "cache-" + n); os.makedirs(d); self.dirs.append(d)
             for kind in ("shaders", "pipelines"):
                 open(os.path.join(d, "PPSA00009.%s.journal" % kind), "w").write(n)
+        for kind in ("shaders", "pipelines"):       # a static journal (not played) is skipped
+            open(os.path.join(self.dirs[0], "PPSA00009.static.%s.journal" % kind), "w").write("s")
         self.empty = os.path.join(t, "cache-empty"); os.makedirs(self.empty)
         self.env = dict(os.environ, NPS5_KYPLST_TOOL=self.tool, NPS5_SCRATCH=os.path.join(t, "scratch"), NPS5_GAMES_DIR=self.games,
                         NPS5_HW_CACHE_KEY="g16-25G83", STUB_LOG=self.log)
@@ -166,9 +226,10 @@ class Harvest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         log = open(self.log).read().splitlines()
         exports = [l for l in log if l.startswith("export")]
-        self.assertEqual(len(exports), 2); self.assertTrue(all("--runtime-code" in l for l in exports))
+        self.assertEqual(len(exports), 2); self.assertFalse([l for l in exports if ".static." in l]); self.assertTrue(all("--runtime-code" in l for l in exports))
         self.assertTrue(any(l.startswith("merge") and "--allow-partial" in l for l in log))
-        self.assertTrue(any(l.startswith("check") for l in log)); self.assertTrue(any(l.startswith("verify") for l in log))
+        self.assertTrue(all("--game %s" % self.game in l for l in exports))      # --game is required by export and check
+        self.assertTrue(any(l.startswith("check") and "--game %s" % self.game in l for l in log)); self.assertTrue(any(l.startswith("verify") for l in log))
         self.assertIn("skipped cache-empty", out); self.assertIn("runtime: 6 resolved, 1 pending", out)
         o = self.out_dir()
         for f in ("pipelines.kyplst", "pipelines.kyplst.verified", "counts.txt"):
@@ -196,6 +257,19 @@ class Harvest(unittest.TestCase):
         rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=dict(STUB_FAIL_VERIFY="1"))
         self.assertEqual(rc, 1); self.assertIn("verify FAILED", out)
         self.assertEqual(os.listdir(os.path.join(self.games, "PPSA00009")), [])
+
+    def test_check_exit_codes_gate_the_harvest(self):
+        # 1 = --require-runtime failed, 2 = title/version mismatch: both stop the harvest and adopt nothing
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=dict(STUB_MISMATCH="1"))
+        self.assertEqual(rc, 1); self.assertIn("check FAILED", out)
+        self.assertEqual(os.listdir(os.path.join(self.games, "PPSA00009")), [])
+        rc, out = self.run_h("PPSA00009", "--game", self.game, self.dirs[0], env=dict(STUB_PENDING="0"))
+        self.assertEqual(rc, 0); self.assertIn("0 pending", out)
+
+    def test_code_store_goes_to_export_too(self):
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--code-store", "/x/s.codestore", self.dirs[0])[0], 0)
+        ex = [l for l in open(self.log).read().splitlines() if l.startswith("export")][0]
+        self.assertIn("--code-store /x/s.codestore", ex)
 
     def test_usage_errors(self):
         for args in ([], ["notanid", "--game", self.game, self.dirs[0]], ["PPSA00009", "--game", self.game],

@@ -6,8 +6,8 @@
 Method (uewarmlist plan, section 0): the image holds the Oodle strings `OodleLZ_Decompress` and
 `OODLE ERROR : bad parameter : decodeTo != __null`. Find every x86-64 `lea reg,[rip+disp32]` that points at one of them, take the
 enclosing function start (the end of the int3 padding run before the lea), and count its direct `call rel32` callers. The function
-that references both strings is the decoder. The guest vaddr is `--base` + the file offset (default base 0: guest_image.bin is the
-loaded image from its lowest address).
+that references both strings is the decoder. The guest vaddr comes from the region table of the image header (`NPS5IMG\\x01`, entries {vaddr, size, file offset} at 0x10), so
+a file position inside a region maps to region vaddr + (position - file offset); a headerless image is flat (--base + file offset).
 
 Output: numbers only (vaddr, lea offset, direct caller count, FNV-1a 64 of the first 64 bytes) and the two game.tsv rows. No bytes of
 the image are printed. Exit codes: 0 exactly one decoder found (or --all), 1 none / ambiguous, 2 usage or unreadable image.
@@ -26,6 +26,32 @@ def fnv1a64(b):
     for c in b:
         h = ((h ^ c) * FNV_PRIME) & M64
     return h
+
+
+MAGIC = b"NPS5IMG\x01"
+
+
+def regions(img, base=0):
+    """-> [(vaddr, size, file_offset)]. A translated build's guest_image.bin starts with MAGIC and, at 0x10, a table of
+    {u64 vaddr, u64 size, u64 file_offset}; the table ends at the first zero-size / out-of-file entry. Without the header the image is
+    flat: file offset + base = vaddr."""
+    if bytes(img[:8]) == MAGIC:
+        out, o = [], 0x10
+        while o + 24 <= len(img) and len(out) < 256:
+            v, sz, fo = struct.unpack_from("<QQQ", img, o)
+            if sz == 0 or fo + sz > len(img):
+                break
+            out.append((v, sz, fo)); o += 24
+        if out:
+            return out
+    return [(base, len(img), 0)]
+
+
+def f2v(regs, pos):
+    for v, sz, fo in regs:
+        if fo <= pos < fo + sz:
+            return v + pos - fo
+    return None
 
 
 def image_path(p):
@@ -54,38 +80,43 @@ def function_start(img, off):
     return 0
 
 
-def lea_refs(img, targets):
-    """-> [(lea offset, target offset)] of every rip-relative lea whose target is in `targets`."""
+def lea_refs(img, regs, targets):
+    """-> [(lea file offset, target vaddr)] of every rip-relative lea whose target vaddr is in `targets`."""
     hit = []
     size = len(img)
     for m in LEA.finditer(img):
         o = m.start()
         if o + 7 > size:
             break
-        t = o + 7 + struct.unpack_from("<i", img, o + 3)[0]
+        va = f2v(regs, o)
+        if va is None:
+            continue
+        t = va + 7 + struct.unpack_from("<i", img, o + 3)[0]
         if t in targets:
             hit.append((o, t))
     return hit
 
 
-def direct_callers(img, entry):
+def direct_callers(img, regs, entry_va):
     n = 0
     size = len(img)
     for m in CALL.finditer(img):
         o = m.start()
         if o + 5 > size:
             break
-        if o + 5 + struct.unpack_from("<i", img, o + 1)[0] == entry:
+        va = f2v(regs, o)
+        if va is not None and va + 5 + struct.unpack_from("<i", img, o + 1)[0] == entry_va:
             n += 1
     return n
 
 
 def locate(img, base=0, prologue=None):
     """-> list of dicts, one per function that references an Oodle string; `both` is true for the decoder (references both)."""
+    regs = regions(img, base)
     strs = string_offsets(img)
-    targets = {o: s for s, offs in strs.items() for o in offs}
+    targets = {f2v(regs, o): s for s, offs in strs.items() for o in offs if f2v(regs, o) is not None}
     funcs = {}
-    for lea, t in lea_refs(img, targets):
+    for lea, t in lea_refs(img, regs, targets):
         f = function_start(img, lea)
         d = funcs.setdefault(f, dict(entry=f, strings=set(), lea=lea - f))
         d["strings"].add(targets[t])
@@ -95,8 +126,9 @@ def locate(img, base=0, prologue=None):
         head = bytes(img[f:f + 64])
         if prologue and not head.startswith(prologue):
             continue
-        out.append(dict(vaddr=base + f, lea=d["lea"], fp="%016x" % fnv1a64(head), head_bytes=len(head),
-                        callers=direct_callers(img, f), both=len(d["strings"]) == len(STRINGS)))
+        va = f2v(regs, f)
+        out.append(dict(vaddr=va, lea=d["lea"], fp="%016x" % fnv1a64(head), head_bytes=len(head),
+                        callers=direct_callers(img, regs, va), both=len(d["strings"]) == len(STRINGS)))
     return out
 
 
