@@ -6,8 +6,11 @@
 Method (uewarmlist plan, section 0): the image holds the Oodle strings `OodleLZ_Decompress` and
 `OODLE ERROR : bad parameter : decodeTo != __null`. Find every x86-64 `lea reg,[rip+disp32]` that points at one of them, take the
 enclosing function start (the end of the int3 padding run before the lea), and count its direct `call rel32` callers. The function
-that references both strings is the decoder. The guest vaddr comes from the region table of the image header (`NPS5IMG\\x01`, entries {vaddr, size, file offset} at 0x10), so
-a file position inside a region maps to region vaddr + (position - file offset); a headerless image is flat (--base + file offset).
+that references both strings is the decoder. The guest vaddr comes from the region table of the image header (`NPS5IMG\\x01`, u32 nregions, u32 nsegments, then the regions {vaddr, size, file offset} and the
+segment table), so a file position inside a region maps to region vaddr + (position - file offset); a headerless image is flat
+(--base + file offset). The scan is region-local; a candidate needs a 16-aligned start, 64 bytes inside its region and at least one
+direct caller. The fingerprint is taken from the image bytes the loader copies to the guest address (what Kyty hashes at run time):
+still check that the printed vaddr is an address-map function entry and run the Kyty selftest (docs/ue5-warmlist.md).
 
 Output: numbers only (vaddr, lea offset, direct caller count, FNV-1a 64 of the first 64 bytes) and the two game.tsv rows. No bytes of
 the image are printed. Exit codes: 0 exactly one decoder found (or --all), 1 none / ambiguous, 2 usage or unreadable image.
@@ -31,27 +34,44 @@ def fnv1a64(b):
 MAGIC = b"NPS5IMG\x01"
 
 
+class ImageError(ValueError):
+    pass
+
+
 def regions(img, base=0):
-    """-> [(vaddr, size, file_offset)]. A translated build's guest_image.bin starts with MAGIC and, at 0x10, a table of
-    {u64 vaddr, u64 size, u64 file_offset}; the table ends at the first zero-size / out-of-file entry. Without the header the image is
-    flat: file offset + base = vaddr."""
+    """-> [(vaddr, size, file_offset)]. A translated build's guest_image.bin (emitter.EncodeGuestImage, loaded by recomp_runtime.c
+    load_guest_image) is: magic[8], u32 nregions, u32 nsegments, nregions x {u64 vaddr, u64 size, u64 file_offset}, nsegments x
+    {u64 vaddr, u64 memsz, u32 pf_flags, u32 reserved}, then the region bytes. Exactly nregions entries are regions (the segment table
+    only carries protections). Without the header the image is flat: file offset + base = vaddr."""
     if bytes(img[:8]) == MAGIC:
-        out, o = [], 0x10
-        while o + 24 <= len(img) and len(out) < 256:
-            v, sz, fo = struct.unpack_from("<QQQ", img, o)
-            if sz == 0 or fo + sz > len(img):
-                break
-            out.append((v, sz, fo)); o += 24
-        if out:
-            return out
+        if len(img) < 16:
+            raise ImageError("truncated NPS5IMG header")
+        nreg, nseg = struct.unpack_from("<II", img, 8)
+        if nreg == 0 or nreg > 4096 or nseg > 65536:
+            raise ImageError("implausible NPS5IMG table sizes (%d regions, %d segments)" % (nreg, nseg))
+        hdr = 16 + 24 * nreg + 24 * nseg
+        if hdr > len(img):
+            raise ImageError("NPS5IMG tables run past the end of the file")
+        out = []
+        for i in range(nreg):
+            v, sz, fo = struct.unpack_from("<QQQ", img, 16 + 24 * i)
+            if fo < hdr or fo + sz > len(img):
+                raise ImageError("NPS5IMG region %d lies outside the file" % i)
+            out.append((v, sz, fo))
+        return out
     return [(base, len(img), 0)]
 
 
-def f2v(regs, pos):
-    for v, sz, fo in regs:
-        if fo <= pos < fo + sz:
-            return v + pos - fo
+def region_of(regs, pos):
+    for r in regs:
+        if r[2] <= pos < r[2] + r[1]:
+            return r
     return None
+
+
+def f2v(regs, pos):
+    r = region_of(regs, pos)
+    return None if r is None else r[0] + pos - r[2]
 
 
 def image_path(p):
@@ -70,14 +90,18 @@ def string_offsets(img):
     return out
 
 
-def function_start(img, off):
-    """Start of the function holding offset `off`: the first byte after the nearest int3 run (>= MIN_PAD) before it."""
+def function_start(img, off, region):
+    """File offset of the start of the function holding `off`, scanning only inside `region` (vaddr, size, file offset): the first byte
+    after the nearest int3 padding run (>= MIN_PAD) whose end is 16-byte aligned in guest memory (a lone `CC CC` inside an immediate,
+    e.g. the divide-by-10 constant 0xCCCCCCCD, does not end on an aligned boundary). The region's first byte counts as a start when no
+    padding precedes (a function at the start of the region). None when there is no such start."""
+    v, sz, fo = region
     i = off
-    while i > 0:
-        if img[i - 1] == 0xCC and i >= MIN_PAD and img[i - MIN_PAD:i] == b"\xcc" * MIN_PAD:
+    while i > fo:
+        if img[i - 1] == 0xCC and i - fo >= MIN_PAD and img[i - MIN_PAD:i] == b"\xcc" * MIN_PAD and (v + i - fo) % 16 == 0 and img[i] != 0xCC:
             return i
         i -= 1
-    return 0
+    return fo if v % 16 == 0 else None
 
 
 def lea_refs(img, regs, targets):
@@ -117,13 +141,19 @@ def locate(img, base=0, prologue=None):
     targets = {f2v(regs, o): s for s, offs in strs.items() for o in offs if f2v(regs, o) is not None}
     funcs = {}
     for lea, t in lea_refs(img, regs, targets):
-        f = function_start(img, lea)
+        f = function_start(img, lea, region_of(regs, lea))
+        if f is None:
+            continue
         d = funcs.setdefault(f, dict(entry=f, strings=set(), lea=lea - f))
         d["strings"].add(targets[t])
         d["lea"] = min(d["lea"], lea - f)
     out = []
     for f, d in sorted(funcs.items()):
+        r = region_of(regs, f)
         head = bytes(img[f:f + 64])
+        if r is None or f + 64 > r[2] + r[1]:      # Kyty hashes 64 bytes at the vaddr: all 64 must be in this one region
+            sys.stderr.write("ue5_locate_decoder: candidate at file offset 0x%x has fewer than 64 bytes in its region: skipped\n" % f)
+            continue
         if prologue and not head.startswith(prologue):
             continue
         va = f2v(regs, f)
@@ -161,9 +191,13 @@ def main(argv):
         print("ue5_locate_decoder: cannot read %s: %s" % (os.path.basename(p), e), file=sys.stderr); return 2
     try:
         found = locate(img, base, prologue)
+    except ImageError as e:
+        print("ue5_locate_decoder: %s: %s" % (os.path.basename(p), e), file=sys.stderr); return 2
     finally:
         img.close()
-    pick = found if show_all else [d for d in found if d["both"]]
+    # a decoder is called: no direct caller means the "entry" is not a function start (or the function is only called through a pointer)
+    nocall = [d for d in found if d["both"] and d["callers"] == 0]
+    pick = found if show_all else [d for d in found if d["both"] and d["callers"] > 0]
     if as_json:
         print(json.dumps(pick, sort_keys=True))
     else:
@@ -175,7 +209,7 @@ def main(argv):
     if show_all:
         return 0 if pick else 1
     if len(pick) != 1:
-        print("ue5_locate_decoder: %s" % ("no function references both Oodle strings" if not pick else "%d candidate functions (give --prologue, or --all to list)" % len(pick)),
+        print("ue5_locate_decoder: %s" % (("%d function(s) reference both Oodle strings but none has a direct caller (not a function start? use --all)" % len(nocall) if nocall else "no function references both Oodle strings") if not pick else "%d candidate functions (give --prologue, or --all to list)" % len(pick)),
               file=sys.stderr)
         return 1
     return 0

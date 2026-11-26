@@ -23,11 +23,34 @@ def call(at, target):
     return b"\xe8" + struct.pack("<i", target - (at + 5))
 
 
+def pad(img):
+    """int3 padding up to the next 16-byte boundary (at least two bytes), as the compiler aligns functions."""
+    img += b"\xcc" * 2
+    while len(img) % 16: img += b"\xcc"
+
+
+def nps5img(regions, nsegments=3, flags=5):
+    """A guest_image.bin built exactly as emitter.EncodeGuestImage / recomp_runtime.c load_guest_image lay it out:
+    magic[8], u32 nregions, u32 nsegments, regions {u64 vaddr, u64 size, u64 file offset}, segments {u64 vaddr, u64 memsz, u32 pf, u32 0},
+    then the region bytes. regions = [(vaddr, bytes)]. -> (image, [file offset of each region's bytes])."""
+    hdr = 16 + 24 * len(regions) + 24 * nsegments
+    out = bytearray(loc.MAGIC + struct.pack("<II", len(regions), nsegments))
+    offs, off = [], hdr
+    for v, data in regions:
+        out += struct.pack("<QQQ", v, len(data), off); offs.append(off); off += len(data)
+    for i in range(nsegments):
+        out += struct.pack("<QQII", 0x400000 + i * 0x1000, 0x1000 + i, flags + i, 0)
+    for _, data in regions:
+        out += data
+    return bytes(out), offs
+
+
 def image(both=True, second_func=False, callers=2):
     """-> (bytes, decoder offset, lea offset). Layout: pad, data strings, int3 pad, decoder, int3 pad, callers."""
     img = bytearray(b"\x00" * 0x100)
     s1 = len(img); img += S1; s2 = len(img); img += S2
-    img += b"\xcc" * 16
+    img += b"\xcc" * 2
+    while len(img) % 16: img += b"\xcc"
     dec = len(img)
     body = bytearray(PROLOGUE)
     lea_off = dec + len(body)
@@ -39,7 +62,7 @@ def image(both=True, second_func=False, callers=2):
     img += b"\xcc" * 15
     other = None
     if second_func:                         # a second function that mentions only the first string
-        other = len(img); img += PROLOGUE; img += lea(len(img), s1); img += b"\xc3"; img += b"\xcc" * 8
+        pad(img); other = len(img); img += PROLOGUE; img += lea(len(img), s1); img += b"\xc3"; img += b"\xcc" * 8
     for _ in range(callers):
         at = len(img); img += call(at, dec); img += b"\xc3" + b"\xcc" * 8
     return bytes(img), dec, lea_off - dec, other
@@ -73,39 +96,85 @@ class Locate(unittest.TestCase):
         self.assertIn("ue5\tdecoder=0x%x\tfp=%s\tabi=oodlelz14" % (dec, fp), out)
 
     def test_region_table_shift_is_applied(self):
-        # NPS5IMG header: one region {vaddr 0x400000, size, file offset 0x1690}: vaddr = file position - 0x1690 + 0x400000
+        # real NPS5IMG layout (nregions=1, nsegments=3): vaddr = region vaddr + position in the region
         data, dec, lea_off, _ = image()
-        shift = 0x1690
-        hdr = loc.MAGIC + b"\0" * 8 + struct.pack("<QQQ", 0x400000, len(data), shift)
-        # the body keeps rip-relative displacements, so only its position moves: rebuild with the offset in mind
-        body = bytearray(b"\x00" * (shift - len(hdr)))
-        pre = len(hdr) + len(body)
-        img = bytearray(hdr) + body + bytearray(data)
-        # fix up lea/call displacements: they were computed for a flat image and stay valid (both ends move together)
-        rc, out, _ = self.run_main([self.build(bytes(img))])
+        img, offs = nps5img([(0x400000, data)])
+        rc, out, _ = self.run_main([self.build(img)])
         self.assertEqual(rc, 0, out)
         want = 0x400000 + dec
         self.assertIn("decoder=0x%x " % want, out); self.assertIn("callers=2", out)
-        fp = "%016x" % loc.fnv1a64(bytes(img[pre + dec:pre + dec + 64]))
-        self.assertIn("fp=" + fp, out)
-        self.assertNotEqual(want, pre + dec)
+        self.assertIn("fp=%016x" % loc.fnv1a64(img[offs[0] + dec:offs[0] + dec + 64]), out)
+
+    def test_segment_table_entries_are_not_regions(self):
+        # the segment table {addr, memsz, pf flags, 0} follows the regions: it must not be read as more regions
+        data, *_ = image()
+        img, offs = nps5img([(0x400000, data)], nsegments=5)
+        regs = loc.regions(img)
+        self.assertEqual(regs, [(0x400000, len(data), offs[0])])
+        img2, _ = nps5img([(0x400000, data), (0x900000, b"\0" * 64)], nsegments=4)
+        self.assertEqual(len(loc.regions(img2)), 2)
 
     def test_two_regions_map_by_containing_region(self):
         data, dec, _, _ = image()
-        r1 = (0x400000, 0x2000, 0x40); r2 = (0x900000, len(data), 0x2040)
-        img = bytearray(loc.MAGIC + b"\0" * 8 + struct.pack("<QQQ", *r1) + struct.pack("<QQQ", *r2))
-        img += b"\0" * (0x2040 - len(img)) + data
-        rc, out, _ = self.run_main([self.build(bytes(img))])
+        img, _ = nps5img([(0x400000, b"\0" * 0x2000), (0x900000, data)])
+        rc, out, _ = self.run_main([self.build(img)])
         self.assertEqual(rc, 0, out); self.assertIn("decoder=0x%x " % (0x900000 + dec), out)
+
+    def test_malformed_headers_are_exit_2(self):
+        data, *_ = image()
+        good, _ = nps5img([(0x400000, data)])
+        for bad in (loc.MAGIC + struct.pack("<II", 0, 0) + b"\0" * 64,                      # no regions
+                    loc.MAGIC + struct.pack("<II", 5000, 0) + b"\0" * 64,                   # implausible count
+                    good[:40],                                                                # tables run past the file
+                    loc.MAGIC[:8] + struct.pack("<II", 1, 0) + struct.pack("<QQQ", 0x400000, 10 ** 9, 40) + b"\0" * 64):   # region outside the file
+            self.assertEqual(self.run_main([self.build(bad)])[0], 2, bad[:20])
 
     def test_header_and_flat_images_agree_on_fp(self):
         # the same code with and without the NPS5IMG header: same fingerprint and caller count, vaddr differs only by the mapping
         data, dec, _, _ = image()
-        hdr = loc.MAGIC + b"\0" * 8 + struct.pack("<QQQ", 0x400000, len(data), 0x1600)
-        img = hdr + b"\0" * (0x1600 - len(hdr)) + data
+        img, _ = nps5img([(0x400000, data)])
         a = loc.locate(data)[0]; b = loc.locate(img)[0]
         self.assertEqual((a["fp"], a["callers"], a["lea"]), (b["fp"], b["callers"], b["lea"]))
         self.assertEqual((a["vaddr"], b["vaddr"]), (dec, 0x400000 + dec))
+
+    def test_cc_inside_an_immediate_is_not_padding(self):
+        # `mov eax, 0xCCCCCCCD` (divide by 10) puts CD CC CC CC inside the function before the lea: not a function start
+        img = bytearray(b"\x00" * 0x40)
+        s1 = len(img); img += S1; s2 = len(img); img += S2
+        pad(img); dec = len(img)
+        img += PROLOGUE + b"\xb8\xcd\xcc\xcc\xcc" + b"\x90" * 3
+        img += lea(len(img), s1); img += lea(len(img), s2); img += b"\xc3"
+        pad(img); at = len(img); img += call(at, dec) + b"\xc3"
+        found = loc.locate(bytes(img))
+        self.assertEqual([d["vaddr"] for d in found if d["both"]], [dec])
+
+    def test_function_at_the_start_of_the_region_and_no_caller_is_refused(self):
+        # a function at offset 0 of its region (no padding before it); with callers=0 it is refused, with one caller it is the decoder
+        img = bytearray(PROLOGUE)
+        l1 = len(img); img += b"\x00" * 7; l2 = len(img); img += b"\x00" * 7; img += b"\xc3"
+        pad(img); t1 = len(img); img += S1; t2 = len(img); img += S2
+        img[l1:l1 + 7] = lea(l1, t1); img[l2:l2 + 7] = lea(l2, t2)
+        data = bytes(img) + b"\0" * 64
+        rc, out, err = self.run_main([self.build(nps5img([(0x400000, data)])[0])])
+        self.assertEqual(rc, 1); self.assertIn("direct caller", err); self.assertNotIn("ue5\t", out)
+        img2 = bytearray(data); pad(img2); c = len(img2); img2 += call(c, 0) + b"\xc3" + b"\0" * 64
+        rc, out, _ = self.run_main([self.build(nps5img([(0x400000, bytes(img2))])[0])])
+        self.assertEqual(rc, 0, out); self.assertIn("decoder=0x400000 ", out)
+
+    def test_head_must_hold_64_bytes_inside_the_region(self):
+        data, dec, _, _ = image(callers=0)
+        short = data[:dec + 40]                                    # the decoder's head is cut by the end of its region
+        d2 = bytearray(short); pad(d2)
+        img, _ = nps5img([(0x400000, bytes(short)), (0x500000, b"\x90" * 200)])
+        rc, out, err = self.run_main([self.build(img), "--all"])
+        self.assertNotIn("decoder=0x%x" % (0x400000 + dec), out); self.assertIn("fewer than 64 bytes", err)
+
+    def test_scan_does_not_cross_regions(self):
+        # padding in the PREVIOUS region must not give the function a start: a region that begins unaligned is skipped
+        data, dec, _, _ = image(callers=1)
+        cut = dec + 1                                               # the region starts one byte into the decoder (no padding, unaligned vaddr)
+        img, _ = nps5img([(0x400000, b"\xcc" * 32), (0x600001, data[cut:])])
+        self.assertEqual([d for d in loc.locate(img) if d["both"]], [])
 
     def test_decoy_xrefs_and_prologue_variants(self):
         # decoy: a function that mentions only S1 and another only S2 are not the decoder; a second real decoder with another
@@ -114,7 +183,7 @@ class Locate(unittest.TestCase):
         s1 = len(img); img += S1; s1b = len(img); img += S1; s2 = len(img); img += S2; img += b"\xcc" * 8
         def func(prol, *targets):
             nonlocal img
-            f = len(img); img += prol
+            pad(img); f = len(img); img += prol
             for t in targets:
                 img += lea(len(img), t)
             img += b"\xc3" + b"\xcc" * 8
@@ -122,6 +191,8 @@ class Locate(unittest.TestCase):
         decoy1 = func(PROLOGUE, s1); decoy2 = func(PROLOGUE, s2)
         alt = bytes.fromhex("4883ec28") + b"\x90" * 12
         d1 = func(PROLOGUE, s1b, s2); d2 = func(alt, s1, s2)
+        for tgt in (d1, d2, d1, d2):                     # a decoder is called: give each one direct callers
+            pad(img); img += call(len(img), tgt) + b"\xc3"
         found = loc.locate(bytes(img))
         both = sorted(d["vaddr"] for d in found if d["both"])
         self.assertEqual(both, [d1, d2]); self.assertNotIn(decoy1, both); self.assertNotIn(decoy2, both)
