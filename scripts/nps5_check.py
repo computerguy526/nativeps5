@@ -366,6 +366,8 @@ def check_kyplst(path, data, sidecar):
         bad.append("pipelines.kyplst.verified is for other bytes: rerun scripts/verify-pipeline-list.sh")
     elif rec.get("result") != KYPLST_OK_LINE:
         bad.append("pipelines.kyplst.verified does not record a passed no-game-code proof")
+    elif "runtime" in rec and not re.match(r"0 runtime shaders not covered\b", rec["runtime"]):
+        bad.append("pipelines.kyplst.verified records runtime shaders the proof did not see the code of (every <runtime> shader must be covered by a --shaders journal)")
     return bad
 
 

@@ -207,6 +207,17 @@ class TestPipelineList(Base):
         side = sidecar(data) + b"runtime=0 runtime shaders not covered by a --shaders journal (of 12)\n"
         self.assertEqual(self.problems(data, side), [])
 
+    def test_record_with_uncovered_runtime_shaders_is_refused(self):
+        # the verify script never writes such a record; a hand-edited or older one must not pass the check either
+        data = kyplst([section(1, info()), section(3, os.urandom(64) * 4)])
+        for line, ok in ((b"runtime=0 runtime shaders not covered by a --shaders journal (of 12)\n", True), (b"runtime=0 runtime shaders not covered\n", True),
+                         (b"runtime=3 runtime shaders not covered by a --shaders journal (of 12)\n", False), (b"runtime=10 runtime shaders not covered\n", False),
+                         (b"runtime=\n", False), (b"runtime=garbage\n", False)):
+            got = self.problems(data, sidecar(data) + line)
+            self.assertEqual(got == [], ok, (line, got))
+            if not ok: self.assertIn("runtime shaders", " ".join(got))
+        self.assertEqual(self.problems(data, sidecar(data)), [])                    # a title without runtime shaders has no such line
+
     def test_real_list_of_the_repository(self):
         p = os.path.join(REPO, "games", "PPSA21564", "pipelines.kyplst")
         self.assertEqual(C.check_kyplst("games/PPSA21564/pipelines.kyplst", open(p, "rb").read(), open(p + ".verified", "rb").read()), [])

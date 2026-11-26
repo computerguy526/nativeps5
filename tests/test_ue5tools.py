@@ -258,13 +258,16 @@ class Locate(unittest.TestCase):
 STUB = r"""#!/bin/bash
 echo "$@" >> "$STUB_LOG"
 case $1 in
- export) while [ $# -gt 0 ]; do [ "$1" = --out ] && out=$2; shift; done; echo "list" > "$out"; echo "exported: 7 kept as runtime code";;
- merge) shift; while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --allow-partial|--producer) shift;; *) cat "$1" >> "$out.in"; shift;; esac; done; cat "$out.in" > "$out"; rm "$out.in";;
+ export) [ -n "$STUB_FAIL_EXPORT" ] && { echo "export: cannot read the shader journal"; exit 1; }
+   while [ $# -gt 0 ]; do [ "$1" = --out ] && out=$2; shift; done; echo "list" > "$out"; echo "exported: 7 kept as runtime code";;
+ merge) [ -n "$STUB_FAIL_MERGE" ] && { echo "merge: another title or version"; exit 2; }
+   shift; while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --allow-partial|--producer) shift;; *) cat "$1" >> "$out.in"; shift;; esac; done; cat "$out.in" > "$out"; rm "$out.in";;
  check) echo "check: ok"; echo "runtime: 6 resolved, ${STUB_PENDING:-1} pending"; [ -n "$STUB_MISMATCH" ] && exit 2; [ -n "$STUB_FAIL_CHECK" ] && exit 1; exit 0;;
  info) echo "  title PPSA00009, version 1.0, 1 things"; echo "  shaders 3 (vertex 1, pixel 1, compute 1); permutations 4"; echo "  permutations 4, pipelines 5";;
  drop) while [ $# -gt 0 ]; do case $1 in --list) l=$2; shift 2;; --out) o=$2; shift 2;; --dropped) d=$2; shift 2;; --hashes) h=$2; shift 2;; *) shift;; esac; done
    cp "$l" "$o"; printf '# hash\\tkind\\tcode\\treason\\n0x1\\tcompute\\truntime\\tx\\n' > "$d"; echo "drop: $(grep -c 0x "$h") hashes named, 1 shaders dropped, 1 permutations, 0 of 5 pipelines; wrote $o";;
- verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "verify: FOUND code"; exit 1; }
+ verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "  section 3: 100 bytes, 2 code windows"; echo "verify: FAILED, the list contains shader code"; exit 1; }
+   [ -n "$STUB_ODD_VERIFY" ] && { echo "verify: something unexpected"; exit 0; }
    # the real tool: the result line, then (when the list has <runtime> shaders) a LAST line with the coverage
    echo "  file: 100 bytes, 0 code windows"; echo "verify: no shader code in the list"
    echo "verify: ${STUB_UNCOVERED:-0} runtime shaders not covered by a --shaders journal (of 12)"; [ "${STUB_UNCOVERED:-0}" != 0 ] && exit 1; exit 0;;
@@ -384,10 +387,6 @@ class Harvest(unittest.TestCase):
         self.assertEqual(rc, 1); self.assertIn("no usable journals", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ProbeHashes(unittest.TestCase):
     def run_p(self, *args):
         r = subprocess.run(["bash", os.path.join(REPO, "scripts", "ue5_probe_hashes.sh")] + list(args), capture_output=True, text=True)
@@ -405,3 +404,168 @@ class ProbeHashes(unittest.TestCase):
         rc, out, err = self.run_p("--rt", a, b)
         self.assertEqual(rc, 0, err); self.assertEqual([l.split("\t")[0] for l in out.splitlines()], ["0x5dcf90f23ef02c81", "0x91eca6e9b0627e97"])
         self.assertEqual(self.run_p(os.path.join(d, "missing"))[0], 2); self.assertEqual(self.run_p()[0], 2)
+
+
+class HarvestGates(unittest.TestCase):
+    """More of the harvest's gates (stub tool; the real tool's exit codes: check 1 = --require-runtime failed, 2 = another title or build)."""
+    setUp, run_h, out_dir = Harvest.setUp, Harvest.run_h, Harvest.out_dir
+
+    def calls(self): return open(self.log).read().splitlines()
+
+    def test_export_and_merge_failures_stop_the_harvest_and_adopt_nothing(self):
+        for env, msg in ((dict(STUB_FAIL_EXPORT="1"), "FAILED"), (dict(STUB_FAIL_MERGE="1"), "merge FAILED")):
+            rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=env)
+            self.assertEqual(rc, 1, out); self.assertIn(msg, out)
+            self.assertEqual(os.listdir(os.path.join(self.games, "PPSA00009")), [])
+            self.assertFalse(os.path.exists(os.path.join(self.out_dir(), "pipelines.kyplst.verified")))
+
+    def test_steps_run_in_order_and_only_the_wanted_ones(self):
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, self.dirs[0])[0], 0)
+        order = [l.split()[0] for l in self.calls()]
+        self.assertEqual(order, ["export", "merge", "check", "info", "info", "verify"])             # no drop without --drop-hashes; info for counts, then the record
+        chk = [l for l in self.calls() if l.startswith("check")][0]
+        self.assertNotIn("--require-runtime", chk); self.assertNotIn("--code-store", chk)         # report-only by default
+
+    def test_require_runtime_values_and_its_code_store_rule(self):
+        for pct, rc in (("0", 0), ("1", 2), ("100", 2), ("101", 2), ("-1", 2), ("abc", 2), ("5%", 2), ("", 2)):
+            self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--require-runtime", pct, self.dirs[0])[0], rc, pct)     # without --code-store: usage error
+        for pct in ("1", "50", "100"):
+            self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--code-store", "/x/s", "--require-runtime", pct, self.dirs[0])[0], 0, pct)
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--require-runtime", "50", self.dirs[0])
+        self.assertIn("needs --code-store", out)
+        for opt in ("--game", "--out", "--code-store", "--require-runtime", "--drop-hashes"):       # a missing or empty value is a usage error (2), not the shell's abort
+            self.assertEqual(self.run_h("PPSA00009", self.dirs[0], opt)[0], 2, opt)
+            self.assertEqual(self.run_h("PPSA00009", opt, "", self.dirs[0])[0], 2, opt)
+
+    def test_check_failure_of_either_kind_is_a_harvest_failure_with_no_record(self):
+        for env in (dict(STUB_FAIL_CHECK="1"), dict(STUB_MISMATCH="1")):                           # tool exit 1 (below --require-runtime) and exit 2 (other build)
+            rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=env)
+            self.assertEqual(rc, 1, out); self.assertIn("check FAILED", out)
+            self.assertNotIn("verify", [l.split()[0] for l in self.calls()])                       # the proof is never attempted on a list that failed its check
+            self.assertFalse(os.path.exists(os.path.join(self.out_dir(), "pipelines.kyplst.verified")))
+            os.remove(self.log)
+
+    def test_verify_gets_the_game_and_every_played_journal_and_no_static_one(self):
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, *self.dirs)[0], 0)
+        v = [l for l in self.calls() if l.startswith("verify")][0]
+        self.assertIn("--game %s" % self.game, v)
+        self.assertEqual(v.count("--shaders"), 2); self.assertNotIn(".static.", v)
+        for d in self.dirs: self.assertIn(os.path.join(d, "PPSA00009.shaders.journal"), v)
+
+    def test_verify_finding_code_adopts_nothing_and_keeps_the_old_pair(self):
+        g = os.path.join(self.games, "PPSA00009")
+        open(os.path.join(g, "pipelines.kyplst"), "w").write("OLD"); open(os.path.join(g, "pipelines.kyplst.verified"), "w").write("OLDREC")
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=dict(STUB_FAIL_VERIFY="1"))
+        self.assertEqual(rc, 1); self.assertIn("verify FAILED", out); self.assertIn("do not commit", out)
+        self.assertEqual(open(os.path.join(g, "pipelines.kyplst")).read(), "OLD"); self.assertEqual(open(os.path.join(g, "pipelines.kyplst.verified")).read(), "OLDREC")
+        self.assertEqual(sorted(os.listdir(g)), ["pipelines.kyplst", "pipelines.kyplst.verified"])      # no .new, no .bak
+
+    def test_write_replaces_the_pair_and_keeps_the_old_one_as_bak(self):
+        g = os.path.join(self.games, "PPSA00009")
+        open(os.path.join(g, "pipelines.kyplst"), "w").write("OLD"); open(os.path.join(g, "pipelines.kyplst.verified"), "w").write("OLDREC")
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0])[0], 0)
+        self.assertEqual(open(os.path.join(g, "pipelines.kyplst.bak")).read(), "OLD"); self.assertEqual(open(os.path.join(g, "pipelines.kyplst.verified.bak")).read(), "OLDREC")
+        self.assertNotEqual(open(os.path.join(g, "pipelines.kyplst")).read(), "OLD"); self.assertIn("sha256=", open(os.path.join(g, "pipelines.kyplst.verified")).read())
+        self.assertFalse([f for f in os.listdir(g) if f.endswith(".new")])
+
+    def test_write_into_a_missing_title_folder_fails_after_everything_passed(self):
+        shutil.rmtree(os.path.join(self.games, "PPSA00009"))
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0])
+        self.assertEqual(rc, 1); self.assertIn("no ", out)
+
+    def test_a_rerun_clears_the_outputs_of_the_last_one(self):
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, self.dirs[0], env=dict(STUB_PENDING="3"))[0], 0)
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--drop-hashes", self.log, self.dirs[0])[0], 0)
+        self.assertTrue(os.path.isfile(os.path.join(self.out_dir(), "dropped.tsv")))
+        rc, out = self.run_h("PPSA00009", "--game", self.game, self.empty)                          # nothing usable: the old list / record are gone, not left to be adopted
+        self.assertEqual(rc, 1)
+        for f in ("pipelines.kyplst", "pipelines.kyplst.verified", "counts.txt", "dropped.tsv"):
+            self.assertFalse(os.path.exists(os.path.join(self.out_dir(), f)), f)
+
+    def test_unpaired_and_static_only_journals_are_skipped_by_name(self):
+        d = os.path.join(self.tmp, "cache-odd"); os.makedirs(d)
+        open(os.path.join(d, "PPSA00009.session_x.shaders.journal"), "w").write("s")                # no matching pipelines journal
+        for kind in ("shaders", "pipelines"): open(os.path.join(d, "PPSA00009.static.%s.journal" % kind), "w").write("s")
+        open(os.path.join(d, "PPSA00001.shaders.journal"), "w").write("other title")
+        rc, out = self.run_h("PPSA00009", "--game", self.game, d)
+        self.assertEqual(rc, 1); self.assertIn("skipped cache-odd", out); self.assertIn("no usable journals", out)
+        s = os.path.join(d, "PPSA00009.session_x.pipelines.journal"); open(s, "w").write("p")
+        rc, out = self.run_h("PPSA00009", "--game", self.game, d)
+        self.assertEqual(rc, 0, out); self.assertEqual(len([l for l in self.calls() if l.startswith("export")]), 1)
+
+    def test_game_tool_and_title_arguments(self):
+        f = os.path.join(self.tmp, "afile"); open(f, "w").write("x")
+        self.assertEqual(self.run_h("PPSA00009", "--game", f, self.dirs[0])[0], 2)                  # --game must be a folder
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, self.dirs[0], env=dict(NPS5_KYPLST_TOOL=os.path.join(self.tmp, "none")))[0], 2)
+        os.chmod(self.tool, 0o644)
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, self.dirs[0])[0], 2)         # a tool that is not executable
+        for bad in ("ppsa00009", "PPSA0009", "PPSA000099", "../PPSA00009"):
+            self.assertEqual(self.run_h(bad, "--game", self.game, self.dirs[0])[0], 2, bad)
+        self.assertEqual(self.run_h("--help")[0], 0)
+
+    def test_nothing_of_the_game_is_printed(self):
+        open(os.path.join(self.game, "eboot.bin"), "wb").write(b"GAMEBYTES-MARKER")
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0]); self.assertEqual(rc, 0, out)
+        self.assertNotIn("GAMEBYTES-MARKER", out)
+        for root, _d, fs in os.walk(self.tmp):
+            for f in fs:
+                if os.path.join(root, f) != os.path.join(self.game, "eboot.bin"):
+                    self.assertNotIn(b"GAMEBYTES-MARKER", open(os.path.join(root, f), "rb").read(), f)
+
+
+class VerifyScript(unittest.TestCase):
+    """scripts/verify-pipeline-list.sh (the no-game-code record that scripts/check.sh requires) against a stub tool. Synthetic data only."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tool = os.path.join(self.tmp, "tool.sh"); open(self.tool, "w").write(STUB); os.chmod(self.tool, 0o755)
+        self.log = os.path.join(self.tmp, "stub.log"); self.game = os.path.join(self.tmp, "app0"); os.makedirs(self.game)
+        self.lst = os.path.join(self.tmp, "pipelines.kyplst"); open(self.lst, "w").write("LISTBYTES")
+        self.env = dict(os.environ, NPS5_KYPLST_TOOL=self.tool, STUB_LOG=self.log, NPS5_SCRATCH=os.path.join(self.tmp, "scratch"))
+
+    def run_v(self, *args, env=None):
+        r = subprocess.run(["bash", os.path.join(REPO, "scripts", "verify-pipeline-list.sh")] + list(args), env=dict(self.env, **(env or {})), capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    def rec(self):
+        return dict(l.split("=", 1) for l in open(self.lst + ".verified").read().splitlines() if "=" in l and not l.startswith("#"))
+
+    def test_record_holds_the_hash_of_the_list_the_result_and_the_counts(self):
+        import hashlib
+        rc, out = self.run_v(self.lst, self.game); self.assertEqual(rc, 0, out)
+        r = self.rec()
+        self.assertEqual(r["sha256"], hashlib.sha256(b"LISTBYTES").hexdigest()); self.assertEqual(r["result"], "verify: no shader code in the list")
+        self.assertEqual(r["title"], "PPSA00009 1.0"); self.assertIn("shaders 3", r["counts"]); self.assertIn("pipelines 5", r["counts"])
+        self.assertEqual(r["runtime"], "0 runtime shaders not covered by a --shaders journal (of 12)")      # the coverage line of a list with runtime shaders
+        self.assertNotIn(self.game, open(self.lst + ".verified").read())                                    # no path of the player's machine in the record
+
+    def test_every_journal_is_passed_as_shaders_and_the_game_as_game(self):
+        j1, j2 = os.path.join(self.tmp, "a.shaders.journal"), os.path.join(self.tmp, "b.shaders.journal")
+        self.assertEqual(self.run_v(self.lst, self.game, j1, j2)[0], 0)
+        v = [l for l in open(self.log).read().splitlines() if l.startswith("verify")][0]
+        self.assertIn("--game %s" % self.game, v); self.assertIn("--shaders %s --shaders %s" % (j1, j2), v)
+
+    def test_found_code_exits_1_and_writes_no_record(self):
+        rc, out = self.run_v(self.lst, self.game, env=dict(STUB_FAIL_VERIFY="1"))
+        self.assertEqual(rc, 1); self.assertIn("FAILED", out); self.assertFalse(os.path.exists(self.lst + ".verified"))
+
+    def test_found_code_leaves_an_older_record_alone_so_the_list_is_still_refused_by_the_check(self):
+        open(self.lst + ".verified", "w").write("sha256=OLD\nresult=verify: no shader code in the list\n")
+        self.assertEqual(self.run_v(self.lst, self.game, env=dict(STUB_FAIL_VERIFY="1"))[0], 1)
+        self.assertIn("sha256=OLD", open(self.lst + ".verified").read())
+
+    def test_uncovered_runtime_shaders_and_an_unexpected_result_line_exit_1(self):
+        rc, out = self.run_v(self.lst, self.game, env=dict(STUB_UNCOVERED="2")); self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(self.lst + ".verified"))
+        rc, out = self.run_v(self.lst, self.game, env=dict(STUB_ODD_VERIFY="1")); self.assertEqual(rc, 1); self.assertIn("unexpected", out)
+        self.assertFalse(os.path.exists(self.lst + ".verified"))
+
+    def test_usage_errors_are_exit_2(self):
+        self.assertEqual(self.run_v(self.lst)[0], 2); self.assertEqual(self.run_v()[0], 2)
+        self.assertEqual(self.run_v(os.path.join(self.tmp, "nolist"), self.game)[0], 2)
+        self.assertEqual(self.run_v(self.lst, self.lst)[0], 2)                                            # the game must be a folder
+        self.assertEqual(self.run_v(self.lst, self.game, env=dict(NPS5_KYPLST_TOOL=os.path.join(self.tmp, "none")))[0], 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

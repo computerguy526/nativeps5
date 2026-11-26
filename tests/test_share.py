@@ -143,6 +143,50 @@ class T(unittest.TestCase):
                 self.assertFalse(f.endswith(".codestore"), f)
                 self.assertNotIn(b"PPSA00001.codestore", get(os.path.join(root, f), "rb"), f)
 
+    def ue5rows(self):
+        gp = os.path.join(self.gd, "game.tsv")
+        put(gp, get(gp).replace("cache\tkind=kyplst\tlimit_mb=448\tapp_ver=01.001.000", tc.T.UE5ROWS))
+
+    def export_calls(self): return [c for c in self.calls if len(c) > 1 and c[1] == "export"]
+
+    def test_ue5_store_beside_the_journals_wins_over_the_player_dir_and_none_is_fine(self):
+        self.ue5rows()
+        d = self.journals("a", "S:vertex:1\nS:vertex:3\nM:1\nM:3\nP:3")
+        player = cache.context("PPSA00001", dict(self.env)).dir; os.makedirs(player, exist_ok=True)
+        pstore = os.path.join(player, "PPSA00001.codestore"); put(pstore, "p")
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]; self.assertEqual(ex[ex.index("--code-store") + 1], pstore)       # only the player dir has one
+        put(os.path.join(d, "PPSA00001.codestore"), "beside"); self.calls.clear()
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]; self.assertEqual(ex[ex.index("--code-store") + 1], os.path.join(d, "PPSA00001.codestore"))
+        os.remove(os.path.join(d, "PPSA00001.codestore")); os.remove(pstore); self.calls.clear()
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]; self.assertIn("--runtime-code", ex); self.assertNotIn("--code-store", ex)   # no store: export still runs, runtime shaders stay pending
+
+    def test_store_bytes_never_reach_the_contribution_the_output_or_the_verify_step(self):
+        self.ue5rows()
+        d = self.journals("a", "S:vertex:1\nS:vertex:3\nM:1\nM:3\nP:3")
+        put(os.path.join(d, "PPSA00001.codestore"), b"KYCODE1\0GAMECODE-MARKER" + os.urandom(64), "wb")
+        rc, out = self.run_main(["share", "PPSA00001", "--from", d]); self.assertEqual(rc, 0, out)
+        self.assertNotIn("GAMECODE-MARKER", out); self.assertNotIn("codestore", out.replace("--code-store", ""))
+        for root, _d, fs in os.walk(self.gd):
+            for f in fs:
+                self.assertNotIn(b"GAMECODE-MARKER", get(os.path.join(root, f), "rb"), f)
+        for c in self.calls:                                         # the store is an export INPUT only: verify / check / merge never take it
+            if len(c) > 1 and c[1] in ("merge", "verify", "check"): self.assertNotIn("--code-store", c)
+            if c[0] == "bash": self.assertFalse([a for a in c if str(a).endswith(".codestore")], c)
+
+    def test_non_ue5_title_ignores_a_store_lying_around(self):
+        d = self.journals("a", "S:vertex:3\nM:3\nP:3"); put(os.path.join(d, "PPSA00001.codestore"), "x")
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]; self.assertNotIn("--code-store", ex); self.assertNotIn("--runtime-code", ex)
+
+    def test_ue5_title_with_another_build_in_the_journals_is_refused(self):
+        self.ue5rows()
+        d = self.journals("a", "S:vertex:3\nM:3\nP:3", version="01.002.000"); put(os.path.join(d, "PPSA00001.codestore"), "x")
+        rc, out = self.run_main(["share", "PPSA00001", "--from", d])
+        self.assertNotEqual(rc, 0); self.assertEqual(self.contribs(), [])
+
     def test_non_ue5_export_has_no_runtime_words(self):
         d = self.journals("a", "S:vertex:3\nM:3\nP:3")
         self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)

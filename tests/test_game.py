@@ -415,6 +415,89 @@ class AstroPairRowTests(unittest.TestCase):
         self.assertIn("reproduced=%d of %d" % (len(self.rows()), len(self.rows())), rec)
 
 
+class Ue5RowTests(Base):
+    """UE5 extraction profile rows (cache code=ue5 + ue5 decoder row): every form the schema accepts or refuses, synthetic values only."""
+    UE5C, UE5, UE5ENV = CheckTests.UE5C, CheckTests.UE5, CheckTests.UE5ENV
+
+    def errs(self, ue5=None, cache=None, extra=""):
+        rows = (cache if cache is not None else self.UE5C) + (ue5 if ue5 is not None else self.UE5) + self.UE5ENV + extra
+        return self.check(game_tsv=GAME + rows)[0]
+
+    def test_decoder_forms(self):
+        for dec, ok in (("0x926510", True), ("0xABCDEF01", True), ("0xabcdef01", True), ("0x1", True), ("0xFFFFFFFFFFFFFFFF", True),
+                        ("0x", False), ("0X926510", False), ("926510", False), ("0xZZ", False), ("0x92 6510", False), ("-0x1", False), ("", False)):
+            e = self.errs(ue5="ue5\tdecoder=%s\tfp=1f82e44a65371db3\tabi=oodlelz14\n" % dec)
+            self.assertEqual(e == [], ok, (dec, e))
+
+    def test_fingerprint_forms(self):
+        for fp, ok in (("1f82e44a65371db3", True), ("0000000000000000", True), ("1F82E44A65371DB3", False), ("1f82e44a65371db", False),
+                       ("1f82e44a65371db3a", False), ("zf82e44a65371db3", False), ("0x1f82e44a65371db", False), ("", False)):
+            e = self.errs(ue5="ue5\tdecoder=0x926510\tfp=%s\tabi=oodlelz14\n" % fp)
+            self.assertEqual(e == [], ok, (fp, e))
+
+    def test_abi_is_the_one_known_convention(self):
+        for abi, ok in (("oodlelz14", True), ("oodlelz15", False), ("OodleLZ14", False), ("oodle", False), ("", False)):
+            e = self.errs(ue5="ue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=%s\n" % abi)
+            self.assertEqual(e == [], ok, (abi, e))
+
+    def test_missing_unknown_and_repeated_words(self):
+        for row in ("ue5\tdecoder=0x926510\tabi=oodlelz14\n", "ue5\tfp=1f82e44a65371db3\tabi=oodlelz14\n", "ue5\tdecoder=0x926510\tfp=1f82e44a65371db3\n",
+                    "ue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14\textra=1\n", "ue5\tdecoder\tfp=1f82e44a65371db3\tabi=oodlelz14\n",
+                    "ue5\tdecoder=0x926510\tdecoder=0x926511\tfp=1f82e44a65371db3\tabi=oodlelz14\n", "ue5\n"):
+            self.assertTrue(self.errs(ue5=row), row)
+        self.assertTrue(self.has(self.errs(ue5=self.UE5 + self.UE5), "may appear once"))
+
+    def test_cache_row_forms_for_code_ue5(self):
+        for row, msg in (("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=abc\n", "app_ver"), ("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.\n", "app_ver"),
+                         ("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001\tlimit_mb=44x\n", "limit_mb"),
+                         ("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001\tbogus=1\n", "unknown cache word"),
+                         ("cache\tkind=kyplst\tdir=elsewhere\tcode=ue5\tapp_ver=01.001\n", "dir must be player"),
+                         ("cache\tkind=none\tdir=player\tcode=ue5\tapp_ver=01.001\n", "needs kind=kyplst"),
+                         ("cache\tkind=kyplst\tcode=ue5\tapp_ver=01.001\n", "needs kind=kyplst and dir=player"),
+                         ("cache\tkind=kyplst\tdir=player\tcode=ue4\tapp_ver=01.001\n", "code must be ue5")):
+            self.assertTrue(self.has(self.errs(cache=row), msg), (row, self.errs(cache=row)))
+        self.assertEqual(self.errs(cache="cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001\n"), [])               # limit_mb is optional
+        self.assertEqual(self.errs(cache="cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001\tlimit_mb=896\n"), [])
+
+    def test_the_ue5_row_is_needed_exactly_with_code_ue5(self):
+        self.assertTrue(self.has(self.errs(ue5=""), "needs a `ue5 decoder="))
+        for plain in ("cache\tkind=kyplst\tdir=player\tapp_ver=01.001\n", "cache\tkind=kyplst\tapp_ver=01.001\n", "cache\tkind=journal\tdir=player\n", "cache\tkind=none\n"):
+            self.assertTrue(self.has(self.errs(cache=plain), "needs `cache ... code=ue5`"), plain)
+
+    def test_shipped_code_ue5_profiles_are_complete(self):
+        # every shipped title with `cache ... code=ue5`: a valid ue5 row, a build row for app_ver, the cvar machinery; none ships a store or journal
+        found = []
+        for tid in sorted(os.listdir(os.path.join(game.REPO, "games"))):
+            d = os.path.join(game.REPO, "games", tid)
+            if not os.path.isfile(os.path.join(d, "game.tsv")): continue
+            p = game.Profile(d)
+            if "code=ue5" not in (p.one("cache", "") or "").split(): continue
+            found.append(tid)
+            u = dict(w.partition("=")[::2] for w in p.one("ue5").split())
+            self.assertRegex(u["decoder"], r"^0x[0-9a-fA-F]+$"); self.assertRegex(u["fp"], r"^[0-9a-f]{16}$"); self.assertEqual(u["abi"], "oodlelz14")
+            av = [w[8:] for w in p.one("cache").split() if w.startswith("app_ver=")][0]
+            self.assertIn(av, [b[0] for b in p.builds()], tid)
+            self.assertEqual(game.check_profile(p, self.schema)[0], [], tid)
+            for f in os.listdir(d):
+                self.assertFalse(f.endswith((".codestore", ".journal", ".stale", ".lock", ".bin", ".dylib")), (tid, f))
+        self.assertIn("PPSA24096", found)
+
+    def test_every_shipped_list_record_names_its_title_and_the_profile_build(self):
+        # the no-code record next to a shipped list says which title (and, for code=ue5, which build) it was made for
+        for tid in sorted(os.listdir(os.path.join(game.REPO, "games"))):
+            d = os.path.join(game.REPO, "games", tid)
+            rec = os.path.join(d, "pipelines.kyplst.verified")
+            if not os.path.isfile(rec): continue
+            kv = dict(l.split("=", 1) for l in open(rec).read().splitlines() if "=" in l and not l.startswith("#"))
+            self.assertTrue(kv["title"].startswith(tid + " "), (tid, kv["title"]))
+            self.assertEqual(kv["result"], "verify: no shader code in the list")
+            self.assertRegex(kv["sha256"], r"^[0-9a-f]{64}$")
+            p = game.Profile(d)
+            av = [w[8:] for w in (p.one("cache", "") or "").split() if w.startswith("app_ver=")]
+            if av:
+                self.assertEqual(kv["title"].split()[1], av[0], (tid, kv["title"], av))
+
+
 class SceneTests(Base):
     def test_lookup(self):
         p = self.prof(); rows = p.scenes()

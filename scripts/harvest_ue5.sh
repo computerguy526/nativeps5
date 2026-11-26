@@ -18,15 +18,16 @@ usage() { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
 case "$1" in -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;; esac
 TID="$1"; shift
 [[ "$TID" =~ ^[A-Z]{4}[0-9]{5}$ ]] || { echo "harvest_ue5: title id expected (PPSA12345), got '$TID'" >&2; exit 2; }
+val() { [ $# -ge 2 ] && [ -n "$2" ] || { echo "harvest_ue5: $1 needs a value" >&2; exit 2; }; }   # a usage error is exit 2, never the shell's own abort (1)
 GAME=""; OUT=""; WRITE=0; STORE=""; REQ=0; DROP=""; DIRS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --game) GAME="${2:?--game needs a folder}"; shift 2;;
-    --out) OUT="${2:?--out needs a folder}"; shift 2;;
+    --game) val "$@"; GAME="$2"; shift 2;;
+    --out) val "$@"; OUT="$2"; shift 2;;
     --write) WRITE=1; shift;;
-    --code-store) STORE="${2:?--code-store needs a file}"; shift 2;;
-    --require-runtime) REQ="${2:?--require-runtime needs a percentage}"; shift 2;;
-    --drop-hashes) DROP="${2:?--drop-hashes needs a file}"; shift 2;;
+    --code-store) val "$@"; STORE="$2"; shift 2;;
+    --require-runtime) val "$@"; REQ="$2"; shift 2;;
+    --drop-hashes) val "$@"; DROP="$2"; shift 2;;
     -h|--help) usage;;
     -*) echo "harvest_ue5: unknown option $1" >&2; exit 2;;
     *) DIRS+=("$1"); shift;;

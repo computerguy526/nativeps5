@@ -922,5 +922,103 @@ class T(unittest.TestCase):
         self.assertEqual(runmod_called, ["PPSA00001"])
 
 
+    # ---- UE5 extraction: player-owned files, ue5 words from the row, prepare keep/restore
+    UE5KEEP = ["PPSA00001.shaders.journal", "PPSA00001.session_a.pipelines.journal", "PPSA00001.pipelines.journal", "PPSA00001.codestore"]
+
+    def ue5_prepare_setup(self):
+        self.set_cache_row(self.UE5ROWS)
+        c = self.ctx(); os.makedirs(c.dir)
+        for f in self.UE5KEEP + ["stale.bin", "PPSA00001.programs.bin", "PPSA00001.codestore.stale"]: open(os.path.join(c.dir, f), "w").write(f)
+        os.makedirs(os.path.join(c.dir, "kk-archive")); open(os.path.join(c.dir, "kk-archive", "x"), "w").write("x")
+        return c
+
+    @staticmethod
+    def ok_runner(seen=None):
+        def runner(cmd, env=None, capture=False):
+            if seen is not None and not capture: seen.append(cmd)
+            return (0, "  shaders 1\n  permutations 2, pipelines 3\n") if capture else 0
+        return runner
+
+    def test_ue5_prepare_wipes_the_rest_but_moves_only_journals_and_the_store(self):
+        c = self.ue5_prepare_setup(); pk = c.dir + ".playerkeep"; during = {}
+        def runner(cmd, env=None, capture=False):
+            if not capture:
+                during["dir"] = sorted(os.listdir(c.dir)); during["keep"] = os.path.isdir(pk)      # the prepare run itself: files already back, the rest wiped
+            return (0, "  shaders 1\n  permutations 2, pipelines 3\n") if capture else 0
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([f for f in during["dir"] if f.endswith((".journal", ".codestore"))], sorted(self.UE5KEEP), during)     # restored BEFORE the run
+        self.assertFalse(during["keep"]); self.assertNotIn("stale.bin", during["dir"])
+        for f in self.UE5KEEP: self.assertEqual(open(os.path.join(c.dir, f)).read(), f)          # back in place afterwards
+        for gone in ("stale.bin", "PPSA00001.programs.bin", "PPSA00001.codestore.stale", "kk-archive"):
+            self.assertFalse(os.path.exists(os.path.join(c.dir, gone)), gone)
+        self.assertFalse(os.path.exists(pk))
+
+    def test_ue5_prepare_that_fails_still_gives_the_players_files_back(self):
+        c = self.ue5_prepare_setup()
+        def runner(cmd, env=None, capture=False): return (1, "boom\n") if capture else 1
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
+        self.assertNotEqual(rc, 0)
+        for f in self.UE5KEEP: self.assertEqual(open(os.path.join(c.dir, f)).read(), f, f)
+        self.assertFalse(os.path.exists(c.dir + ".playerkeep"))
+
+    def test_ue5_prepare_refuses_a_keep_dir_that_is_not_its_own(self):
+        c = self.ue5_prepare_setup(); pk = c.dir + ".playerkeep"; os.makedirs(pk); open(os.path.join(pk, "mine.txt"), "w").write("not ours")
+        seen = []
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], self.ok_runner(seen))
+        self.assertNotEqual(rc, 0); self.assertIn(cache.PLAYERKEEP_MARK, out + err)
+        self.assertEqual(open(os.path.join(pk, "mine.txt")).read(), "not ours")                 # untouched, never deleted
+        for f in self.UE5KEEP: self.assertTrue(os.path.isfile(os.path.join(c.dir, f)), f)       # nothing wiped, nothing run
+        self.assertEqual(seen, [])
+
+    def test_ue5_prepare_with_a_restore_conflict_changes_nothing(self):
+        # an interrupted prepare left the store in the keep dir AND a new one was written since: both stay, the prepare stops
+        c = self.ue5_prepare_setup(); pk = c.dir + ".playerkeep"; os.makedirs(pk)
+        open(os.path.join(pk, cache.PLAYERKEEP_MARK), "w").write("m"); open(os.path.join(pk, "PPSA00001.codestore"), "w").write("OLD")
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], self.ok_runner())
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(open(os.path.join(pk, "PPSA00001.codestore")).read(), "OLD")
+        self.assertEqual(open(os.path.join(c.dir, "PPSA00001.codestore")).read(), "PPSA00001.codestore")
+        self.assertTrue(os.path.isfile(os.path.join(c.dir, "stale.bin")))
+
+    def test_restore_playerkeep_is_a_no_op_without_a_keep_dir_and_creates_the_target(self):
+        d = os.path.join(self.tmp, "t", "c"); pk = d + ".playerkeep"
+        cache.restore_playerkeep(d, pk); self.assertFalse(os.path.exists(d))                   # nothing to restore: nothing created
+        os.makedirs(pk); open(os.path.join(pk, cache.PLAYERKEEP_MARK), "w").write("m"); open(os.path.join(pk, "a.codestore"), "w").write("S")
+        cache.restore_playerkeep(d, pk)                                                         # the cache dir was wiped away entirely: it is recreated
+        self.assertEqual(open(os.path.join(d, "a.codestore")).read(), "S"); self.assertFalse(os.path.exists(pk))
+        cache.restore_playerkeep(d, pk)                                                         # and a second call is harmless
+
+    def test_non_ue5_prepare_keeps_no_player_files(self):
+        c = self.ctx(); os.makedirs(c.dir)
+        for f in ("PPSA00001.shaders.journal", "PPSA00001.codestore", "x.bin"): open(os.path.join(c.dir, f), "w").write(f)
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], self.ok_runner())
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([f for f in os.listdir(c.dir) if f.endswith((".journal", ".codestore", "x.bin"))], [])
+        self.assertFalse(os.path.exists(c.dir + ".playerkeep"))
+
+    def test_ue5_words_follow_the_row_and_the_player_dir(self):
+        self.set_cache_row("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001.000\nue5\tdecoder=0xABC123\tfp=0123456789abcdef\tabi=oodlelz14")
+        c = self.ctx(); w = dict(cache.ue5_words(c))
+        self.assertEqual(w, {"KYTY_PIPELINE_LIST_CODE_STORE": c.dir + "/PPSA00001.codestore", "KYTY_UE5_DECODER": "0xABC123",
+                             "KYTY_UE5_DECODER_FP": "0123456789abcdef", "KYTY_UE5_DECODER_ABI": "oodlelz14", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY": "1"})
+        self.assertNotIn("KYTY_UE5_CODE", w)                                                    # the off switch is the player's, never a profile word
+        # the same words reach the prepare run and the launch phase, nothing else adds them
+        pw, lw = dict(cache.prepare_words(c, "/app0")), dict(cache.launch_words(c, "/app0"))
+        for k, v in w.items():
+            if k != "KYTY_LAUNCH_WAIT_BEFORE_ENTRY": self.assertEqual((pw[k], lw[k]), (v, v), k)
+        self.assertEqual(lw["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
+
+    def test_ue5_row_needs_both_the_code_word_and_the_decoder_row(self):
+        # a profile with only one half (the schema refuses it; the words must not appear even if one slipped through)
+        self.set_cache_row("cache\tkind=kyplst\tdir=player\tapp_ver=01.001.000\nue5\tdecoder=0x1\tfp=0123456789abcdef\tabi=oodlelz14")
+        c = self.ctx(); self.assertIsNone(cache.ue5_row(c.p)); self.assertEqual(cache.ue5_words(c), [])
+        self.assertNotIn("KYTY_UE5_DECODER", dict(cache.launch_words(c, "/app0")))
+        gp = os.path.join(self.tmp, "games", "PPSA00001", "game.tsv")
+        keep = [l for l in open(gp).read().splitlines() if not l.startswith(("cache\t", "ue5\t"))]
+        open(gp, "w").write("\n".join(keep + ["cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001.000"]) + "\n")
+        c = self.ctx(); self.assertIn("code=ue5", c.p.one("cache")); self.assertIsNone(cache.ue5_row(c.p)); self.assertEqual(cache.ue5_words(c), [])
+
+
 if __name__ == "__main__":
     unittest.main()

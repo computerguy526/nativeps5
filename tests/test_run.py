@@ -481,6 +481,44 @@ class CacheKinds(unittest.TestCase):
         for k in self.UE5_KEYS + ("KYTY_PIPELINE_LIST",):
             self.assertNotIn(k, p2.env)
 
+    def ue5plan(self, argv=(), extra=None):
+        d, env = self.mk(self.UE5ROWS); env.update(extra or {})
+        open(os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"list")
+        return d, env, run.compose(*run.parse_args(["PPSA00001"] + list(argv)), env)
+
+    def test_ue5_off_switch_is_the_players_env_word_and_changes_no_other_ue5_word(self):
+        # KYTY_UE5_CODE=0 is read by Kyty (the extraction stays off, the list's runtime shaders stay pending); nps5 never sets it itself
+        d, env, p = self.ue5plan()
+        self.assertNotIn("KYTY_UE5_CODE", p.env)
+        d2, env2, q = self.ue5plan(["--env", "KYTY_UE5_CODE=0"])
+        self.assertEqual(q.env["KYTY_UE5_CODE"], "0"); self.assertEqual(q.layers["KYTY_UE5_CODE"], "--env")
+        for k in self.UE5_KEYS + ("KYTY_PIPELINE_LIST", "KYTY_PIPELINE_REPLAY_ALL"):
+            self.assertEqual(q.env[k].replace(d2, "D"), p.env[k].replace(d, "D"), k)           # same words either way
+
+    def test_ue5_words_come_from_the_profile_row_and_a_later_layer_can_override_them(self):
+        d, env, p = self.ue5plan()
+        self.assertEqual(p.env["KYTY_UE5_DECODER"], "0x926510"); self.assertEqual(p.env["KYTY_UE5_DECODER_FP"], "1f82e44a65371db3")
+        d, env, q = self.ue5plan(["--env", "KYTY_UE5_DECODER_FP=ffffffffffffffff"])
+        self.assertEqual(q.env["KYTY_UE5_DECODER_FP"], "ffffffffffffffff"); self.assertEqual(q.layers["KYTY_UE5_DECODER_FP"], "--env")
+        self.assertEqual(q.env["KYTY_UE5_DECODER"], "0x926510")
+
+    def test_ue5_store_and_journals_live_in_the_player_dir_not_the_run_dir(self):
+        d, env, p = self.ue5plan()
+        pdir = os.path.join(env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player")
+        for k in ("KYTY_PIPELINE_LIST_CODE_STORE", "KYTY_PIPELINE_JOURNAL_PATH", "KYTY_PROGRAM_CACHE_PATH"):
+            self.assertTrue(p.env[k].startswith(pdir + "/"), (k, p.env[k]))
+        self.assertNotIn(p.workdir, p.env["KYTY_PIPELINE_LIST_CODE_STORE"])
+        # the dir does not depend on the stack commits: an update keeps the player's store
+        d2, env2, q = self.ue5plan(extra=dict(NPS5_STACK_KYTY="dddd444", NPS5_STACK_KK="eeee555"))
+        self.assertEqual(os.path.basename(os.path.dirname(q.env["KYTY_PIPELINE_LIST_CODE_STORE"])), "kyty-player")
+
+    def test_ue5_launch_wait_is_set_only_with_the_ue5_row(self):
+        d, env, p = self.ue5plan()
+        self.assertEqual(p.env["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1"); self.assertEqual(p.layers["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "cache")
+        for row in ("cache\tkind=journal", "cache\tkind=kyplst", ""):
+            d, env, q = self.plan(row)
+            self.assertNotIn("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", q.env, row)
+
     def test_ue5_without_a_list_and_plain_kyplst_have_no_ue5_words(self):
         # no list yet: the journal cache of v1.4 (list-less words, KYTY_PIPELINE_LIST=0), none of the ue5 words; a plain kyplst title never gets one
         d, env = self.mk(self.UE5ROWS)
@@ -792,6 +830,35 @@ class ShippedGames(unittest.TestCase):
             except run.Refuse as e:
                 self.fail("%s is refused by check_final (rc %s): %s" % (t, e.code, e))
             self.assertNotEqual(plan.env.get("KYTY_EOP_TIMESTAMPS"), "gpu", t)
+
+    # words a release must never turn on by itself: the flight recorder is compiled in and OFF for players, the object tracer and the
+    # framerate hotkey are opt-in, and playtest cheats are not a feature of any release (the player's own --env can still set them)
+    OFF_BY_DEFAULT = ("KYTY_FLIGHTREC", "NPS5_APEDIAG", "NPS5_APEDIAG_FILE", "NPS5_APEDIAG_IDS", "NPS5_FRAMERATE_HOTKEY",
+                      "NPS5_FRAMERATE_MIN_LEVELS", "NPS5_FRAMERATE_FILE", "NPS5_LEVELFIX_CACHE_DIR")
+
+    def test_no_shipped_title_turns_a_diagnostic_or_cheat_word_on(self):
+        root = os.path.abspath(os.path.join(HERE, ".."))
+        games = os.path.join(root, "games")
+        env = dict(NPS5_GAMES_DIR=games, NPS5_PUBLIC_DIR=root, NPS5_SCRATCH=tempfile.mkdtemp(), NPS5_SELF_MEM_LIMIT_MB="18944", NPS5_RUN_REASON="shipped-title diag test",
+                   NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew")
+        lst = os.path.join(env["NPS5_SCRATCH"], "cvars.list"); open(lst, "w").close()
+        for t in sorted(x for x in os.listdir(games) if os.path.isfile(os.path.join(games, x, "game.tsv"))):
+            plan = run.compose(*run.parse_args([t, "--bin", "/x/native", "--env", "NPS5_UECVAR_LIST=" + lst]), dict(env))
+            for k in self.OFF_BY_DEFAULT:
+                self.assertNotIn(k, plan.env, (t, k))
+            self.assertEqual([k for k in plan.env if "CHEAT" in k.upper() or "GODMODE" in k.upper() or "INFINITE" in k.upper()], [], t)
+            # the profile text itself (not only the composed plan) carries none of them
+            keys = {l.split("\t")[1].split("=")[0] for l in open(os.path.join(games, t, "game.tsv")).read().splitlines() if l.startswith("env\t")}
+            self.assertEqual(keys & set(self.OFF_BY_DEFAULT), set(), t)
+            self.assertEqual([k for k in keys if "CHEAT" in k.upper()], [], t)
+
+    def test_the_players_own_env_can_still_turn_the_recorder_on(self):
+        root = os.path.abspath(os.path.join(HERE, ".."))
+        env = dict(NPS5_GAMES_DIR=os.path.join(root, "games"), NPS5_PUBLIC_DIR=root, NPS5_SCRATCH=tempfile.mkdtemp(), NPS5_SELF_MEM_LIMIT_MB="18944",
+                   NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew")
+        p = run.compose(*run.parse_args(["PPSA21564", "--bin", "/x/native", "--env", "KYTY_FLIGHTREC=1"]), env)
+        self.assertEqual(p.env["KYTY_FLIGHTREC"], "1"); self.assertEqual(p.layers["KYTY_FLIGHTREC"], "--env")
+        self.assertTrue(p.env["KYTY_FLIGHTREC_DIR"].endswith("/flightrec"))                     # the dumps go to the run folder when it is on
 
 
 if __name__ == "__main__":
