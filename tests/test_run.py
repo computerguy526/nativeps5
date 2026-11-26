@@ -446,10 +446,11 @@ class CacheKinds(unittest.TestCase):
                    NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew", NPS5_HW_CACHE_KEY="g16-25G83",
                    NPS5_STACK_KYTY="aaaa111", NPS5_STACK_KK="bbbb222", NPS5_STACK_RECOMP="cccc333", NPS5_RUN_REASON="cache plan test")
         os.makedirs(os.path.join(sc, "titles")); open(os.path.join(sc, "titles", "PPSA21564.env"), "w").write("APP0=%s\nBIN=/b/native\n" % app0)
-        out = run.shader_cache_words("PPSA21564", env, app0)
+        out = run.shader_cache_words("PPSA21564", env, app0, adopt=False)   # a dry plan: the stable dir is only named, not created
         import cache as cm
         cx = cm.context("PPSA21564", env)
-        self.assertEqual(cx.kind, "kyplst"); self.assertEqual(cx.dir, os.path.join(sc, "cache", "PPSA21564", "kyty-" + cx.key))
+        self.assertEqual(cx.kind, "kyplst"); self.assertTrue(cx.stable_dir)   # v1.4.2 cachekey: the profile row NPS5_CACHE_STABLE_DIR=1 names the dir by hardware class
+        self.assertEqual(cx.dir, os.path.join(sc, "cache", "PPSA21564", cm.stable_name("kyty", cx.hw)))
         got = [(k, v) for k, v, _ in out if k]
         want = cm.cache_env("PPSA21564", cx.dir, cx.metal, with_libcache=False, environ=env) + cm.launch_words(cx, app0)
         self.assertEqual(got, want)
