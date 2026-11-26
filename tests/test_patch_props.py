@@ -497,8 +497,9 @@ class Sidecar(Base):
 
 # ---------------------------------------------------------------- processes: concurrency and interruption
 CHILD = r"""
-import importlib.util, os, subprocess, sys, time, json
+import importlib.util, os, signal, subprocess, sys, time, json
 sys.dont_write_bytecode = True
+signal.signal(signal.SIGINT, signal.default_int_handler)  # a background-launched runner (CI wrapper, `&`) starts us with SIGINT ignored
 spec = importlib.util.spec_from_file_location("p", sys.argv[1]); P = importlib.util.module_from_spec(spec); spec.loader.exec_module(P)
 src, out, mode, force, start = sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5] == "1", float(sys.argv[6])
 real = subprocess.run
@@ -561,12 +562,12 @@ class Procs(Base):
             out = self.out("killed")
             p = self.spawn(out, "hang", False, time.time())
             t0 = time.time()
-            while not os.path.exists(out + ".hanging") and time.time() - t0 < 120:
+            while not os.path.exists(out + ".hanging") and time.time() - t0 < 30:
                 time.sleep(0.02)
             self.assertTrue(os.path.exists(out + ".hanging"), "child never reached the signing step")
             self.assertTrue(any(".tmp" in f for f in os.listdir(self.d)), "work happens under a temporary name")
             self.assertFalse(os.path.exists(out)); self.assertFalse(os.path.exists(out + ".patches.json"))
-            p.send_signal(sig); p.communicate(timeout=120)
+            p.send_signal(sig); p.communicate(timeout=30)
             os.remove(out + ".hanging")
             self.assertFalse(os.path.exists(out), "interrupted run must not leave the output (%s)" % sig)
             self.assertFalse(os.path.exists(out + ".patches.json"))
