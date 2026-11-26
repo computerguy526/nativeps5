@@ -3,11 +3,15 @@
 
   nps5 run <id> [--scene NAME] [--until SPEC[+N]] [--secs N] [--class func|perf] [--tag T]
                [--gpu kyty|anyps5] [--bin PATH] [--patch NAMES] [--arm LABEL:KEY=VAL,...]
-               [--env KEY=VAL]... [--workdir NAME] [--save NAME] [--play] [--dry-run]
+               [--env KEY=VAL]... [--workdir NAME] [--save NAME] [--scenery full|reduced|minimal] [--play] [--dry-run]
 
 Environment, lowest to highest: safety base < profile (games/<id>/game.tsv: preset, rows, schema keys, scene rows)
 < titles/<id>.env ENV < scene pad < --arm < --env. The final set is then checked (env_forbidden, GPU profiling
 ban, memory limit never above the machine's, run length cap, one title at a time, no second GPU process).
+--scenery P  the player's scenery setting (also NPS5_SCENERY in the environment, `--env`, or titles/<id>.env). `full` (default, or
+unset) changes nothing. `reduced` / `minimal` thin the level objects the title's profile has `scenery` rows for: a copy of your own level
+file is generated under <scratch>/scenery/<id>/<preset>/ and mounted by the runtime (NPS5_OVERLAY_DIR); the game folder is never written.
+A source that is not the file the row was made for gets no overlay and one warning. Refused (exit 2) together with your own NPS5_OVERLAY_DIR.
 --play  a person playing at the keyboard, not a test: sound on, no --until target and no early stop by the watcher, up
 to 7200 s (the default) without NPS5_RUN_REASON. Every other safety rule stays. Not for scripts or agents: the 180 s cap
 is what bounds an unattended run.
@@ -56,6 +60,11 @@ def _watch():
 
 def _logsummary():
     spec = importlib.util.spec_from_file_location("nps5_logsummary", os.path.join(HERE, "logsummary.py"))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+
+
+def _scenery():
+    spec = importlib.util.spec_from_file_location("nps5_scenery", os.path.join(HERE, "scenery.py"))
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 
 
@@ -371,6 +380,43 @@ def build_patched(sel, p, environ, runner=None):
         raise Refuse("nps5 patch failed (rc %d); nothing was run" % rc, 78)
 
 
+def scenery_overlay(plan, p, opts, environ, scratch, app0, dry):
+    """The `scenery` setting (scripts/nps5lib/scenery.py). `full` / unset: nothing is added (the launch is byte-identical to a run
+    without the setting). Otherwise, when the profile has rows for the preset, the overlay folder is generated from the player's own
+    level file and NPS5_OVERLAY_DIR points at it. The setting word itself is removed from the title's environment."""
+    sc = _scenery()
+    setting = opts.get("scenery") or plan.env.get("NPS5_SCENERY") or environ.get("NPS5_SCENERY") or "full"
+    if "NPS5_SCENERY" in plan.env:
+        del plan.env["NPS5_SCENERY"]; plan.order.remove("NPS5_SCENERY"); plan.layers.pop("NPS5_SCENERY", None)
+    if setting not in sc.PRESETS:
+        raise Refuse("scenery %r: full, reduced or minimal" % setting, 2)
+    if setting == "full":
+        return
+    prows = p.get("scenery")
+    if not prows:
+        plan.warnings.append("scenery: %s has no scenery rows; the setting %s does nothing" % (p.id, setting)); return
+    try:
+        rows = sc.rows_for(prows, setting)
+    except ValueError as e:
+        raise Refuse("games/%s/game.tsv scenery row: %s" % (p.id, e), 78)
+    if not rows:
+        plan.warnings.append("scenery: %s has no rows for %s; the setting does nothing" % (p.id, setting)); return
+    if "NPS5_OVERLAY_DIR" in plan.env:
+        raise Refuse("--scenery %s cannot be combined with NPS5_OVERLAY_DIR (set by %s): the runtime mounts one overlay folder. "
+                     "Use one of them" % (setting, plan.layers.get("NPS5_OVERLAY_DIR", "?")), 2)
+    target = sc.overlay_dir(scratch, p.id, setting)
+    if dry:
+        plan.put("NPS5_OVERLAY_DIR", target, "scenery"); plan.warnings.append("scenery: %s (dry run: not generated)" % setting); return
+    try:
+        target, lines = sc.generate(app0, scratch, p.id, setting, rows)
+    except sc.Skip as e:
+        plan.warnings.append("WARNING: scenery %s not applied, the game starts unchanged: %s" % (setting, e)); return
+    except OSError as e:
+        plan.warnings.append("WARNING: scenery %s not applied, the game starts unchanged: %s" % (setting, e.strerror or e)); return
+    plan.put("NPS5_OVERLAY_DIR", target, "scenery")
+    plan.warnings += ["scenery: %s: %s" % (setting, l) for l in lines]
+
+
 def compose(tid, opts, environ=None, g=None):
     """Resolve a request into a Plan. No side effects beyond reading files."""
     environ = machine_env(environ)
@@ -525,6 +571,8 @@ def compose(tid, opts, environ=None, g=None):
         plan.put(k, v, "--env")
     if "NPS5_TITLE_RUN" in plan.env:
         plan.env["NPS5_TITLE_RUN"] = "1"
+    # 5b. the player's scenery setting (off unless asked: nothing is added)
+    scenery_overlay(plan, p, opts, environ, scratch, titles.get("APP0") or "", bool(opts.get("dry")))
     # checks and binary
     check_final(g, p, plan, secs, environ, gpu)
     plan.tid, plan.tag, plan.cls, plan.gpu, plan.scene, plan.secs, plan.until = tid, tag, cls, gpu, scene, secs, until
@@ -966,7 +1014,7 @@ def dry_run_text(plan, bininfo=None):
 def parse_args(argv):
     opts = dict(env=[]); pos = []; i = 0
     VAL = {"--scene": "scene", "--until": "until", "--secs": "secs", "--class": "class", "--tag": "tag", "--gpu": "gpu", "--bin": "bin",
-           "--patch": "patch", "--arm": "arm", "--workdir": "workdir", "--save": "save"}
+           "--patch": "patch", "--arm": "arm", "--workdir": "workdir", "--save": "save", "--scenery": "scenery"}
     while i < len(argv):
         a = argv[i]
         if a in VAL or a == "--env":
@@ -1142,7 +1190,7 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
     """The real run. Returns the exit code. Ticket -> lock -> binary -> run -> manifest verify -> run.json."""
     warn, busy = preflight(plan)
     for w in plan.warnings:
-        if w.startswith("WARNING"): print("nps5 run: " + w, file=sys.stderr)
+        if w.startswith(("WARNING", "scenery:")): print("nps5 run: " + w, file=sys.stderr)
     plan.warnings += warn
     for w in warn: print("nps5 run: warning: " + w, file=sys.stderr)
     if busy:

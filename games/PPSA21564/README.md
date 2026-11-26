@@ -132,6 +132,7 @@ Run-time settings of the translated binary (settings dialog `NPS5_SETTINGS_DIALO
 |---|---|---|---|
 | `fast_lighting` (`NPS5_ASTRO_FAST_LIGHTING`) | on, off | on | on = the non-tiled lighting path (the `nt` patch as a setting) |
 | `upscaling` (`NPS5_ASTRO_UPSCALING`) | `off`, `metalfx900`, `metalfx720` | `metalfx720` | `metalfx900`/`metalfx720` render the scene at 900p/720p and scale it with Apple MetalFX (spatial); 720p is the default since v1.0.3, `off` = native 1080p with the game's own upscaler. The blocky squares are fixed in v1.0.3, edges are more jagged than native, little fps gain (see `lowres` above); needs the `dr` patch |
+| `scenery` (`nps5 run --scenery`, `NPS5_SCENERY`) | `full`, `reduced`, `minimal` | `full` | opt-in, "Apes on the Loose" only (`hero_ape_escape`). `reduced` removes the flowers and grass tufts, `minimal` also the moss patches; bushes, trees, pillars, ground leaves and anything with links or children stay. `nps5` generates a thinned copy of your own `level.lvx` under `<scratch>/scenery/PPSA21564/<preset>/` (only if the file's sha256 is the one the profile row was made for, else no overlay and one warning) and mounts it over the game folder with `NPS5_OVERLAY_DIR`; the game folder is never written. Cannot be combined with your own `NPS5_OVERLAY_DIR`. The profile rows hold hashes of model-name prefixes, no names. Keep it `full` for gameplay checks of that level's apes and bosses |
 
 ## Known issues
 

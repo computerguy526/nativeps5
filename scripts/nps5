@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """nps5: one command name. `run` and `patch` are handled here (scripts/nps5lib/); every other subcommand
 (build, list, play, launcher, doctor, ...) passes through to the Go nps5 of ps5recomp.
-  nps5 run <id> [--scene X] [--until SPEC] [--arm LABEL:K=V,...] [--class func|perf] [--secs N] [--dry-run] ...
+  nps5 run <id> [--scene X] [--until SPEC] [--arm LABEL:K=V,...] [--class func|perf] [--secs N] [--scenery full|reduced|minimal] [--dry-run] ...
   nps5 log <run|file> [--summary] [--rate] [--level W]   readable view of a noisy run log + the SUMMARY block
   nps5 bug-report [<run>|--last] [--out F.zip] [--dry-run]   one zip of redacted text logs + versions + settings for an issue
   nps5 analyze|ab|pics|report ...   frame stats, noise-aware A/B, picture sheets, PR evidence (docs/agents/evidence.md)

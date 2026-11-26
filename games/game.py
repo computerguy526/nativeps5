@@ -214,12 +214,18 @@ def v_addrbuild(v, a):
     if not w or not re.fullmatch(r"0x[0-9a-fA-F]+", w[0]): return "guest address (hex) first"
     for x in w[1:]:
         if not re.fullmatch(r"build=\S+", x): return "only build=<version> may follow the address"
+def v_scenery(v, a):
+    try:
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("nps5_scenery", os.path.join(REPO, "scripts", "nps5lib", "scenery.py"))
+        m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); m.parse_row(v)
+    except ValueError as e: return str(e)
 def v_stage(v, a): return None if len(v) == 1 and v[0] in STAGES else "S0..S8 expected"
 
 VALIDATORS = {"text": v_text, "id": v_id, "int": v_int, "hex": v_hex, "wxh": v_wxh, "wxh_opt": v_wxh_opt, "enum": v_enum,
               "version": v_version, "words": v_words, "relpath": v_relpath, "build": v_build, "lineage": v_lineage,
               "kvwords": v_kvwords, "envrow": v_envrow, "forbidrow": v_forbid, "marker": v_marker, "runsecs": v_runsecs,
-              "cache": v_cache, "ue5row": v_ue5, "addrbuild": v_addrbuild, "stage": v_stage}
+              "cache": v_cache, "ue5row": v_ue5, "scenery": v_scenery, "addrbuild": v_addrbuild, "stage": v_stage}
 
 
 def mem_limit_error(k, val, limit=MEM_LIMIT_MAX):

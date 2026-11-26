@@ -46,6 +46,13 @@ run_secs	default=90	max=180
 blank_fail_s	90
 cache	kind=kyplst	limit_mb=896	app_ver=01.007.000
 
+# ---- Player setting `scenery` (nps5 run --scenery reduced|minimal; default full = no row used, no overlay) ----
+# One row per level and preset. src= is the sha256 of the level file the row was made for (another game version: no overlay, one warning).
+# drop= keys are <length>:<first 16 hex of sha256(model-name prefix of that length)>: no asset names in the repository.
+# The generated copy is mounted over the game folder by the runtime (NPS5_OVERLAY_DIR); the game folder is never written. Why: games/PPSA21564/README.md, Settings.
+scenery	hero_ape_escape	reduced	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7
+scenery	hero_ape_escape	minimal	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7,19:9645c26dad834bc3
+
 # ---- Environment words (deltas over the preset; the reason for each is in README.md, "Canonical configuration and why") ----
 # Order matters: a later row for the same KEY wins. `when` is - or gpu=kyty|anyps5, build=, scene=, class=, and the hardware
 # conditions hw= hw!= gpufam= ram<= cores<= os>= (docs/reference/hardware.md). Rows for hardware nobody has run say `untested`.
