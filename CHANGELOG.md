@@ -20,10 +20,10 @@ Everything in v1.4.0, plus the fix that lets players build SAROS. **Update:** `n
   itself (linked, its `libSceAmpr` would replace the system library). Measured on an M5 Pro (`nps5 build`, then `nps5 run` with the v1.4.0 libraries, 150 s runs):
   - the build from the dump and the build from a folder of links match: 2,411 imports, 146 linked modules, 53 unresolved, 681,043 functions, the same function map;
     the development program also has 146 linked modules and 53 unresolved;
-  - three runs ended `DONE_FIXED` with 0 unimplemented-function calls and 0 unsupported-instruction hits;
-  - motion worked on a virtual pad, with 0 live shader compiles at the peak on a warm cache and a peak footprint of 13.0 to 13.8 GB.
+  - three runs ended `DONE_FIXED` with 0 unimplemented-function calls and 0 unsupported-instruction hits; the last frame dump of the longest run shows the title's animated background;
+  - motion worked on a virtual pad, with 0 live shader compiles at the peak on a warm cache and a peak footprint of 13.0 to 13.8 GiB (13,292 to 14,114 MiB; 3.3 GiB with the v1.4.0 build).
 
-  A played session on a v1.4.1 build is still owed; no frame rate is claimed.
+  In-level play has not yet been verified on a v1.4.1 build (the runs pressed no button, so they never left the title); no frame rate is claimed.
 - **SAROS: the console-variable list recipe works from the public tools.** `uecvar xref` + `uecvar dumplist` on the eboot gives 5,095 entries. It is identical to the
   list the development checks used.
 
