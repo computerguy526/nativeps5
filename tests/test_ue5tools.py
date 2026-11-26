@@ -266,12 +266,24 @@ case $1 in
  info) echo "  title PPSA00009, version 1.0, 1 things"; echo "  shaders 3 (vertex 1, pixel 1, compute 1); permutations 4"; echo "  permutations 4, pipelines 5";;
  drop) while [ $# -gt 0 ]; do case $1 in --list) l=$2; shift 2;; --out) o=$2; shift 2;; --dropped) d=$2; shift 2;; --hashes) h=$2; shift 2;; *) shift;; esac; done
    cp "$l" "$o"; printf '# hash\\tkind\\tcode\\treason\\n0x1\\tcompute\\truntime\\tx\\n' > "$d"; echo "drop: $(grep -c 0x "$h") hashes named, 1 shaders dropped, 1 permutations, 0 of 5 pipelines; wrote $o";;
+ hashes) printf '0x00000000000000a1\tcompute\n0x00000000000000b2\tpixel\n';;
  verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "  section 3: 100 bytes, 2 code windows"; echo "verify: FAILED, the list contains shader code"; exit 1; }
    [ -n "$STUB_ODD_VERIFY" ] && { echo "verify: something unexpected"; exit 0; }
    # the real tool: the result line, then (when the list has <runtime> shaders) a LAST line with the coverage
    echo "  file: 100 bytes, 0 code windows"; echo "verify: no shader code in the list"
    echo "verify: ${STUB_UNCOVERED:-0} runtime shaders not covered by a --shaders journal (of 12)"; [ "${STUB_UNCOVERED:-0}" != 0 ] && exit 1; exit 0;;
 esac
+"""
+
+
+SPV_STUB = r"""#!/bin/bash
+# fake kyty_spv_dump --probe: records its arguments, writes the rows $STUB_PROBE_ROWS to --out (an unprobed.txt and a log too)
+echo "SPV $@" >> "$STUB_LOG"
+[ "$1" = --probe ] || exit 9
+while [ $# -gt 0 ]; do case $1 in --out) o=$2; shift 2;; --log) l=$2; shift 2;; --unprobed) u=$2; shift 2;; --hashes) cp "$2" "$STUB_HASHES_COPY"; shift 2;; *) shift;; esac; done
+printf "$STUB_PROBE_ROWS" > "$o"; : > "$l"; : > "$u"
+[ -n "$STUB_PROBE_FAIL" ] && exit 1
+echo "probe: 2 programs probed (3 permutations), $(grep -c 0x "$o") dropped (1 refused/crashed/timeout, 0 ray tracing), 0 listed programs not in any cache"
 """
 
 
@@ -355,6 +367,66 @@ class Harvest(unittest.TestCase):
         self.assertEqual(rc, 2); self.assertIn("is not a file", out)
         rc, out = self.run_h("PPSA00009", "--game", self.game, self.dirs[0])             # without the option: no drop call, no stale dropped.tsv
         self.assertEqual(rc, 0); self.assertFalse(os.path.exists(os.path.join(self.out_dir(), "dropped.tsv")))
+
+    def probe_env(self, rows="0x00000000000000a1\\trefused: EXIT SPIR-V validation failed\\n"):
+        spv = os.path.join(self.tmp, "spv.sh"); open(spv, "w").write(SPV_STUB); os.chmod(spv, 0o755)
+        for d in self.dirs: open(os.path.join(d, "PPSA00009.programs.bin"), "w").write("p")
+        self.hashes_copy = os.path.join(self.tmp, "hashes.copy")
+        return dict(NPS5_SPVDUMP_TOOL=spv, STUB_PROBE_ROWS=rows, STUB_HASHES_COPY=self.hashes_copy)
+
+    def test_probe_drops_refused_programs_before_check(self):
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--probe", "--probe-jobs", "6", "--probe-timeout", "30", *self.dirs, env=self.probe_env())
+        self.assertEqual(rc, 0, out)
+        log = open(self.log).read().splitlines()
+        spv = [l for l in log if l.startswith("SPV")][0]
+        for d in self.dirs: self.assertIn("--programs %s/PPSA00009.programs.bin" % d, spv)
+        self.assertIn("--jobs 6", spv); self.assertIn("--timeout 30", spv); self.assertNotIn("--rt", spv)       # no game.tsv: ray tracing stays
+        self.assertEqual(open(self.hashes_copy).read().count("0x"), 2)                                           # the list's hashes (tool `hashes`)
+        i_drop = [i for i, l in enumerate(log) if l.startswith("drop")]; i_chk = [i for i, l in enumerate(log) if l.startswith("check")]
+        self.assertTrue(i_drop and i_drop[0] < i_chk[0]); self.assertIn("--hashes %s/drop.hashes" % self.out_dir(), log[i_drop[0]])
+        self.assertIn("probe: 2 programs probed", out); self.assertIn("probe: 2 programs probed", open(os.path.join(self.out_dir(), "counts.txt")).read())
+        self.assertIn("0x00000000000000a1", open(os.path.join(self.out_dir(), "probe.tsv")).read())
+
+    def test_probe_rt_follows_the_title_profile(self):
+        env = self.probe_env(); tsv = os.path.join(self.games, "PPSA00009", "game.tsv")
+        open(tsv, "w").write("env\tNPS5_UECVAR_SET=r.Nanite.X=0,r.RayTracing.Enable=0,g.Y=1\tgpu=kyty\tnote\n")
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--probe", self.dirs[0], env=env)[0], 0)
+        self.assertIn("--rt", [l for l in open(self.log).read().splitlines() if l.startswith("SPV")][-1])
+        os.remove(self.log)
+        open(tsv, "w").write("env\tNPS5_UECVAR_SET=r.RayTracing.Enable=1\tgpu=kyty\tnote\n")      # a title that runs ray tracing: no --rt
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--probe", self.dirs[0], env=env)[0], 0)
+        self.assertNotIn("--rt", open(self.log).read().split("SPV")[1])
+        os.remove(self.log)
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--probe", "--probe-rt", "on", self.dirs[0], env=env)[0], 0)
+        self.assertIn("--rt", open(self.log).read().split("SPV")[1])
+        os.remove(self.log); open(tsv, "w").write("env\tNPS5_UECVAR_SET=r.RayTracing.Enable=0\tgpu=kyty\tnote\n")
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--probe", "--probe-rt", "off", self.dirs[0], env=env)[0], 0)
+        self.assertNotIn("--rt", open(self.log).read().split("SPV")[1])
+
+    def test_probe_errors_and_other_titles_unaffected(self):
+        env = self.probe_env()
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--probe", self.dirs[0], env=dict(env, STUB_PROBE_FAIL="1"))
+        self.assertEqual(rc, 1); self.assertIn("probe FAILED", out)
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--probe", self.dirs[0], env=dict(env, NPS5_SPVDUMP_TOOL=os.path.join(self.tmp, "none")))
+        self.assertEqual(rc, 2); self.assertIn("no probe tool", out)
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--probe", self.empty, self.dirs[0], env=env)
+        self.assertEqual(rc, 0, out)
+        os.remove(self.log)
+        for d in self.dirs: os.remove(os.path.join(d, "PPSA00009.programs.bin"))
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--probe", self.dirs[0], env=env); self.assertEqual(rc, 1); self.assertIn("no PPSA00009*.programs.bin", out)
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, "--probe-rt", "maybe", self.dirs[0])[0], 2)
+        # without --probe nothing of the probe runs (the ASTRO path): no hashes call, no probe files, no drop
+        os.remove(self.log)
+        self.assertEqual(self.run_h("PPSA00009", "--game", self.game, self.dirs[0], env=env)[0], 0)
+        log = open(self.log).read(); self.assertNotIn("SPV", log); self.assertFalse([l for l in log.splitlines() if l.startswith(("hashes", "drop"))])
+        self.assertFalse(os.path.exists(os.path.join(self.out_dir(), "probe.tsv")))
+
+    def test_probe_and_drop_hashes_combine(self):
+        h = os.path.join(self.tmp, "h.txt"); open(h, "w").write("0x00000000000000b2\tBVH\n")
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--probe", "--drop-hashes", h, self.dirs[0], env=self.probe_env())
+        self.assertEqual(rc, 0, out)
+        both = open(os.path.join(self.out_dir(), "drop.hashes")).read()
+        self.assertIn("0x00000000000000a1", both); self.assertIn("0x00000000000000b2", both)
 
     def test_failed_check_and_verify_adopt_nothing(self):
         rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", "--code-store", "/x/s", "--require-runtime", "100", self.dirs[0], env=dict(STUB_FAIL_CHECK="1"))
