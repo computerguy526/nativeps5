@@ -216,13 +216,15 @@ class Wiring(unittest.TestCase):
         self.titles("PPSA00001", ""); self.assertIn("reduced", self.plan([], env={"NPS5_SCENERY": "reduced"}).env["NPS5_OVERLAY_DIR"])
         self.assertIn("minimal", self.plan(["--scenery", "minimal"], env={"NPS5_SCENERY": "reduced"}).env["NPS5_OVERLAY_DIR"])
 
-    def test_own_overlay_dir_is_refused_not_merged(self):
+    def test_own_overlay_dir_is_combined_not_refused(self):
         self.titles("PPSA00001", "")
-        with self.assertRaises(run.Refuse) as c: self.plan(["--scenery", "reduced", "--env", "NPS5_OVERLAY_DIR=/x"])
-        self.assertEqual(c.exception.code, 2); self.assertIn("NPS5_OVERLAY_DIR", str(c.exception))
+        uo = os.path.join(self.d, "uo"); os.makedirs(os.path.join(uo, "cfg")); wr(os.path.join(uo, "cfg", "Engine.ini"), "x")
+        pl = self.plan(["--scenery", "reduced", "--env", "NPS5_OVERLAY_DIR=" + uo])
+        od = pl.env["NPS5_OVERLAY_DIR"]; self.assertNotEqual(od, uo)
+        self.assertTrue(os.path.isfile(os.path.join(od, "cfg", "Engine.ini"))); self.assertTrue(os.path.isfile(os.path.join(od, self.rel)))
+        self.assertEqual(self.plan([]).env.get("NPS5_OVERLAY_DIR"), None)           # without the setting nothing is touched
         self.titles("PPSA00001", 'ENV="NPS5_OVERLAY_DIR=/y"\n')
-        with self.assertRaises(run.Refuse): self.plan(["--scenery", "minimal"])
-        self.assertEqual(self.plan([]).env["NPS5_OVERLAY_DIR"], "/y")           # without the setting the user's own folder is untouched
+        self.assertEqual(self.plan([]).env["NPS5_OVERLAY_DIR"], "/y")
 
     def test_bad_value_refused(self):
         self.titles("PPSA00001", "")

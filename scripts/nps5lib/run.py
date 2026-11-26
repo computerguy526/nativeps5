@@ -381,40 +381,58 @@ def build_patched(sel, p, environ, runner=None):
 
 
 def scenery_overlay(plan, p, opts, environ, scratch, app0, dry):
-    """The `scenery` setting (scripts/nps5lib/scenery.py). `full` / unset: nothing is added (the launch is byte-identical to a run
-    without the setting). Otherwise, when the profile has rows for the preset, the overlay folder is generated from the player's own
-    level file and NPS5_OVERLAY_DIR points at it. The setting word itself is removed from the title's environment."""
+    """The `scenery` setting and the profile's `levelfix` rows (scripts/nps5lib/scenery.py): both end in ONE generated level file in
+    one overlay folder (NPS5_OVERLAY_DIR). `full` / unset scenery and no level-fix rows (or NPS5_LEVELFIX=0): nothing is added (the
+    launch is byte-identical to a launch without the feature). Level fixes are ON whenever the profile has rows for the title; a game
+    version the rows were not made for gets no overlay and one warning. A player's own NPS5_OVERLAY_DIR (or <userdata>/overlay) is
+    combined with the generated folder (symlinks; the player's file wins on the same path). The setting words are removed from the
+    title's environment."""
     sc = _scenery()
     setting = opts.get("scenery") or plan.env.get("NPS5_SCENERY") or environ.get("NPS5_SCENERY") or "full"
-    if "NPS5_SCENERY" in plan.env:
-        del plan.env["NPS5_SCENERY"]; plan.order.remove("NPS5_SCENERY"); plan.layers.pop("NPS5_SCENERY", None)
+    fixset = plan.env.get("NPS5_LEVELFIX", environ.get("NPS5_LEVELFIX", "1"))
+    for k in ("NPS5_SCENERY", "NPS5_LEVELFIX"):
+        if k in plan.env:
+            del plan.env[k]; plan.order.remove(k); plan.layers.pop(k, None)
     if setting not in sc.PRESETS:
         raise Refuse("scenery %r: full, reduced or minimal" % setting, 2)
-    if setting == "full":
-        return
-    prows = p.get("scenery")
-    if not prows:
-        plan.warnings.append("scenery: %s has no scenery rows; the setting %s does nothing" % (p.id, setting)); return
+    if fixset not in ("0", "1"):
+        raise Refuse("NPS5_LEVELFIX %r: 0 or 1" % fixset, 2)
+    rows, fixes = [], []
     try:
-        rows = sc.rows_for(prows, setting)
+        if setting != "full":
+            prows = p.get("scenery")
+            if not prows:
+                plan.warnings.append("scenery: %s has no scenery rows; the setting %s does nothing" % (p.id, setting))
+            else:
+                rows = sc.rows_for(prows, setting)
+                if not rows:
+                    plan.warnings.append("scenery: %s has no rows for %s; the setting does nothing" % (p.id, setting))
+        if fixset == "1":
+            fixes = sc.fixes_for(p.get("levelfix") or [])
     except ValueError as e:
-        raise Refuse("games/%s/game.tsv scenery row: %s" % (p.id, e), 78)
-    if not rows:
-        plan.warnings.append("scenery: %s has no rows for %s; the setting does nothing" % (p.id, setting)); return
-    if "NPS5_OVERLAY_DIR" in plan.env:
-        raise Refuse("--scenery %s cannot be combined with NPS5_OVERLAY_DIR (set by %s): the runtime mounts one overlay folder. "
-                     "Use one of them" % (setting, plan.layers.get("NPS5_OVERLAY_DIR", "?")), 2)
-    target = sc.overlay_dir(scratch, p.id, setting)
+        raise Refuse("games/%s/game.tsv scenery/levelfix row: %s" % (p.id, e), 78)
+    if not rows and not fixes:
+        return
+    what = " + ".join(x for x in (setting + " scenery" if rows else "", "level fixes" if fixes else "") if x)
+    user = plan.env.get("NPS5_OVERLAY_DIR")
+    if not user and plan.env.get("NPS5_USERDATA_DIR") and os.path.isdir(os.path.join(plan.env["NPS5_USERDATA_DIR"], "overlay")):
+        user = os.path.join(plan.env["NPS5_USERDATA_DIR"], "overlay")     # the runtime's implicit overlay: an explicit one replaces it
+    target = sc.overlay_dir(scratch, p.id, setting, bool(fixes))
     if dry:
-        plan.put("NPS5_OVERLAY_DIR", target, "scenery"); plan.warnings.append("scenery: %s (dry run: not generated)" % setting); return
+        plan.put("NPS5_OVERLAY_DIR", target, "scenery")
+        plan.warnings.append("scenery: %s (dry run: not generated%s)" % (what, "; combined with " + user if user else "")); return
     try:
-        target, lines = sc.generate(app0, scratch, p.id, setting, rows)
-    except sc.Skip as e:
-        plan.warnings.append("WARNING: scenery %s not applied, the game starts unchanged: %s" % (setting, e)); return
-    except OSError as e:
-        plan.warnings.append("WARNING: scenery %s not applied, the game starts unchanged: %s" % (setting, e.strerror or e)); return
+        target, lines = sc.generate(app0, scratch, p.id, setting if rows else "full", rows, fixes)
+        if user:
+            merged = os.path.join(scratch, "scenery", p.id, "merged")
+            target, left_out = sc.merge_overlay(target, user, merged)
+            lines.append("combined with your overlay %s" % user)
+            lines += ["WARNING: your overlay has %s: not replaced by the generated file" % x for x in left_out]
+    except (sc.Skip, OSError) as e:
+        plan.warnings.append("WARNING: %s not applied, the game starts unchanged: %s" % (what, e if isinstance(e, sc.Skip) else (e.strerror or e)))
+        return
     plan.put("NPS5_OVERLAY_DIR", target, "scenery")
-    plan.warnings += ["scenery: %s: %s" % (setting, l) for l in lines]
+    plan.warnings += ["scenery: %s: %s" % (what, l) for l in lines]
 
 
 def compose(tid, opts, environ=None, g=None):

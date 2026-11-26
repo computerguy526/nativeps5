@@ -26,6 +26,7 @@
 #   ue5row    decoder=<0x guest vaddr> fp=<16 hex FNV-1a 64 of the 64 bytes at it> abi=oodlelz14 (all three; needs cache code=ue5, which needs kind=kyplst dir=player)
 #   addrbuild guest address (hex) [build=<version or eboot prefix>]
 #   scenery   <level> <preset> src=<sha256> class=<class> drop=<len>:<hash16>[,...]; preset = reduced | minimal; names only as hashes of model-name prefixes (scripts/nps5lib/scenery.py)
+#   levelfix  <level> src=<sha256> class=<class> object=<len>:<hash16> attr=<Attribute> old=<v> new=<v>; one level-file value, applied to your own copy through the overlay (default on, NPS5_LEVELFIX=0 off; scripts/nps5lib/scenery.py)
 #   stage     S0..S8 (evidence per stage is checked: see game.py STAGE_EVIDENCE)
 # Free keys: fact.<anything> is never read by a tool (people and the README only). Any other unknown key is an error.
 # Conditional env rows: `env<TAB>KYTY_X=1<TAB>gpu=kyty,class=perf<TAB>why`. All conditions must hold (AND). Only conditions whose
@@ -75,5 +76,6 @@ stall_fail_s	int	no	one	-	-	run	early-stop stall threshold, seconds
 cache	cache	no	one	-	-	cache	which prepare step the title has (code=ue5: the list's <runtime> shaders get their code from the game's own shader library at start)
 ue5	ue5row	no	one	-	-	cache, run	UE5 shader library decoder: guest vaddr, fingerprint, call convention (code=ue5 titles)
 scenery	scenery	no	many	-	-	run	the player's `scenery` setting (nps5 run --scenery): rows that say which level objects a preset removes; no row = the setting does nothing for the title
+levelfix	levelfix	no	many	-	-	run	level-file attribute fixes (nps5 run, default on; NPS5_LEVELFIX=0 turns off): one object (by hashed name suffix), one attribute, expected old value, new value; a game version whose level file hashes differently gets no overlay and one warning
 uecvars	relpath	no	one	-	-	run	Unreal console-variable table
 stage	stage	no	one	S0|S1|S2|S3|S4|S5|S6|S7|S8	-	game.py check, README	bring-up stage reached

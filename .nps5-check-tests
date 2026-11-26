@@ -1,11 +1,12 @@
 scripts/check.sh --selftest
 for f in scripts/*.sh host/*.sh kosmickrisp/build-kosmickrisp.sh tools/*/*.sh; do bash -n "$f" || exit 1; done
-python3 -I -m py_compile scripts/nps5_check.py tools/xray/xray.py tools/agxdis/agxdis.py tools/shaderlab/*.py host/gpucache_prune.py games/game.py tests/test_game.py scripts/nps5lib/hw.py tests/test_hw.py tests/test_share.py scripts/nps5 scripts/nps5lib/run.py scripts/nps5lib/metal.py scripts/nps5lib/ovguard.py scripts/nps5lib/harvestall.py tests/test_harvestall.py scripts/nps5lib/patch.py scripts/nps5lib/watch.py scripts/nps5lib/scenery.py tests/test_scenery.py
+python3 -I -m py_compile scripts/nps5_check.py tools/xray/xray.py tools/agxdis/agxdis.py tools/shaderlab/*.py host/gpucache_prune.py games/game.py tests/test_game.py scripts/nps5lib/hw.py tests/test_hw.py tests/test_share.py scripts/nps5 scripts/nps5lib/run.py scripts/nps5lib/metal.py scripts/nps5lib/ovguard.py scripts/nps5lib/harvestall.py tests/test_harvestall.py scripts/nps5lib/patch.py scripts/nps5lib/watch.py scripts/nps5lib/scenery.py tests/test_scenery.py tests/test_levelfix.py
 python3 -I tests/test_check.py
 python3 -I tests/test_game.py
 python3 -I tests/test_ovguard.py
 python3 -I tests/test_harvestall.py
 python3 -I tests/test_scenery.py
+python3 -I tests/test_levelfix.py
 python3 -I scripts/nps5lib/ovguard.py check
 python3 -I -m py_compile scripts/nps5lib/profdrift.py tests/test_profdrift.py
 python3 -I tests/test_profdrift.py

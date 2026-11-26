@@ -53,6 +53,12 @@ cache	kind=kyplst	limit_mb=896	app_ver=01.007.000
 scenery	hero_ape_escape	reduced	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7
 scenery	hero_ape_escape	minimal	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7,19:9645c26dad834bc3
 
+# ---- Level fix (default ON; NPS5_LEVELFIX=0 turns it off): Apes on the Loose, 6th catch ----
+# The 6th catch fires the boss-start chain; the delay trigger that starts the statue sequence waits 0.6 s, so at our frame rates the sequence starts
+# before the rescue presentation and the presentation hangs (ape bar stuck, no animation; a soft-lock). 8.0 s lets the rescue show first (proven by a
+# play test: delay ran 8.4 s, rescue showed). Same overlay as `scenery`; src= guard as there. Why: games/PPSA21564/README.md, Known issues.
+levelfix	hero_ape_escape	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=delay_trigger	object=59:a1da091914d9c49b	attr=EnterDelay	old=0.6	new=8.0
+
 # ---- Environment words (deltas over the preset; the reason for each is in README.md, "Canonical configuration and why") ----
 # Order matters: a later row for the same KEY wins. `when` is - or gpu=kyty|anyps5, build=, scene=, class=, and the hardware
 # conditions hw= hw!= gpufam= ram<= cores<= os>= (docs/reference/hardware.md). Rows for hardware nobody has run say `untested`.

@@ -2200,6 +2200,7 @@ NPS5_LAZY_DISPATCH	ps5recomp		pkg/runtime/core/recomp_runtime.c
 NPS5_LEAN	ps5recomp		pkg/cli/stamp.go
 NPS5_LEAN_CHECK	ps5recomp		pkg/runtime/core/nps5_lean.c
 NPS5_LEAN_HOOKS	ps5recomp		pkg/runtime/core/nps5_lean.c
+NPS5_LEVELFIX	nativeps5	`1` (default) | `0`: profile `levelfix` rows (level-file value fixes, e.g. the Apes on the Loose 6th-catch soft-lock) applied through an overlay folder by `nps5 run`; 0 turns them off	scripts/nps5lib/run.py
 NPS5_LIBKERNEL_HLE_H	ps5recomp		pkg/thunkgen/thunkgen_test.go
 NPS5_LOG	ps5recomp		pkg/diag/diag_test.go
 NPS5_LOG_RATE	ps5recomp	first,every: thin repeated periodic log lines (default off)	pkg/runtime/modules/libSceAnyPS5/nps5_log.h

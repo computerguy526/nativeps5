@@ -13,6 +13,13 @@ Profile rows (games/<id>/game.tsv, schema type `scenery`; the profile carries no
   An object is a drop candidate when its class equals `class=` and its model name's first <len> characters hash (sha256, first 16
   hex digits) to <hash>. Names are matched by hash in the same spirit as shader keys; the names themselves stay out of the repository.
 
+Level attribute fixes (the same overlay, schema type `levelfix`; default ON for a title that has rows, NPS5_LEVELFIX=0 opts out):
+  levelfix <level> src=<sha256> class=<object class> object=<len>:<hash> attr=<Attribute> old=<value> new=<value>
+  The object is found by its <Name>: the LAST <len> characters hash (sha256, first 16 hex digits) to <hash>, so no game name is in the
+  repository. Exactly one object of that class must match, it must carry exactly one <attr> whose text is `old`, and that text is
+  replaced by `new` (same bytes everywhere else, CRLF kept). Any other outcome is a Skip: no overlay, one warning, game starts unchanged.
+  Fixes and scenery thinning of one level go into ONE overlay file (fix first, then thinning; both on = both applied).
+
 Safety rules (every one is a test): whole <LevelObject> blocks are removed and every other byte is kept (CRLF, order, resources);
 an object that anything else mentions by id (a link, any reference other than its children's Parent) is kept; an object with a
 kept child is kept (no Parent dangles); objects without a model, or of another class, are kept. The source must hash to `src=`
@@ -67,6 +74,72 @@ def parse_row(cols):
     if not re.fullmatch(r"class=[A-Za-z0-9_]+", cls):
         raise ValueError("class=<word> expected")
     return dict(level=level, preset=preset, src=src[4:], cls=cls[6:], drops=parse_drop(drop))
+
+
+FIX_VALUE = r"[A-Za-z0-9_.+-]+"
+
+
+def parse_fix(cols):
+    """Columns after the key -> dict(level, src, cls, obj=(len, hash), attr, old, new). Raises ValueError with the reason."""
+    w = " ".join(cols).split()
+    if len(w) != 7:
+        raise ValueError("needs <level> src=<sha256> class=<class> object=<len>:<hash16> attr=<Attribute> old=<value> new=<value>")
+    level, src, cls, ob, attr, old, new = w
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", level):
+        raise ValueError("level must be a plain folder name (no leading dot, no path)")
+    if not re.fullmatch(r"src=[0-9a-f]{64}", src):
+        raise ValueError("src= must be a lower-case sha256")
+    if not re.fullmatch(r"class=[A-Za-z0-9_]+", cls):
+        raise ValueError("class=<word> expected")
+    m = re.fullmatch(r"object=([1-9]\d{0,2}):([0-9a-f]{16})", ob)
+    if not m:
+        raise ValueError("object=<len>:<16 hex digits> expected")
+    if not re.fullmatch(r"attr=[A-Za-z][A-Za-z0-9_]*", attr):
+        raise ValueError("attr=<Attribute> expected")
+    for k, v in (("old", old), ("new", new)):
+        if not re.fullmatch(k + "=" + FIX_VALUE, v):
+            raise ValueError("%s=<value> expected (letters, digits and _ . + - only)" % k)
+    if old[4:] == new[4:]:
+        raise ValueError("old and new are the same")
+    return dict(level=level, src=src[4:], cls=cls[6:], obj=(int(m.group(1)), m.group(2)), attr=attr[5:], old=old[4:], new=new[4:])
+
+
+def fixes_for(profile_rows):
+    """profile_rows: the `levelfix` rows' columns (Profile.get('levelfix')) -> parsed fixes."""
+    return [parse_fix(c) for c in profile_rows]
+
+
+def apply_fix(data, fx):
+    """-> data with one attribute value replaced. Pure. Raises Skip unless exactly one object matches and carries the old value once."""
+    n, h = fx["obj"]
+    hits = []
+    for m in OBJ.finditer(data):
+        b = m.group(0)
+        if _field(b, b"Lox") != fx["cls"]:
+            continue
+        name = _field(b, b"Name")
+        if name and len(name) >= n and name_hash(name[-n:]) == h:
+            hits.append(m)
+    if len(hits) != 1:
+        raise Skip("%s: level fix: %d objects match (exactly 1 needed)" % (fx["level"], len(hits)))
+    blk = hits[0].group(0)
+    tag = fx["attr"].encode()
+    pat = re.compile(rb"(<%s type=\"\w+\">)([^<]*)(</%s>)" % (re.escape(tag), re.escape(tag)))
+    found = list(pat.finditer(blk))
+    if len(found) != 1:
+        raise Skip("%s: level fix: the object has %d <%s> values (exactly 1 needed)" % (fx["level"], len(found), fx["attr"]))
+    if found[0].group(2).decode() != fx["old"]:
+        raise Skip("%s: level fix: %s is %r, expected %r (another game version?)" % (fx["level"], fx["attr"], found[0].group(2).decode(), fx["old"]))
+    a, b2 = hits[0].span()
+    ns = blk[:found[0].start(2)] + fx["new"].encode() + blk[found[0].end(2):]
+    out = data[:a] + ns + data[b2:]
+    if out.count(b"<LevelObject>") != data.count(b"<LevelObject>") or len(out) - len(data) != len(fx["new"]) - len(fx["old"]):
+        raise Skip("%s: level fix: result check failed" % fx["level"])
+    try:
+        ET.fromstring(out)
+    except ET.ParseError as e:
+        raise Skip("%s: level fix: result is not well-formed XML (%s)" % (fx["level"], e))
+    return out
 
 
 def rows_for(profile_rows, preset):
@@ -175,47 +248,93 @@ def _atomic_write(path, data):
         raise
 
 
-def overlay_dir(scratch, tid, preset):
-    return os.path.join(scratch, "scenery", tid, preset)
+def overlay_dir(scratch, tid, preset, fixed=False):
+    """Scenery only: <scratch>/scenery/<id>/<preset> (unchanged). With level fixes the folder is `fix` (preset full) or `<preset>+fix`."""
+    name = preset if not fixed else ("fix" if preset == "full" else preset + "+fix")
+    return os.path.join(scratch, "scenery", tid, name)
 
 
-def rules_id(rows):
-    return sha256_bytes(json.dumps([(r["level"], r["src"], r["cls"], r["drops"]) for r in rows], sort_keys=True).encode())[:16]
+def rules_id(rows, fixes=()):
+    return sha256_bytes(json.dumps([[(r["level"], r["src"], r["cls"], r["drops"]) for r in rows],
+                                    [(f["level"], f["src"], f["cls"], f["obj"], f["attr"], f["old"], f["new"]) for f in fixes]],
+                                   sort_keys=True).encode())[:16]
 
 
-def generate(app0, scratch, tid, preset, rows):
-    """Make (or reuse) the overlay folder of one preset. -> (folder, [log lines]). Raises Skip with the reason when nothing can be
-    made; in that case nothing under the folder is changed for the failing level (a stale file from an older run is removed so a
-    wrong overlay can never be mounted)."""
-    base = overlay_dir(scratch, tid, preset)
+def generate(app0, scratch, tid, preset, rows, fixes=()):
+    """Make (or reuse) the overlay folder of one preset (+ level fixes). -> (folder, [log lines]). Raises Skip with the reason when
+    nothing can be made; in that case nothing under the folder is changed for the failing level (a stale file from an older run is
+    removed so a wrong overlay can never be mounted). rows = scenery rows of this preset (may be empty), fixes = parsed levelfix rows."""
+    base = overlay_dir(scratch, tid, preset, bool(fixes))
     meta_path = base + ".meta.json"        # beside the folder, never inside it: everything inside is mounted over the game folder
     try: meta = json.loads(_read(meta_path))
     except (OSError, ValueError): meta = {}
     lines, fresh = [], {}
-    for r in rows:
-        rel = LEVEL_REL % r["level"]
+    levels = []
+    for r in list(rows) + list(fixes):
+        if r["level"] not in levels: levels.append(r["level"])
+    for lv in levels:
+        rs = [r for r in rows if r["level"] == lv]; fs = [f for f in fixes if f["level"] == lv]
+        rel = LEVEL_REL % lv
         dst = os.path.join(base, rel)
         src_path = os.path.join(app0, rel)
         try:
             data = _read(src_path)
         except OSError as e:
-            _drop(dst); raise Skip("%s: source not readable (%s)" % (r["level"], e.strerror or e))
+            _drop(dst); raise Skip("%s: source not readable (%s)" % (lv, e.strerror or e))
         got = sha256_bytes(data)
-        if got != r["src"]:
-            _drop(dst); raise Skip("%s: source is not the file this setting was made for (sha256 %s..., expected %s...); no overlay" % (r["level"], got[:12], r["src"][:12]))
-        key = rules_id([r])
-        m = meta.get(r["level"], {})
+        for x in rs + fs:
+            if got != x["src"]:
+                _drop(dst); raise Skip("%s: source is not the file this setting was made for (sha256 %s..., expected %s...); no overlay" % (lv, got[:12], x["src"][:12]))
+        key = rules_id(rs, fs)
+        m = meta.get(lv, {})
         if m.get("src") == got and m.get("rules") == key and os.path.isfile(dst) and m.get("out") == sha256_bytes(_read(dst)):
-            fresh[r["level"]] = m; lines.append("%s: reused (%d of %d objects removed)" % (r["level"], m["removed"], m["objects"])); continue
+            fresh[lv] = m; lines.append("%s: reused (%s)" % (lv, m.get("what", "overlay"))); continue
         try:
-            out, n, k = thin(data, r)
+            out, what = data, []
+            for fx in fs:
+                out = apply_fix(out, fx); what.append("fixed %s" % fx["attr"])
+            n = k = 0
+            if rs:
+                out, n, k = thin(out, rs[0]); what.append("%d of %d objects removed" % (k, n))
         except Skip as e:
-            _drop(dst); raise Skip("%s: %s" % (r["level"], e))
+            _drop(dst); raise Skip("%s: %s" % (lv, e))
         _atomic_write(dst, out)
-        fresh[r["level"]] = dict(src=got, rules=key, out=sha256_bytes(out), objects=n, removed=k)
-        lines.append("%s: generated (%d of %d objects removed, %d -> %d bytes)" % (r["level"], k, n, len(data), len(out)))
+        what = ", ".join(what)
+        fresh[lv] = dict(src=got, rules=key, out=sha256_bytes(out), what=what)
+        lines.append("%s: generated (%s, %d -> %d bytes)" % (lv, what, len(data), len(out)))
     _atomic_write(meta_path, json.dumps(fresh, sort_keys=True, indent=1).encode())
     return base, lines
+
+
+MERGE_MAX = 20000
+
+
+def merge_overlay(gen_dir, user_dir, out_dir):
+    """The runtime mounts ONE overlay folder, so a player's own overlay and the generated one are combined into <out_dir> made of symlinks
+    (the runtime follows them; nothing is copied). A file the player's overlay has at the same relative path wins (case-insensitive,
+    as the console file system): the generated file is left out and named in the returned list. -> (out_dir, [rel paths not applied]).
+    Raises Skip when either folder is unusable or too big."""
+    import shutil
+    def walk(root):
+        out = {}
+        for r, ds, fs in os.walk(root):
+            ds[:] = [d for d in ds if not d.startswith(".")]
+            for f in fs:
+                if f.startswith("."): continue
+                p = os.path.join(r, f); out[os.path.relpath(p, root)] = p
+                if len(out) > MERGE_MAX: raise Skip("overlay %s has over %d files" % (root, MERGE_MAX))
+        return out
+    if not os.path.isdir(user_dir):
+        raise Skip("NPS5_OVERLAY_DIR %s is not a folder" % user_dir)
+    mine, theirs = walk(gen_dir), walk(user_dir)
+    low = {k.lower() for k in theirs}
+    skipped = sorted(k for k in mine if k.lower() in low)
+    shutil.rmtree(out_dir, ignore_errors=True)
+    for k, p in list(theirs.items()) + [(k, p) for k, p in mine.items() if k not in skipped]:
+        d = os.path.join(out_dir, k); os.makedirs(os.path.dirname(d), exist_ok=True)
+        os.symlink(os.path.abspath(p), d)
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir, skipped
 
 
 def _drop(path):
