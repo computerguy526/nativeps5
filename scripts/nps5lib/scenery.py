@@ -23,7 +23,6 @@ import collections, hashlib, json, os, re, tempfile, xml.etree.ElementTree as ET
 PRESETS = ("full", "reduced", "minimal")
 OBJ = re.compile(rb"[ \t]*<LevelObject>.*?</LevelObject>\r?\n", re.S)
 UUID = re.compile(rb"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
-META = "scenery.json"
 LEVEL_REL = "data/prein/levels/%s/level.lvx"          # where a level's file lives in the game folder (and in the overlay)
 
 
@@ -59,8 +58,8 @@ def parse_row(cols):
     if len(w) != 5:
         raise ValueError("needs <level> <preset> src=<sha256> class=<class> drop=<len>:<hash>[,...]")
     level, preset, src, cls, drop = w
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", level):
-        raise ValueError("level must be a plain folder name")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", level):
+        raise ValueError("level must be a plain folder name (no leading dot, no path)")
     if preset not in PRESETS or preset == "full":
         raise ValueError("preset must be reduced or minimal (full is the absence of a row)")
     if not re.fullmatch(r"src=[0-9a-f]{64}", src):
@@ -189,7 +188,7 @@ def generate(app0, scratch, tid, preset, rows):
     made; in that case nothing under the folder is changed for the failing level (a stale file from an older run is removed so a
     wrong overlay can never be mounted)."""
     base = overlay_dir(scratch, tid, preset)
-    meta_path = os.path.join(base, META)
+    meta_path = base + ".meta.json"        # beside the folder, never inside it: everything inside is mounted over the game folder
     try: meta = json.loads(_read(meta_path))
     except (OSError, ValueError): meta = {}
     lines, fresh = [], {}
@@ -208,7 +207,10 @@ def generate(app0, scratch, tid, preset, rows):
         m = meta.get(r["level"], {})
         if m.get("src") == got and m.get("rules") == key and os.path.isfile(dst) and m.get("out") == sha256_bytes(_read(dst)):
             fresh[r["level"]] = m; lines.append("%s: reused (%d of %d objects removed)" % (r["level"], m["removed"], m["objects"])); continue
-        out, n, k = thin(data, r)
+        try:
+            out, n, k = thin(data, r)
+        except Skip as e:
+            _drop(dst); raise Skip("%s: %s" % (r["level"], e))
         _atomic_write(dst, out)
         fresh[r["level"]] = dict(src=got, rules=key, out=sha256_bytes(out), objects=n, removed=k)
         lines.append("%s: generated (%d of %d objects removed, %d -> %d bytes)" % (r["level"], k, n, len(data), len(out)))

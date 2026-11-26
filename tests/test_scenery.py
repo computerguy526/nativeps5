@@ -101,7 +101,7 @@ class Rules(unittest.TestCase):
     def test_row_parser(self):
         good = ["lv", "reduced", "src=" + "a" * 64, "class=bg", "drop=%d:%s" % DROPS[0]]
         self.assertEqual(S.parse_row(good)["drops"], [DROPS[0]])
-        for bad in (good[:4], ["lv", "full"] + good[2:], good[:2] + ["src=zz"] + good[3:], good[:4] + ["drop=3:xyz"], ["../x"] + good[1:]):
+        for bad in (good[:4], ["lv", "full"] + good[2:], good[:2] + ["src=zz"] + good[3:], good[:4] + ["drop=3:xyz"], ["../x"] + good[1:], [".."] + good[1:], [".hid"] + good[1:], ["a/b"] + good[1:]):
             with self.assertRaises(ValueError): S.parse_row(bad)
 
 
@@ -122,6 +122,8 @@ class Generate(unittest.TestCase):
         out = open(os.path.join(base, self.rel), "rb").read()
         self.assertEqual(out.count(b"<LevelObject>"), 3); self.assertEqual(open(os.path.join(self.app0, self.rel), "rb").read(), before)
         self.assertIn("2 of 5", lines[0])
+        files = [os.path.relpath(os.path.join(r, f), base) for r, _, fs in os.walk(base) for f in fs]
+        self.assertEqual(files, [self.rel])                      # only the level file is in the folder the runtime mounts
 
     def test_second_call_reuses_and_a_damaged_output_is_regenerated(self):
         base, _ = self.gen(); p = os.path.join(base, self.rel); st = os.stat(p).st_mtime_ns
@@ -139,6 +141,17 @@ class Generate(unittest.TestCase):
         os.unlink(os.path.join(self.app0, self.rel))
         with self.assertRaises(S.Skip): self.gen()
         self.assertFalse(os.path.exists(os.path.join(self.scratch, "scenery")) and os.path.exists(os.path.join(self.scratch, "scenery", "PPSA00001", "reduced", self.rel)))
+
+    def test_failed_sanity_check_leaves_no_overlay(self):
+        base, _ = self.gen(); p = os.path.join(base, self.rel)
+        real = S.thin
+        def bad(data, row): raise S.Skip("a Parent no longer resolves")
+        S.thin = bad
+        try:
+            with self.assertRaises(S.Skip): self.gen(dict(self.row, drops=[DROPS[0]]))
+        finally:
+            S.thin = real
+        self.assertFalse(os.path.exists(p))
 
     def test_changed_rules_regenerate(self):
         self.gen(); r2 = dict(self.row, drops=[DROPS[0]])
