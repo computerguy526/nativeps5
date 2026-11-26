@@ -67,6 +67,7 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - Closing the window can hit the 5-second save timeout, leaving about 20 Metal archive pipelines unflushed (they compile again next time).
 - The first start after an update is longer (the one-time cache preparation).
 - `KYTY_SAROS_PROGRAM_CACHE=1`: per-launch cost not measured.
+- `nps5 cache metal --reproduce`: the bundled fixtures no longer cover all committed Metal rows (v1.4 fixture 69 of 409); rows still install as you play.
 
 - **SAROS (`PPSA07631`): starts and plays with known limits on v1.4; frame rate PENDING.** v1.3.x was not playable (about 1 fps with the hand shaders, no background without them); that text is replaced.
   What changed: the generic indirect-image path, the Nanite raw raster parameters and the shader-bundle compaction (Kyty), and a SAROS player profile in `games/PPSA07631/game.tsv`: MetalFX temporal in the game's FSR3 slot
