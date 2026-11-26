@@ -1,7 +1,7 @@
 # SAROS (`PPSA07631`)
 
 Game note. No game data is here and none is accepted; you need your own dump ([CONTRIBUTING.md](../../CONTRIBUTING.md)).
-**Status (v1.4.0): cannot be built with v1.4.0: the shipped profile has empty translate settings so the translator stops on unsupported instructions, a required translate option is missing, and the translator does not follow symlinked folders, so the folder of links the SAROS note tells you to make leaves the libc and audio modules unlinked. This was also true in v1.3.x. All v1.4 SAROS checks used a hand-built binary. A fix is coming in v1.4.1; until then SAROS is not playable from a v1.4.0 build. ASTRO BOT is not affected.** Release-candidate check on a hand-built binary (rc17, M5 Pro with 24 GB or more, `nps5 run`, two sessions): both ended with verdict DONE_FIXED, motion works, 0 live shader compiles at the peak in both, peak footprint 13.7 and 14.5 GB. No frame-rate number is claimed for v1.4: the figures below from development builds are not v1.4 measurements.
+**Status (v1.4.1): builds with `nps5 build` and starts; frame rate PENDING.** v1.4.0 (and v1.3.x) could not build SAROS: the profile had no translate settings, so the translator stopped on unsupported instructions, the packed-code discovery was missing, and from a folder of links the translator linked none of the game's modules. v1.4.1 fixes all three in `nativeps5-recomp`. Check of the v1.4.1 player path (M5 Pro, `nps5 build` from the dump and from a folder of links, then `nps5 run`, three 150 s runs with the v1.4.0 libraries): all three ended with verdict DONE_FIXED, 0 unimplemented-function calls, motion works on a virtual pad, 0 live shader compiles at the peak on a warm cache, peak footprint 13.0 to 13.8 GB. A played session on a v1.4.1 build is still owed. The v1.4.0 release-candidate sessions (13.7 and 14.5 GB) used a development binary. No frame-rate number is claimed: the figures below from development builds are not v1.4 measurements.
 **Was not playable on v1.3.x:** with the hand shaders on the title stalled at about 1 fps; with them off the background was missing. v1.4 carries the generic indirect-image path, the Nanite raw raster parameters, the shader-bundle compaction and the player profile in [game.tsv](game.tsv) (MetalFX temporal 720p to 4K, the 32-bit integer target fix, the Unreal cvar settings).
 
 - **Version:** 01.005.002 (SDK 11.00), eboot Build ID `6d383b3837ff06b8`.
@@ -16,15 +16,19 @@ Game note. No game data is here and none is accepted; you need your own dump ([C
 
 ## Set it up (v1.4)
 
-**Not working in v1.4.0:** steps 2 and the `nps5 build` it names currently produce a broken build. Wait for v1.4.1.
+**Needs v1.4.1 or later** (`nativeps5-recomp` v1.4.1). With v1.4.0, step 2 does not give a working program.
 
 1. **Pack the dump first** (79 GB instead of 153 GB; the largest `.ucas` is 64 GB and APFS cannot compress a file over 2 GiB by
    itself): [disk-space](../../docs/reference/disk-space.md). The runtime reads the packed copy with no setting
    ([large games](../../docs/reference/large-games.md)).
-2. **Translate from a clean view of the dump.** A dump made by some tools carries emulator artefacts: a `fakelib/` folder and an
-   `ampr_emu.index` file. Translate from a copy or a folder of links without them (**with v1.4.0 a folder of links currently produces a broken build, because the translator does not follow symlinked folders: wait for v1.4.1**); excluding the module instead (`-exclude-module`)
-   binds the system library to empty stubs and the game stops at its first file read. `nps5 build` picks the profile by title ID.
-   Translating takes about six minutes and 3.3 GB of memory on an M5 Pro (about 625,000 functions) and the program is 730 MB.
+2. **Translate the dump with `nps5 build`.** `nps5 build` picks the profile by title ID. The profile translates with
+   `-packed-layout` (the title packs its functions without alignment) and `-allow-unsupported` (29 MMX and absolute-address forms the
+   translator does not lower; none was hit in the checked runs). You can translate straight from the dump: the translator leaves a dump tool's
+   `fakelib/` folder out by itself, and it also finds the game's modules (`sce_module/`, `prx/`) through a folder of links. Do not use
+   `-exclude-module` for `libSceAmpr`: it binds the system library to empty stubs and the game stops at its first file read.
+   **Check the build log:** its `HLE imports` line must say `146 linked PRX` and `53 unresolved`. `0 linked PRX` means the game's own libc was
+   not found, and the run then logs `Called unimplemented function '_Iswctype'` and stays black.
+   Measured on an M5 Pro: about seven minutes (681,000 functions); the program is 776 MB.
 3. **Create `titles/PPSA07631.env`** from `titles/example.env`: `BIN` (the program `nps5 build` printed), `APP0` (your dump), `GPU=kyty`.
 4. **The Unreal console-variable list (required).** The profile's cvar settings (below) and `NPS5_TITLE_RESOLUTION` need the title's cvar
    list (`NPS5_UECVAR_LIST`) made from your own eboot. `nps5 run PPSA07631` refuses to start (exit 78) when it is missing or not a file:

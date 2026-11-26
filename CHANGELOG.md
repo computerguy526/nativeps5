@@ -3,6 +3,30 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.4.1 (hotfix)
+
+Everything in v1.4.0, plus the fix that lets players build SAROS. **Update:** `nativeps5-recomp` moves to `v1.4.1` (see [components.lock](components.lock));
+`nativeps5-kyty` and `nativeps5-anyps5` stay at `v1.4.0`. Pull, check out the recomp tag, rebuild it (`scripts/build.sh recomp`) and translate SAROS again
+(`nps5 build`). ASTRO BOT's translation is unchanged by this release (same functions, imports and program size), so it needs no new translation.
+
+- **SAROS (`PPSA07631`): `nps5 build` now gives a working program (recomp).** v1.4.0 (and v1.3.x) could not:
+  - the translator refused the title's MMX and absolute-address instructions;
+  - the packed-code discovery the title needs (its functions are packed without alignment) was only a developer environment switch;
+  - from a folder of links to the dump, which the game note recommended, none of the game's own modules were linked: the log said `0 linked PRX`, and the run
+    stayed black with `Called unimplemented function '_Iswctype'` warnings at a 3.3 GB footprint.
+
+  The v1.4.0 SAROS checks had run a program translated during development, not one made by `nps5 build`.
+  Now the SAROS profile translates with `-packed-layout -allow-unsupported`, and the translator follows folders of links and leaves a dump tool's `fakelib/` folder out by
+  itself (linked, its `libSceAmpr` would replace the system library). Measured on an M5 Pro (`nps5 build`, then `nps5 run` with the v1.4.0 libraries, 150 s runs):
+  - the build from the dump and the build from a folder of links match: 2,411 imports, 146 linked modules, 53 unresolved, 681,043 functions, the same function map;
+    the development program also has 146 linked modules and 53 unresolved;
+  - three runs ended `DONE_FIXED` with 0 unimplemented-function calls and 0 unsupported-instruction hits;
+  - motion worked on a virtual pad, with 0 live shader compiles at the peak on a warm cache and a peak footprint of 13.0 to 13.8 GB.
+
+  A played session on a v1.4.1 build is still owed; no frame rate is claimed.
+- **SAROS: the console-variable list recipe works from the public tools.** `uecvar xref` + `uecvar dumplist` on the eboot gives 5,095 entries. It is identical to the
+  list the development checks used.
+
 ## v1.4.0 (2026-11-25)
 
 Every number below was measured on a release-candidate build (M5 Pro, ASTRO BOT, the profile settings `nps5 run` composes); numbers marked PENDING are not claims.
@@ -67,7 +91,7 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - Closing the window can hit the 5-second save timeout, leaving about 20 Metal archive pipelines unflushed (they compile again next time).
 - The first start after an update is longer (the one-time cache preparation).
 - `KYTY_SAROS_PROGRAM_CACHE=1`: per-launch cost not measured.
-- SAROS (`PPSA07631`) cannot be built with v1.4.0: the shipped profile has empty translate settings so the translator stops on unsupported instructions, a required translate option is missing, and the translator does not follow symlinked folders, so the folder of links the SAROS note tells you to make leaves the libc and audio modules unlinked. This was also true in v1.3.x. All v1.4 SAROS checks used a hand-built binary. A fix is coming in v1.4.1; until then SAROS is not playable from a v1.4.0 build. ASTRO BOT is not affected.
+- SAROS (`PPSA07631`) cannot be built with v1.4.0: the shipped profile has empty translate settings so the translator stops on unsupported instructions, a required translate option is missing, and the translator does not follow symlinked folders, so the folder of links the SAROS note tells you to make leaves the libc and audio modules unlinked. This was also true in v1.3.x. All v1.4 SAROS checks used a hand-built binary. Fixed in v1.4.1 (see above). ASTRO BOT is not affected.
 - `nps5 cache metal --reproduce`: the bundled fixtures no longer cover all committed Metal rows (v1.4 fixture 69 of 409); rows still install as you play.
 
 - **SAROS (`PPSA07631`): cannot be built with v1.4.0 (fix in v1.4.1); the v1.4 checks below used a hand-built binary.** v1.3.x was not playable (about 1 fps with the hand shaders, no background without them); that text is replaced.
