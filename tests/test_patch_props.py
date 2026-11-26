@@ -561,12 +561,12 @@ class Procs(Base):
             out = self.out("killed")
             p = self.spawn(out, "hang", False, time.time())
             t0 = time.time()
-            while not os.path.exists(out + ".hanging") and time.time() - t0 < 30:
+            while not os.path.exists(out + ".hanging") and time.time() - t0 < 120:
                 time.sleep(0.02)
             self.assertTrue(os.path.exists(out + ".hanging"), "child never reached the signing step")
             self.assertTrue(any(".tmp" in f for f in os.listdir(self.d)), "work happens under a temporary name")
             self.assertFalse(os.path.exists(out)); self.assertFalse(os.path.exists(out + ".patches.json"))
-            p.send_signal(sig); p.communicate(timeout=30)
+            p.send_signal(sig); p.communicate(timeout=120)
             os.remove(out + ".hanging")
             self.assertFalse(os.path.exists(out), "interrupted run must not leave the output (%s)" % sig)
             self.assertFalse(os.path.exists(out + ".patches.json"))

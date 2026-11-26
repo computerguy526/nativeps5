@@ -19,7 +19,7 @@ Verdicts in run.json: DONE_UNTIL (the --until target was reached), DONE_FIXED (n
 not reached in time), ENDED_EARLY (the title exited by itself before the target), EARLY_BLACK, EARLY_STALL, CRASH,
 FAIL_RC<n>, DUMP_MODIFIED, INTERRUPTED / ERROR (the runner was stopped or failed; the title is stopped with it).
 A tag names one run: a run folder that already holds a run.json is set aside as <tag>.prev-<time>, never mixed."""
-import importlib.util, ctypes, hashlib, importlib.util, json, os, re, shlex, shutil, signal, subprocess, sys, threading, time
+import ctypes, hashlib, importlib.util, json, os, re, shlex, shutil, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
