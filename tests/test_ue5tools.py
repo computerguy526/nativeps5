@@ -337,7 +337,7 @@ class Harvest(unittest.TestCase):
         self.assertIn("--code-store /x/s.codestore", chk); self.assertIn("--require-runtime 100", chk)
 
     def test_failed_check_and_verify_adopt_nothing(self):
-        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", "--require-runtime", "100", self.dirs[0], env=dict(STUB_FAIL_CHECK="1"))
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", "--code-store", "/x/s", "--require-runtime", "100", self.dirs[0], env=dict(STUB_FAIL_CHECK="1"))
         self.assertEqual(rc, 1); self.assertIn("check FAILED", out)
         rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=dict(STUB_FAIL_VERIFY="1"))
         self.assertEqual(rc, 1); self.assertIn("verify FAILED", out)

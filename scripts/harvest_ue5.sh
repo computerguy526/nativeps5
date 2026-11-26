@@ -12,8 +12,9 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/nps5-env.sh"
-usage() { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
+case "$1" in -h|--help) sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;; esac
 TID="$1"; shift
 [[ "$TID" =~ ^[A-Z]{4}[0-9]{5}$ ]] || { echo "harvest_ue5: title id expected (PPSA12345), got '$TID'" >&2; exit 2; }
 GAME=""; OUT=""; WRITE=0; STORE=""; REQ=0; DIRS=()
@@ -30,6 +31,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 [[ "$REQ" =~ ^[0-9]+$ ]] && [ "$REQ" -le 100 ] || { echo "harvest_ue5: --require-runtime is a percentage 0..100" >&2; exit 2; }
+[ "$REQ" -eq 0 ] || [ -n "$STORE" ] || { echo "harvest_ue5: --require-runtime $REQ needs --code-store FILE (without the code store every runtime shader stays pending)" >&2; exit 2; }
 [ ${#DIRS[@]} -gt 0 ] || { echo "harvest_ue5: no cache dirs given" >&2; exit 2; }
 [ -n "$GAME" ] && [ -d "$GAME" ] || { echo "harvest_ue5: --game <app0 folder> is required (the verify step reads your copy of the game)" >&2; exit 2; }
 TOOL="${NPS5_KYPLST_TOOL:-$NPS5_KYTY_DIR/build-arm64/kyty_pipeline_list}"
@@ -75,8 +77,13 @@ echo "verified: $LIST.verified"
 echo "counts ($OUT/counts.txt):"; sed 's/^/  /' "$OUT/counts.txt"
 if [ "$WRITE" = 1 ]; then
   [ -d "$GAMES/$TID" ] || { echo "harvest_ue5: no $GAMES/$TID" >&2; exit 1; }
-  cp "$LIST" "$GAMES/$TID/pipelines.kyplst.tmp" && mv "$GAMES/$TID/pipelines.kyplst.tmp" "$GAMES/$TID/pipelines.kyplst"
-  cp "$LIST.verified" "$GAMES/$TID/pipelines.kyplst.verified"
+  G="$GAMES/$TID"
+  # stage both files under temporary names first, then move both: a failure in between never leaves a new list with the old record
+  cp "$LIST" "$G/pipelines.kyplst.new" && cp "$LIST.verified" "$G/pipelines.kyplst.verified.new" \
+    || { rm -f "$G/pipelines.kyplst.new" "$G/pipelines.kyplst.verified.new"; echo "harvest_ue5: could not stage the list in $G" >&2; exit 1; }
+  [ ! -f "$G/pipelines.kyplst" ] || cp "$G/pipelines.kyplst" "$G/pipelines.kyplst.bak"
+  [ ! -f "$G/pipelines.kyplst.verified" ] || cp "$G/pipelines.kyplst.verified" "$G/pipelines.kyplst.verified.bak"
+  mv "$G/pipelines.kyplst.verified.new" "$G/pipelines.kyplst.verified" && mv "$G/pipelines.kyplst.new" "$G/pipelines.kyplst"
   echo "wrote games/$TID/pipelines.kyplst and .verified"
 else
   echo "not adopted (--write copies the list and .verified into games/$TID/)"
