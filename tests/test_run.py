@@ -149,6 +149,15 @@ class T(unittest.TestCase):
         p = self.plan(["--env", "NEED_LIST=" + f]); self.assertEqual(p.env["NEED_LIST"], f)
         self.assertEqual([x for x in p.warnings if "NEED_LIST" in x], [])
 
+    def test_empty_env_value_overrides_a_profile_word(self):
+        # c2exec (D120): KYTY_NATIVE_INDIRECT_MESH=1 is a profile word; `--env KYTY_NATIVE_INDIRECT_MESH=` is the player's off switch
+        # (Kyty reads an empty value as unset, the codegen fingerprint stays; 0 and "empty" would change it)
+        open(os.path.join(self.d, "games", "PPSA00001", "game.tsv"), "a").write("env\tKYTY_NATIVE_INDIRECT_MESH=1\tgpu=kyty\n")
+        self.titles("")
+        self.assertEqual(self.plan([]).env["KYTY_NATIVE_INDIRECT_MESH"], "1")
+        p = self.plan(["--env", "KYTY_NATIVE_INDIRECT_MESH="])
+        self.assertEqual(p.env["KYTY_NATIVE_INDIRECT_MESH"], ""); self.assertEqual(p.layers["KYTY_NATIVE_INDIRECT_MESH"], "--env")
+
     def test_env_required(self):
         # v1.4 review M18: a title that needs a user-made file (SAROS: the Unreal cvar list) refuses loudly instead of running without it
         open(os.path.join(self.d, "games", "PPSA00001", "game.tsv"), "a").write("env_required\tNEED_LIST\tmade from your own eboot\n")

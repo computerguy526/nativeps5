@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fixture tests for games/game.py. Synthetic profiles are written to a temp dir; no real title is read."""
-import importlib.util, os, sys, tempfile, unittest, io, contextlib
+import importlib.util, os, re, sys, tempfile, unittest, io, contextlib
 sys.dont_write_bytecode = True
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -296,6 +296,49 @@ class AstroProfileTests(unittest.TestCase):
         for k in ("KYTY_MEMTRIM_BIG_WIDTH", "KYTY_FLIGHTREC", "NPS5_QOS_LOG"):   # test-rig words stay out of the shipped env
             self.assertNotIn(k, d)
         self.assertEqual(d["NPS5_QOS_GPU"], "rt")
+
+
+class AstroIndirectMeshTests(unittest.TestCase):
+    """c2exec (D120): KYTY_NATIVE_INDIRECT_MESH=1 is an ASTRO BOT kyty profile word. 0 and "empty" change the Kyty codegen fingerprint
+    (cold pipeline cache), so no profile may carry them; an empty value (--env KYTY_NATIVE_INDIRECT_MESH=) is the off switch."""
+    WORD = "KYTY_NATIVE_INDIRECT_MESH"
+
+    def compose(self, tid, **kw):
+        p = game.Profile(os.path.join(game.REPO, "games", tid))
+        return {k: v for k, v, _ in game.compose_env(p, **kw)}
+
+    def test_astro_kyty_env_carries_the_word(self):
+        self.assertEqual(self.compose("PPSA21564", gpu="kyty")[self.WORD], "1")
+
+    def test_astro_anyps5_does_not(self):
+        self.assertNotIn(self.WORD, self.compose("PPSA21564", gpu="anyps5"))
+
+    def test_other_titles_do_not(self):
+        for tid in sorted(os.listdir(os.path.join(game.REPO, "games"))):
+            if tid == "PPSA21564" or not os.path.isfile(os.path.join(game.REPO, "games", tid, "game.tsv")):
+                continue
+            for gpu in ("kyty", "anyps5"):
+                try:
+                    env = self.compose(tid, gpu=gpu)
+                except Exception:   # a title whose profile does not compose for that back end carries nothing either
+                    continue
+                self.assertNotIn(self.WORD, env, "%s gpu=%s" % (tid, gpu))
+
+    def test_no_profile_row_sets_zero_or_empty(self):
+        files = [os.path.join(game.REPO, "titles", "kyty-preset.env")]
+        for tid in os.listdir(os.path.join(game.REPO, "games")):
+            files.append(os.path.join(game.REPO, "games", tid, "game.tsv"))
+        seen = 0
+        for f in files:
+            if not os.path.isfile(f):
+                continue
+            for line in open(f).read().splitlines():
+                if line.startswith("#"):
+                    continue
+                for m in re.finditer(r"(?:^|[\s\t])%s=(\S*)" % self.WORD, line):
+                    seen += 1
+                    self.assertNotIn(m.group(1), ("0", "empty"), "%s: %s" % (f, line))
+        self.assertGreaterEqual(seen, 1)
 
 
 class AstroPairRowTests(unittest.TestCase):

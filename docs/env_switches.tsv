@@ -1562,7 +1562,7 @@ KYTY_NATIVE_IMAGE_POOL_IDLE_MS	kyty		src/graphics/host_gpu/vma.cpp
 KYTY_NATIVE_IMAGE_POOL_IDLE_MS	nativeps5		titles/kyty-preset.env
 KYTY_NATIVE_IMAGE_POOL_MB	kyty		src/graphics/host_gpu/vma.cpp
 KYTY_NATIVE_INDIRECT	kyty		src/graphics/guest_gpu/graphicsRun.cpp
-KYTY_NATIVE_INDIRECT_MESH	kyty		src/graphics/host_gpu/renderer/meshIndirect.cpp
+KYTY_NATIVE_INDIRECT_MESH	kyty	1|on: GPU conversion of indirect mesh draws (ASTRO BOT profile default on, v1.4.3); verify|exit: checked; unset or empty: CPU path on macOS; never 0 or empty (changes the codegen fingerprint)	src/graphics/host_gpu/renderer/meshIndirect.cpp
 KYTY_NGG_PRIM_AMP	kyty		src/graphics/shader/shader.cpp
 KYTY_OCCLUSION_BATCH	kyty		src/graphics/host_gpu/renderer/occlusion.cpp
 KYTY_OCCLUSION_BATCH	nativeps5		titles/kyty-preset.env

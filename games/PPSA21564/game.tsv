@@ -121,6 +121,8 @@ env	KYTY_FPS_LIMIT_MILLI=auto	gpu=kyty	frame cap from the window's display: fixe
 env	KYTY_FAULT_CLASS=1	gpu=kyty	learned read class per guest page: pages the CPU polls every frame stay readable (fewer fault waits)
 env	KYTY_CLEAN_PAGE=1	gpu=kyty	a store to a page whose GPU bytes are already published skips the drain
 env	KYTY_GPU_ACCURACY=low	gpu=kyty	fast math for pixel/compute shaders outside fast-math-deny.txt (our Metal translations stay exact)
+# v1.4.3 default (README "Options"; off: `--env KYTY_NATIVE_INDIRECT_MESH=` (an empty value is unset: the CPU path). NEVER 0 or empty as a word: they change the Kyty shader fingerprint (cold cache))
+env	KYTY_NATIVE_INDIRECT_MESH=1	gpu=kyty	the per-frame indirect mesh draw is converted on the GPU instead of the CP waiting for its argument record (Apes p50 34.4/34.3 -> 32.9 ms, CP commit 31 -> 17 ms; Sky Garden neutral; c2design-2026-11-26 section 7)
 # v1.2 default (README "Options"; off: `--env KYTY_ALIAS_REBUILD_PARTIAL=0`)
 env	KYTY_ALIAS_REBUILD_PARTIAL=1	gpu=kyty	a partly owned render target is rebuilt only in the blocks it does not own (Sky Garden tiler traffic 2.4 -> 1.8-2.0 GB/s)
 # v1.2.1 default (README "Options"; off: `--env KYTY_CP_LEAD_MAX_MS=0`)
@@ -146,7 +148,7 @@ env_forbidden	APS5_PROFILE_PASSES	GPU timestamp counter-heap profiling
 
 # ---- Facts (for people and the README; no tool reads them) ----
 fact.display_buffer	3840x2160
-fact.pipeline_list_counts	shaders 1217 (vertex 646, pixel 322, compute 249), permutations 1597, pipelines 2549
+fact.pipeline_list_counts	shaders 1222 (vertex 650, pixel 323, compute 249), permutations 1602, pipelines 2567
 fact.pipeline_list_scenes	title, world map and 12 levels (first visits), plus play-test sessions
 fact.prepare	scripts/prepare-pipelines.sh PPSA21564
 fact.level_peak_gib	16.3-17.8

@@ -267,6 +267,13 @@ The ASTRO BOT profile (`games/PPSA21564/game.tsv`) turns these on. Each has an o
   about 2.4 to 1.8-2.0 GB/s; frame times were the same or slightly better (n=3 A/B), no picture differences. Off:
   `KYTY_ALIAS_REBUILD_PARTIAL=0`.
 
+- **GPU conversion of the per-frame indirect mesh draw** (v1.4.3, `KYTY_NATIVE_INDIRECT_MESH=1`): ASTRO BOT issues one
+  indirect mesh draw per frame whose argument record a compute pass of the same frame has just written. Reading it on the
+  CPU made the command processor wait 10-16 ms for the GPU every frame; now a small compute dispatch derives the draw from
+  the same bytes on the GPU. Apes (`hero_ape_escape`, M5 Pro, 3 runs per arm): median frame 34.4 / 34.3 -> 32.9 ms, the
+  frames over 70 ms 172 / 159 -> 119, game speed the same; Sky Garden the same within 1 ms. Off: pass it empty,
+  `--env KYTY_NATIVE_INDIRECT_MESH=` (do not use `0`: that changes the shader fingerprint and starts a cold pipeline cache).
+
 The flight recorder (below) and the rest of memory trim (`KYTY_MEMTRIM_BIG_WIDTH`) stay off by default.
 
 ### Memory and GPU options (off by default, v1.1.1)
