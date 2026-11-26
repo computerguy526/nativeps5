@@ -230,8 +230,10 @@ def compile_jobs(environ):
 
 def prepare_words(ctx, app0):
     o = cache_opts(ctx.p)
+    ue5 = ue5_words(ctx)        # code=ue5: extract at guest_ready, compile, exit (no eboot shaders to read)
+    exe = [] if ue5 else [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_PREPARE", "1"),
-            ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")), ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")),
+            ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", ""))] + exe + ue5 + [
             ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ))), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
             ("KYTY_HELPER_PREWARM", "1"),   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
             # v1.1.2: the profile defers KosmicKrisp's archive flush to exit for play; a prepare waits one flush period before it ends
@@ -589,8 +591,12 @@ def cmd_share(ctx, o, runner):
     exp = []
     for i, d in enumerate(dirs):
         out = os.path.join(work, "j%d.kyplst" % i)
+        xw = []
+        if ue5_row(ctx.p):     # code=ue5: nearly every journaled shader is runtime code, found only in the player's code store
+            store = next((q for q in (os.path.join(d, ctx.tid + ".codestore"), os.path.join(ctx.dir, ctx.tid + ".codestore")) if os.path.isfile(q)), "")
+            xw = ["--runtime-code"] + (["--code-store", store] if store else [])
         rc, text = runner([tool, "export", "--out", out, "--game", app0, "--shaders", os.path.join(d, ctx.tid + ".shaders.journal"),
-                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer], env=ctx.environ, capture=True)
+                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer] + xw, env=ctx.environ, capture=True)
         if rc != 0:
             print("share: could not export journal set %d: %s" % (i + 1, scrub(text.strip().splitlines()[-1] if text.strip() else "?", ctx.environ))); continue
         exp.append(out)
@@ -831,7 +837,17 @@ def cmd_prepare(ctx, o, runner):
             shutil.rmtree(keep, ignore_errors=True); os.replace(lcdir, keep)
         if keep_libcache and os.path.isdir(mdir):
             shutil.rmtree(mkeep, ignore_errors=True); os.replace(mdir, mkeep)
+        # the player's own data in a dir=player cache (journals = harvest input, the code store) is never deleted by a prepare
+        pkeep = ctx.dir + ".playerkeep"; kept = []
+        if ue5_row(ctx.p) and os.path.isdir(ctx.dir):
+            shutil.rmtree(pkeep, ignore_errors=True); os.makedirs(pkeep)
+            for f in os.listdir(ctx.dir):
+                if f.endswith(".journal") or f.endswith(".codestore"):
+                    os.replace(os.path.join(ctx.dir, f), os.path.join(pkeep, f)); kept.append(f)
         rmtree_inside(ctx.dir, ctx.root); os.makedirs(ctx.dir)
+        for f in kept:
+            os.replace(os.path.join(pkeep, f), os.path.join(ctx.dir, f))
+        shutil.rmtree(pkeep, ignore_errors=True)
         if os.path.isdir(keep):
             os.replace(keep, lcdir)
         if os.path.isdir(mkeep):

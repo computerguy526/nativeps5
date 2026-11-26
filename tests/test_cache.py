@@ -212,6 +212,29 @@ class T(unittest.TestCase):
         self.assertNotIn("KK_LIBCACHE_DIR", dict(cache.cache_env("PPSA00001", "/c", "mid", with_libcache=False)))
 
     # ---- prepare / record / check
+    def test_ue5_prepare_carries_the_ue5_words_and_keeps_the_players_journals(self):
+        # ue5fix M1: a prepare of a code=ue5 title reads the library (ue5 words, no eboot) and never wipes the player's journals / code store
+        self.set_cache_row(self.UE5ROWS)
+        c = self.ctx(); os.makedirs(c.dir)
+        keep = ["PPSA00001.shaders.journal", "PPSA00001.session_a.pipelines.journal", "PPSA00001.codestore"]
+        for f in keep + ["stale.bin"]: open(os.path.join(c.dir, f), "w").write(f)
+        calls = []
+        def runner(cmd, env=None, capture=False):
+            if capture: return 0, "  shaders 1\n  permutations 2, pipelines 3\n"
+            calls.append(cmd); return 0
+        rc, out, err = self.run_main(["prepare", "PPSA00001"], runner)
+        self.assertEqual(rc, 0, err)
+        for f in keep: self.assertEqual(open(os.path.join(c.dir, f)).read(), f, f)
+        self.assertFalse(os.path.exists(os.path.join(c.dir, "stale.bin")))
+        cmd = " ".join(calls[0])
+        for w in ("KYTY_UE5_DECODER=0x926510", "KYTY_UE5_DECODER_FP=1f82e44a65371db3", "KYTY_UE5_DECODER_ABI=oodlelz14", "KYTY_PIPELINE_LIST_CODE_STORE=" + c.dir + "/PPSA00001.codestore", "KYTY_PIPELINE_LIST_PREPARE=1"):
+            self.assertIn(w, cmd)
+        self.assertNotIn("KYTY_PIPELINE_LIST_EXE", cmd)
+
+    def test_non_ue5_prepare_words_unchanged(self):
+        self.assertIn("KYTY_PIPELINE_LIST_EXE", dict(cache.prepare_words(self.ctx(), "/app0")))
+        self.assertNotIn("KYTY_UE5_DECODER", dict(cache.prepare_words(self.ctx(), "/app0")))
+
     def test_prepare_dry_run_names_key_and_command(self):
         rc, out, _ = self.run_main(["prepare", "PPSA00001", "--dry-run"])
         c = self.ctx()

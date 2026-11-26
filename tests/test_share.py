@@ -127,6 +127,23 @@ class T(unittest.TestCase):
         self.assertIn("title PPSA00001\n", txt); self.assertIn("version 01.001.000\n", txt)
         self.assertIn("producer nps5-share ", txt)
 
+    def test_ue5_title_exports_runtime_code_with_the_code_store(self):
+        # ue5fix M4: a code=ue5 title's journaled shaders are runtime code: export gets --runtime-code (+ the player's code store)
+        gp = os.path.join(self.gd, "game.tsv")
+        put(gp, get(gp).replace("cache\tkind=kyplst\tlimit_mb=448\tapp_ver=01.001.000", tc.T.UE5ROWS))
+        d = self.journals("a", "S:vertex:1\nS:vertex:3\nM:1\nM:3\nP:3")
+        store = os.path.join(d, "PPSA00001.codestore"); put(store, "x")
+        rc, out = self.run_main(["share", "PPSA00001", "--from", d])
+        self.assertEqual(rc, 0, out)
+        ex = [c for c in self.calls if len(c) > 1 and c[1] == "export"][0]
+        self.assertIn("--runtime-code", ex); self.assertEqual(ex[ex.index("--code-store") + 1], store)
+
+    def test_non_ue5_export_has_no_runtime_words(self):
+        d = self.journals("a", "S:vertex:3\nM:3\nP:3")
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = [c for c in self.calls if len(c) > 1 and c[1] == "export"][0]
+        self.assertNotIn("--runtime-code", ex)
+
     def test_nothing_new_says_thanks_and_writes_nothing(self):
         self.journals("a", "S:vertex:1\nM:2\nP:1")
         rc, out = self.run_main(["share", "PPSA00001"])
