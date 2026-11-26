@@ -34,6 +34,15 @@ as the list: that is intended (prewarm everything the player has seen), at the c
 store are moved to `<dir>.playerkeep` (with a marker file) while the dir is wiped and moved back after; an interrupted prepare leaves
 them there and the next prepare restores them first. Nothing deletes that keep dir while it holds a file.
 
+## Notes from the SAROS dry run
+
+- The `env NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=...` row is inert on SAROS: its console-variable list (made from the eboot) has no
+  entry for that name (the string is in the eboot as UTF-16 but has no registration xref). It is not needed there: extraction and the listed
+  compiles run before the game enters. It is needed on Cronos.
+- `tools/ue5/ue5_locate_decoder.py` wants both Oodle strings in the decoder; SAROS's decoder references only one. Use `--all` and check the
+  fingerprint and the address-map entry (`F 0x... ` in the build's addrmap.txt) until the locator accepts a single-string decoder.
+- `nps5 run` of a non-play class is capped at 180 s: a cold first start is made by `nps5 cache prepare` (up to 1800 s), then a normal run.
+
 ## Open checks for WP8
 
 - Cronos (PPSA24096) now uses the journal cache while it has no list (`cache kind=kyplst dir=player code=ue5`; owner decision: needed to

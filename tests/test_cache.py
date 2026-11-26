@@ -334,6 +334,12 @@ class T(unittest.TestCase):
 
     UE5ROWS = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001.000\tlimit_mb=448\nue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14"
 
+    def test_ue5_list_with_executable_shaders_keeps_the_eboot(self):
+        # a code=ue5 list may hold executable-sourced shaders (SAROS: 41); Kyty ignores the whole list without the eboot, so run and prepare pass it
+        self.set_cache_row(self.UE5ROWS); c = self.ctx(); app0 = os.path.join(self.tmp, "app0")
+        for words in (cache.launch_words(c, app0), cache.prepare_words(c, app0)):
+            self.assertEqual(dict(words)["KYTY_PIPELINE_LIST_EXE"], os.path.join(app0, "eboot.bin"))
+
     def test_ue5_words_status_and_prepare(self):
         plain = self.ctx(); app0 = os.path.join(self.tmp, "app0")
         self.assertEqual(cache.ue5_words(plain), []); self.assertIsNone(cache.ue5_row(plain.p))
