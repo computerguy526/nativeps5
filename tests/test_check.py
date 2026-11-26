@@ -196,6 +196,11 @@ class TestPipelineList(Base):
         self.assertEqual(self.problems(data), [])
         self.clean({self.P: data, self.P + ".verified": sidecar(data), "games/PPSA00000/game.tsv": b"title_id\tPPSA00000\n"})
 
+    def test_record_with_runtime_coverage_line_is_accepted(self):
+        data = kyplst([section(1, info()), section(3, os.urandom(64) * 4)])
+        side = sidecar(data) + b"runtime=0 runtime shaders not covered by a --shaders journal (of 12)\n"
+        self.assertEqual(self.problems(data, side), [])
+
     def test_real_list_of_the_repository(self):
         p = os.path.join(REPO, "games", "PPSA21564", "pipelines.kyplst")
         self.assertEqual(C.check_kyplst("games/PPSA21564/pipelines.kyplst", open(p, "rb").read(), open(p + ".verified", "rb").read()), [])

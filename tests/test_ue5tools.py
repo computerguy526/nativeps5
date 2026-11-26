@@ -191,7 +191,10 @@ case $1 in
  merge) shift; while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --allow-partial|--producer) shift;; *) cat "$1" >> "$out.in"; shift;; esac; done; cat "$out.in" > "$out"; rm "$out.in";;
  check) echo "check: ok"; echo "runtime: 6 resolved, ${STUB_PENDING:-1} pending"; [ -n "$STUB_MISMATCH" ] && exit 2; [ -n "$STUB_FAIL_CHECK" ] && exit 1; exit 0;;
  info) echo "  title PPSA00009, version 1.0, 1 things"; echo "  shaders 3 (vertex 1, pixel 1, compute 1); permutations 4"; echo "  permutations 4, pipelines 5";;
- verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "verify: FOUND code"; exit 1; }; echo "verify: no shader code in the list";;
+ verify) [ -n "$STUB_FAIL_VERIFY" ] && { echo "verify: FOUND code"; exit 1; }
+   # the real tool: the result line, then (when the list has <runtime> shaders) a LAST line with the coverage
+   echo "  file: 100 bytes, 0 code windows"; echo "verify: no shader code in the list"
+   echo "verify: ${STUB_UNCOVERED:-0} runtime shaders not covered by a --shaders journal (of 12)"; [ "${STUB_UNCOVERED:-0}" != 0 ] && exit 1; exit 0;;
 esac
 """
 
@@ -237,6 +240,17 @@ class Harvest(unittest.TestCase):
         self.assertIn("runtime: 6 resolved", open(os.path.join(o, "counts.txt")).read())
         self.assertIn("not adopted", out)
         self.assertFalse(os.path.exists(os.path.join(self.games, "PPSA00009", "pipelines.kyplst")))
+
+    def test_real_two_line_verify_output_is_accepted_and_recorded(self):
+        rc, out = self.run_h("PPSA00009", "--game", self.game, self.dirs[0])
+        self.assertEqual(rc, 0, out)
+        rec = open(os.path.join(self.out_dir(), "pipelines.kyplst.verified")).read()
+        self.assertIn("result=verify: no shader code in the list\n", rec); self.assertIn("runtime=0 runtime shaders not covered", rec)
+
+    def test_uncovered_runtime_shaders_adopt_nothing(self):
+        rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0], env=dict(STUB_UNCOVERED="3"))
+        self.assertEqual(rc, 1); self.assertIn("verify FAILED", out)
+        self.assertEqual(os.listdir(os.path.join(self.games, "PPSA00009")), [])
 
     def test_write_adopts_list_and_verified(self):
         rc, out = self.run_h("PPSA00009", "--game", self.game, "--write", self.dirs[0])
