@@ -240,15 +240,36 @@ def prepare_words(ctx, app0):
         ([("KYTY_PREPARE_FLUSH_SYNC", "1")] if gate(ctx.environ, "FLUSH_SYNC") or gate(ctx.environ, "COMPACT") else [])   # compaction is written by that flush
 
 
+UE5_NOTE = "shaders come from the game's library at start; nothing to prepare ahead"
+
+
+def ue5_row(p):
+    """The `ue5 decoder= fp= abi=` row of a `cache ... code=ue5` title as a dict, else None (every other title, ASTRO included)."""
+    if "code=ue5" not in (p.one("cache", "") or "").split() or not p.one("ue5"):
+        return None
+    return dict(w.partition("=")[::2] for w in p.one("ue5").split())
+
+
+def ue5_words(ctx):
+    """Run environment of a code=ue5 title (I2): the player's code store, the decoder, its fingerprint and the call convention."""
+    u = ue5_row(ctx.p)
+    if not u:
+        return []
+    return [("KYTY_PIPELINE_LIST_CODE_STORE", os.path.join(ctx.dir, ctx.tid + ".codestore")), ("KYTY_UE5_DECODER", u["decoder"]),
+            ("KYTY_UE5_DECODER_FP", u["fp"]), ("KYTY_UE5_DECODER_ABI", u["abi"])]
+
+
 def launch_words(ctx, app0):
     """The launch phase of a normal run on a prepared cache: every pipeline of the list (and of the player's own journal) is created
     again before the game starts, behind the loading card (KYTY_PIPELINE_REPLAY_ALL), together with the renderer's helper pipelines
     (KYTY_HELPER_PREWARM). On a prepared cache each one is a cache hit (about 3 s for 1,500 pipelines); whatever the caches lost since
     compiles there, not at its first draw."""
     o = cache_opts(ctx.p)
-    return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")),
-            ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")), ("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1"),
-            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ)))] + \
+    ue5 = ue5_words(ctx)                    # code=ue5: no eboot shaders to read (the code comes from the game's shader library)
+    exe = [] if ue5 else [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]
+    return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", ""))] + exe + \
+        [("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1"),
+            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ)))] + ue5 + \
         metalmod.launch_words(ctx.dir, os.path.join(ctx.p.dir, metalmod.LIST_NAME), ctx.environ)[0]
 
 
@@ -328,6 +349,8 @@ def status(ctx):
         lines.append("  warning: no commit known for %s (set NPS5_KYTY_DIR / NPS5_KK_DIR / NPS5_RECOMP_DIR to git checkouts, or NPS5_STACK_KYTY / "
                      "NPS5_STACK_KK / NPS5_STACK_RECOMP to an identity): the key does not track them, so a cache built by another build of them "
                      "would be reused" % ", ".join(unk))
+    if ue5_row(ctx.p):
+        return "prepared", lines + ["  " + UE5_NOTE + " (cache dir %s)" % ctx.dir]
     if ctx.list_sha == "none":
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
@@ -778,6 +801,8 @@ class ProgressTail(threading.Thread):
 
 
 def cmd_prepare(ctx, o, runner):
+    if ue5_row(ctx.p):
+        print("prepare: " + UE5_NOTE); return 0
     app0 = app0_of(ctx, o["dry"])
     if not os.path.isfile(ctx.list_path):
         raise CacheError("no %s" % ctx.list_path, 2)

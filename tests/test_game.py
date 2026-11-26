@@ -68,6 +68,21 @@ class CheckTests(Base):
             errs, _ = self.check(game_tsv=GAME + row)
             self.assertEqual(errs == [], ok, (row, errs))
 
+    UE5 = "ue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14\n"
+    UE5C = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.005.002\tlimit_mb=448\n"
+
+    def test_ue5_rows(self):
+        # synthetic values only; the schema accepts a good pair and refuses every malformed or half-present one
+        ok = ((self.UE5C + self.UE5, True), (self.UE5C, False), (self.UE5, False),
+              ("cache\tkind=kyplst\tcode=ue5\n" + self.UE5, False), ("cache\tkind=journal\tdir=player\tcode=ue5\n" + self.UE5, False),
+              (self.UE5C + "cache\tkind=none\n", False),
+              (self.UE5C + self.UE5.replace("0x926510", "926510"), False), (self.UE5C + self.UE5.replace("1f82e44a65371db3", "1f82e4"), False),
+              (self.UE5C + self.UE5.replace("oodlelz14", "oodle"), False), (self.UE5C + "ue5\tdecoder=0x1\tfp=1f82e44a65371db3\n", False),
+              (self.UE5C + self.UE5 + self.UE5, False), (self.UE5C.replace("code=ue5", "code=ue4") + self.UE5, False))
+        for rows, good in ok:
+            errs, _ = self.check(game_tsv=GAME + rows)
+            self.assertEqual(errs == [], good, (rows, errs))
+
     def test_saros_cache_rows(self):
         p = game.Profile(os.path.join(game.REPO, "games", "PPSA07631"))
         self.assertEqual(p.one("cache"), "kind=journal")

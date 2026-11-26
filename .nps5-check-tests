@@ -25,6 +25,8 @@ python3 -I tests/test_bugreport.py
 python3 -I tests/test_logsummary.py
 python3 -I tests/test_watch.py
 python3 -I tests/test_cache.py
+python3 -I -m py_compile tools/ue5/ue5_locate_decoder.py tests/test_ue5tools.py
+python3 -I tests/test_ue5tools.py
 python3 -I tests/test_fetch.py
 python3 -I tests/test_metal.py
 python3 -I tests/test_bench.py

@@ -154,6 +154,25 @@ class T(unittest.TestCase):
         self.assertEqual(pl.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player"))
         self.assertEqual(pl.key, plain.key)                                   # the key itself is still computed (list identity)
 
+    UE5ROWS = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001.000\tlimit_mb=448\nue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14"
+
+    def test_ue5_words_status_and_prepare(self):
+        plain = self.ctx(); app0 = os.path.join(self.tmp, "app0")
+        self.assertEqual(cache.ue5_words(plain), []); self.assertIsNone(cache.ue5_row(plain.p))
+        self.assertIn("KYTY_PIPELINE_LIST_EXE", dict(cache.launch_words(plain, app0)))
+        self.set_cache_row(self.UE5ROWS)
+        c = self.ctx()
+        self.assertEqual(c.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player"))
+        w = dict(cache.launch_words(c, app0))
+        self.assertNotIn("KYTY_PIPELINE_LIST_EXE", w)
+        self.assertEqual(w["KYTY_PIPELINE_LIST_CODE_STORE"], c.dir + "/PPSA00001.codestore")
+        self.assertEqual((w["KYTY_UE5_DECODER"], w["KYTY_UE5_DECODER_FP"], w["KYTY_UE5_DECODER_ABI"]), ("0x926510", "1f82e44a65371db3", "oodlelz14"))
+        self.assertEqual(w["KYTY_PIPELINE_REPLAY_ALL"], "1")
+        st, lines = cache.status(c)
+        self.assertEqual(st, "prepared"); self.assertIn("nothing to prepare ahead", "\n".join(lines))
+        rc, out, _ = self.run_main(["prepare", "PPSA00001"])
+        self.assertEqual(rc, 0); self.assertIn("nothing to prepare ahead", out)
+
     # ---- status
     def test_status_fresh_partial_prepared_stale(self):
         c = self.ctx()
