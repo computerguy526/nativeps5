@@ -30,8 +30,9 @@ gpu_profile_ban	on
 run_secs	default=150	max=300
 blank_fail_s	150
 stall_fail_s	180
-# v1.4: no shipped list; one stable per-player cache dir (journal + programs + driver cache) the title fills while it is played, so session 2+ starts warm (README, Shader cache)
-cache	kind=journal
+# v1.4.2: the warm list (games/PPSA07631/pipelines.kyplst) holds <runtime> shaders whose code comes from the game's own shader library at start (code=ue5); until the list is shipped this behaves as the v1.4 journal cache. One stable per-player cache dir (journal + programs + driver cache) the title fills while it is played, so session 2+ starts warm (README, Shader cache)
+cache	kind=kyplst	dir=player	code=ue5	app_ver=01.005.002	limit_mb=896
+ue5	decoder=0x924e80	fp=1f82e44a65371db3	abi=oodlelz14
 
 # ---- Environment words (deltas over the preset; why: README.md, "What the profile needs") ----
 env	NPS5_WINDOW_TITLE_NAME=Saros	-	window title label
@@ -39,7 +40,7 @@ env	NPS5_GPU=kyty	gpu=kyty	back end selector word
 env	NPS5_SELF_MEM_LIMIT_MB=17408	gpu=kyty	SAROS runs at 15-16 GB; the limit is a guard, never raised to make a scene pass
 env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	record-time clocks instead of the preset's counter-heap timestamps (refused by the env_forbidden row below)
 # v1.4 SAROS player settings (v14rc 2026-11-25: the MFX720 stack of the best 2026-11-24 runs, ue2boot/upsaros_mfx.sh + sarostilerexec; evidence in promotions.tsv). The cvar VALUES live here, the cvar LIST FILE is machine-local (env_required).
-env	NPS5_UECVAR_SET=r.Nanite.PersistentThreadsCulling=0,r.RayTracing.Enable=0,r.Nanite.PrimShaderRasterization=0,r.Nanite.MeshShaderRasterization=0,r.FidelityFX.FSR3.Enabled=1,r.FidelityFX.FSR3.CreateReactiveMask=0,r.FidelityFX.FSR3.QualityMode=4,r.DynamicRes.OperationMode=0	gpu=kyty	Unreal console variables applied from the list: Nanite compute culling and raster modes, ray tracing off (no flicker, about -30 ms), the FSR3 upscaler slot that MetalFX temporal fills (720p to 4K)
+env	NPS5_UECVAR_SET=r.Nanite.PersistentThreadsCulling=0,r.RayTracing.Enable=0,r.Nanite.PrimShaderRasterization=0,r.Nanite.MeshShaderRasterization=0,r.FidelityFX.FSR3.Enabled=1,r.FidelityFX.FSR3.CreateReactiveMask=0,r.FidelityFX.FSR3.QualityMode=4,r.DynamicRes.OperationMode=0,g.TimeoutForBlockOnRenderFence=1800000	gpu=kyty	Unreal console variables applied from the list: Nanite compute culling and raster modes, ray tracing off (no flicker, about -30 ms), the FSR3 upscaler slot that MetalFX temporal fills (720p to 4K)
 env	NPS5_UECVAR_SET_FOR=100000	gpu=kyty	the cvars stay applied past 120 s
 env	KYTY_METALFX=temporal	gpu=kyty	MetalFX temporal upscaler in the game's FSR3 slot (720p scene to 4K)
 env	KYTY_METALFX_UE=fsr3	gpu=kyty	upscaler adapter for the Unreal FSR3 slot

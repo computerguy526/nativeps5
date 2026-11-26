@@ -22,7 +22,8 @@
 #   forbidrow KEY[=VALUE] [why]; refused from any source (profile, preset, --env), exit 78
 #   marker    <name> <spec>; spec = log:<regex> | open:<regex> | present:<n>
 #   runsecs   default=<s> max=<s>
-#   cache     kind=kyplst|journal|none [dir=player] [limit_mb=<n>] [app_ver=<x.y.z>]   (journal = no list: a stable per-player dir the title fills while played)
+#   cache     kind=kyplst|journal|none [dir=player] [code=ue5] [limit_mb=<n>] [app_ver=<x.y.z>]   (journal = no list: a stable per-player dir the title fills while played)
+#   ue5row    decoder=<0x guest vaddr> fp=<16 hex FNV-1a 64 of the 64 bytes at it> abi=oodlelz14 (all three; needs cache code=ue5, which needs kind=kyplst dir=player)
 #   addrbuild guest address (hex) [build=<version or eboot prefix>]
 #   stage     S0..S8 (evidence per stage is checked: see game.py STAGE_EVIDENCE)
 # Free keys: fact.<anything> is never read by a tool (people and the README only). Any other unknown key is an error.
@@ -69,6 +70,7 @@ scene_tag_skip	text	no	one	-	-	runtime	scene name prefixes that never become the
 run_secs	runsecs	no	one	-	-	run	soft cap and ceiling when the scene gives none
 blank_fail_s	int	no	one	-	-	run	early-stop black threshold, seconds
 stall_fail_s	int	no	one	-	-	run	early-stop stall threshold, seconds
-cache	cache	no	one	-	-	cache	which prepare step the title has
+cache	cache	no	one	-	-	cache	which prepare step the title has (code=ue5: the list's <runtime> shaders get their code from the game's own shader library at start)
+ue5	ue5row	no	one	-	-	cache, run	UE5 shader library decoder: guest vaddr, fingerprint, call convention (code=ue5 titles)
 uecvars	relpath	no	one	-	-	run	Unreal console-variable table
 stage	stage	no	one	S0|S1|S2|S3|S4|S5|S6|S7|S8	-	game.py check, README	bring-up stage reached

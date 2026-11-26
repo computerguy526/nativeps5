@@ -68,9 +68,68 @@ class CheckTests(Base):
             errs, _ = self.check(game_tsv=GAME + row)
             self.assertEqual(errs == [], ok, (row, errs))
 
+    UE5 = "ue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14\n"
+    UE5C = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001\tlimit_mb=448\n"
+    UE5ENV = ("env\tNPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000\t-\tfence\n" "env\tNPS5_UECVAR_SET_FOR=100000\t-\tkeep applied\n"
+              "env_required\tNPS5_UECVAR_LIST\tthe cvar list\n")
+
+    def test_ue5_rows(self):
+        # synthetic values only; the schema accepts a good pair and refuses every malformed or half-present one
+        ok = ((self.UE5C + self.UE5 + self.UE5ENV, True), (self.UE5C, False), (self.UE5, False),
+              ("cache\tkind=kyplst\tcode=ue5\n" + self.UE5, False), ("cache\tkind=journal\tdir=player\tcode=ue5\n" + self.UE5, False),
+              (self.UE5C + "cache\tkind=none\n", False),
+              (self.UE5C + self.UE5.replace("0x926510", "926510"), False), (self.UE5C + self.UE5.replace("1f82e44a65371db3", "1f82e4"), False),
+              (self.UE5C + self.UE5.replace("oodlelz14", "oodle"), False), (self.UE5C + "ue5\tdecoder=0x1\tfp=1f82e44a65371db3\n", False),
+              (self.UE5C + self.UE5 + self.UE5, False), (self.UE5C.replace("code=ue5", "code=ue4") + self.UE5, False))
+        for rows, good in ok:
+            errs, _ = self.check(game_tsv=GAME + rows)
+            self.assertEqual(errs == [], good, (rows, errs))
+
+    def test_ue5_title_rows_with_the_fence_cvar_and_launch_knob(self):
+        # T1/T5: the per-version knobs are data rows; a new UE 5.x needs only these (cvar row and decoder row), no code
+        rows = self.UE5C + self.UE5 + self.UE5ENV
+        errs, _ = self.check(game_tsv=GAME + rows)
+        self.assertEqual(errs, [])
+        p = self.prof(game_tsv=GAME + rows)
+        self.assertIn("NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000", [r[0] for r in p.get("env")])
+
+    def test_ue5_needs_the_cvar_machinery_and_a_build(self):
+        # ue5fix M2/m7: code=ue5 must carry the fence cvar, SET_FOR and the cvar-list requirement; app_ver names a build; no repeated words
+        base = self.UE5C + self.UE5
+        fence, setfor, lst = self.UE5ENV.splitlines(keepends=True)
+        for what, rows, msg in (("no fence", base + setfor + lst, "TimeoutForBlockOnRenderFence"), ("no SET_FOR", base + fence + lst, "NPS5_UECVAR_SET_FOR"),
+                                ("no list", base + fence + setfor, "NPS5_UECVAR_LIST"),
+                                ("no app_ver", self.UE5C.replace("app_ver=01.001\t", "") + self.UE5 + self.UE5ENV, "app_ver"),
+                                ("app_ver not a build", self.UE5C.replace("01.001", "09.009") + self.UE5 + self.UE5ENV, "not a build row"),
+                                ("not the package", self.UE5C.replace("01.001", "01.002") + self.UE5 + self.UE5ENV, "package version"),
+                                ("repeated word", self.UE5C.replace("limit_mb=448", "limit_mb=448\tcode=ue5") + self.UE5 + self.UE5ENV, "repeats a word")):
+            errs, _ = self.check(game_tsv=GAME + rows)
+            self.assertTrue(self.has(errs, msg), (what, errs))
+        self.assertEqual(self.check(game_tsv=GAME + base + self.UE5ENV)[0], [])
+
+    def test_shipped_ue5_profiles_carry_the_cvar_machinery(self):
+        for tid in ("PPSA07631", "PPSA24096"):
+            p = game.Profile(os.path.join(game.REPO, "games", tid))
+            envs = [r[0] for r in p.get("env")]
+            self.assertTrue([e for e in envs if e.startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=" in e], tid)
+            self.assertTrue([e for e in envs if e.startswith("NPS5_UECVAR_SET_FOR=")], tid)
+            self.assertIn("NPS5_UECVAR_LIST", [r[0] for r in p.get("env_required")], tid)
+            self.assertEqual(game.check_profile(p, self.schema)[0], [], tid)
+
+    def test_cronos_cache_row_is_the_journal_cache_until_a_list_ships(self):
+        # M3 (decision: keep): Cronos is a code=ue5 journal cache (kyplst + dir=player), not kind=none; its footprint is a WP8 check
+        c = game.Profile(os.path.join(game.REPO, "games", "PPSA24096"))
+        self.assertEqual(c.one("cache"), "kind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.010.000\tlimit_mb=896")
+        self.assertFalse(os.path.exists(os.path.join(game.REPO, "games", "PPSA24096", "pipelines.kyplst")))
+
     def test_saros_cache_rows(self):
         p = game.Profile(os.path.join(game.REPO, "games", "PPSA07631"))
-        self.assertEqual(p.one("cache"), "kind=journal")
+        self.assertEqual(p.one("cache"), "kind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.005.002\tlimit_mb=896")
+        self.assertEqual(p.one("ue5"), "decoder=0x924e80\tfp=1f82e44a65371db3\tabi=oodlelz14")
+        self.assertTrue([r for r in p.get("env") if r[0].startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=1800000" in r[0]])
+        c = game.Profile(os.path.join(game.REPO, "games", "PPSA24096"))
+        self.assertEqual(c.one("ue5"), "decoder=0x6ea51c0\tfp=de94b558d54b8f29\tabi=oodlelz14")
+        self.assertIn("NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000", [r[0] for r in c.get("env")])
         rows = {r[0] for r in p.get("env")}
         for w in ("ASTROHYBRID_CACHE_TITLE_ID=PPSA07631", "KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S=300", "KYTY_PIPELINE_CACHE_SAVE_QUIET_S=5",
                   "KYTY_PIPELINE_CACHE_SAVE_MIN_NEW=64", "KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1"):

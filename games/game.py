@@ -198,7 +198,17 @@ def v_cache(v, a):
         if k == "limit_mb" and not val.isdigit(): return "limit_mb must be decimal"
         if k == "app_ver" and not re.fullmatch(r"\d+(\.\d+)+", val): return "app_ver must look like 01.007.000"
         if k == "dir" and val != "player": return "dir must be player"
-        if k not in ("kind", "limit_mb", "app_ver", "dir"): return "unknown cache word %r" % k
+        if k == "code" and val != "ue5": return "code must be ue5"
+        if k not in ("kind", "limit_mb", "app_ver", "dir", "code"): return "unknown cache word %r" % k
+    if kv.get("code") and (kv.get("kind") != "kyplst" or kv.get("dir") != "player"): return "code=ue5 needs kind=kyplst and dir=player"
+def v_ue5(v, a):
+    w = " ".join(v).split(); kv = dict(x.partition("=")[::2] for x in w)
+    if len(kv) != len(w): return "duplicate word"
+    for k in kv:
+        if k not in ("decoder", "fp", "abi"): return "unknown ue5 word %r" % k
+    if not re.fullmatch(r"0x[0-9a-fA-F]+", kv.get("decoder", "")): return "decoder=0x<guest vaddr> required"
+    if not re.fullmatch(r"[0-9a-f]{16}", kv.get("fp", "")): return "fp=<16 lowercase hex> required"
+    if kv.get("abi") != "oodlelz14": return "abi=oodlelz14 required"
 def v_addrbuild(v, a):
     w = " ".join(v).split()
     if not w or not re.fullmatch(r"0x[0-9a-fA-F]+", w[0]): return "guest address (hex) first"
@@ -209,7 +219,7 @@ def v_stage(v, a): return None if len(v) == 1 and v[0] in STAGES else "S0..S8 ex
 VALIDATORS = {"text": v_text, "id": v_id, "int": v_int, "hex": v_hex, "wxh": v_wxh, "wxh_opt": v_wxh_opt, "enum": v_enum,
               "version": v_version, "words": v_words, "relpath": v_relpath, "build": v_build, "lineage": v_lineage,
               "kvwords": v_kvwords, "envrow": v_envrow, "forbidrow": v_forbid, "marker": v_marker, "runsecs": v_runsecs,
-              "cache": v_cache, "addrbuild": v_addrbuild, "stage": v_stage}
+              "cache": v_cache, "ue5row": v_ue5, "addrbuild": v_addrbuild, "stage": v_stage}
 
 
 def mem_limit_error(k, val, limit=MEM_LIMIT_MAX):
@@ -284,6 +294,24 @@ def check_profile(p, schema):
     for key, s in schema.items():
         if s["required"] and key not in seen:
             E("game.tsv", None, "missing required key %r" % key)
+    cw = (p.one("cache", "") or "").split()
+    if "code=ue5" in cw and not p.one("ue5"): E("game.tsv", None, "cache code=ue5 needs a `ue5 decoder=<vaddr> fp=<fnv> abi=oodlelz14` row")
+    if p.one("ue5") and "code=ue5" not in cw: E("game.tsv", None, "a `ue5` row needs `cache ... code=ue5`")
+    if len(cw) != len(set(cw)): E("game.tsv", None, "cache row repeats a word")
+    if "code=ue5" in cw:
+        av = next((w[8:] for w in cw if w.startswith("app_ver=")), "")
+        bv = [b[0] for b in p.builds()]
+        if not av: E("game.tsv", None, "cache code=ue5 needs app_ver=<version> (the list is tied to one build)")
+        elif av not in bv: E("game.tsv", None, "cache app_ver %s is not a build row (%s): the ue5 decoder row belongs to one build" % (av, ", ".join(bv)))
+        elif p.one("package") and av != p.one("package").split()[0]: E("game.tsv", None, "cache app_ver %s is not the package version %s" % (av, p.one("package")))
+        # the render-fence wait must outlast the first start's compile (30 min), and that cvar only applies with the cvar machinery configured
+        envs = [c[0] for c in p.get("env") if c]
+        if not any(e.startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=" in e for e in envs):
+            E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET=...g.TimeoutForBlockOnRenderFence=<ms>` row")
+        if not any(e.startswith("NPS5_UECVAR_SET_FOR=") for e in envs):
+            E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET_FOR=<ms>` row (the cvars are re-applied only 120 s by default)")
+        if not any(c and c[0] == "NPS5_UECVAR_LIST" for c in p.get("env_required")):
+            E("game.tsv", None, "code=ue5 needs `env_required NPS5_UECVAR_LIST` (without the cvar list NPS5_UECVAR_SET sets nothing)")
     tid = p.one("title_id")
     if tid and tid != p.id: E("game.tsv", None, "title_id %s does not match folder name %s" % (tid, p.id))
     builds = p.builds()

@@ -437,6 +437,45 @@ class CacheKinds(unittest.TestCase):
         self.assertTrue(cx.dir.endswith("kyty-" + cx.key)); self.assertNotIn("player", cx.dir)
         self.assertEqual(got["KYTY_PIPELINE_LIST"], os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"))      # the list path, never the journal "0"
 
+    UE5ROWS = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.005.002\tlimit_mb=448\nue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14"
+    UE5_KEYS = ("KYTY_PIPELINE_LIST_CODE_STORE", "KYTY_UE5_DECODER", "KYTY_UE5_DECODER_FP", "KYTY_UE5_DECODER_ABI", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY")
+
+    def test_ue5_plan_has_the_code_words_and_no_eboot_reader(self):
+        d, env = self.mk(self.UE5ROWS)
+        open(os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"list")
+        tid, opts = run.parse_args(["PPSA00001"]); p = run.compose(tid, opts, env)
+        pdir = os.path.join(env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player")
+        self.assertEqual(p.env["KYTY_PIPELINE_LIST_CODE_STORE"], pdir + "/PPSA00001.codestore")
+        self.assertEqual((p.env["KYTY_UE5_DECODER"], p.env["KYTY_UE5_DECODER_FP"], p.env["KYTY_UE5_DECODER_ABI"]), ("0x926510", "1f82e44a65371db3", "oodlelz14"))
+        for k in self.UE5_KEYS:
+            self.assertEqual(p.layers[k], "cache", k)
+        for k in ("KYTY_PIPELINE_LIST", "KYTY_PIPELINE_LIST_APP_VER", "KYTY_PIPELINE_REPLAY_ALL", "KYTY_HELPER_PREWARM"):
+            self.assertIn(k, p.env, k)
+        self.assertEqual(p.env["KYTY_PIPELINE_LIST_APP_VER"], "01.005.002")
+        self.assertNotIn("KYTY_PIPELINE_LIST_EXE", p.env)
+        self.assertEqual(p.env["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
+        self.assertTrue(p.env["KYTY_PROGRAM_CACHE_PATH"].startswith(pdir + "/"))           # the player dir = the uewarmC dir
+        self.assertFalse([w for w in p.warnings if "not prepared" in w])                   # nothing to prepare ahead
+        # with the cache off none of it is set
+        d2, env2 = self.mk(self.UE5ROWS); env2["NPS5_RUN_SHADER_CACHE"] = "0"
+        p2 = run.compose(*run.parse_args(["PPSA00001"]), env2)
+        for k in self.UE5_KEYS + ("KYTY_PIPELINE_LIST",):
+            self.assertNotIn(k, p2.env)
+
+    def test_ue5_without_a_list_and_plain_kyplst_have_no_ue5_words(self):
+        # no list yet: the journal cache of v1.4 (list-less words, KYTY_PIPELINE_LIST=0), none of the ue5 words; a plain kyplst title never gets one
+        d, env = self.mk(self.UE5ROWS)
+        p = run.compose(*run.parse_args(["PPSA00001"]), env)
+        self.assertEqual(p.env["KYTY_PIPELINE_LIST"], "0")
+        for k in self.UE5_KEYS + ("KYTY_PIPELINE_REPLAY_ALL", "KYTY_PIPELINE_LIST_EXE"):
+            self.assertNotIn(k, p.env, k)
+        d, env = self.mk("cache\tkind=kyplst")
+        open(os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"list")
+        p = run.compose(*run.parse_args(["PPSA00001"]), env)
+        self.assertIn("KYTY_PIPELINE_LIST_EXE", p.env)
+        for k in self.UE5_KEYS:
+            self.assertNotIn(k, p.env)
+
     def test_astro_profile_cache_plan_is_unchanged(self):
         # the shipped ASTRO profile (kind=kyplst with its list): same dir as the stack-key formula, same words, no journal word
         root = os.path.abspath(os.path.join(HERE, ".."))

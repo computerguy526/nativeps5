@@ -20,15 +20,20 @@ gpu_profile_ban	on
 
 # ---- Timing / run limits ----
 run_secs	default=150	max=300
-cache	kind=none
+# UE5 warm list: <runtime> shaders, code from the game's own shader library (code=ue5); no list shipped yet = journal cache only
+cache	kind=kyplst	dir=player	code=ue5	app_ver=01.010.000	limit_mb=896
+ue5	decoder=0x6ea51c0	fp=de94b558d54b8f29	abi=oodlelz14
 
 # ---- Environment words ----
 # The footprint guard was raised once, by the owner, from 17408 to 18432 MiB for this title (the 24 GB Mac limit is 18944); it is
 # never raised further and never to make a scene pass.
 env	NPS5_WINDOW_TITLE_NAME=Cronos	-	window title label
 env	NPS5_GPU=kyty	gpu=kyty	back end selector word
+env	NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000	gpu=kyty	the render-fence wait stays 30 min while the first start compiles the warm list
+env	NPS5_UECVAR_SET_FOR=100000	gpu=kyty	the cvars stay applied past 120 s
 env	NPS5_SELF_MEM_LIMIT_MB=18432	gpu=kyty	footprint guard for this title (17770 MiB was reached at about 8.5 min of a cold-cache session)
 env	KYTY_EOP_TIMESTAMPS=cbtime	gpu=kyty	record-time clocks instead of the preset's counter-heap timestamps (refused by the env_forbidden row below)
+env_required	NPS5_UECVAR_LIST	the Unreal console-variable list made from your own eboot (recipe: `uecvar xref -o x.json <eboot.bin>` then `uecvar dumplist x.json > cronos.list`, as for SAROS); without it the render-fence cvar silently does not apply and the first start's compile can trip the fence timeout
 env_forbidden	KYTY_EOP_TIMESTAMPS=gpu	Metal counter heaps kernel-panicked the Mac
 
 # ---- Facts ----

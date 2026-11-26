@@ -262,8 +262,10 @@ def compile_jobs(environ):
 
 def prepare_words(ctx, app0):
     o = cache_opts(ctx.p)
+    ue5 = ue5_words(ctx)        # code=ue5: extract at guest_ready, compile, exit (no eboot shaders to read)
+    exe = [] if ue5 else [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_PREPARE", "1"),
-            ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")), ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")),
+            ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", ""))] + exe + ue5 + [
             ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ))), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
             ("KYTY_HELPER_PREWARM", "1"),   # the renderer's own tile/detile pipelines are in no list: built (and archived) by the prepare too
             # v1.1.2: the profile defers KosmicKrisp's archive flush to exit for play; a prepare waits one flush period before it ends
@@ -272,15 +274,37 @@ def prepare_words(ctx, app0):
         ([("KYTY_PREPARE_FLUSH_SYNC", "1")] if gate(ctx.environ, "FLUSH_SYNC") or gate(ctx.environ, "COMPACT") else [])   # compaction is written by that flush
 
 
+UE5_NOTE = "shaders come from the game's library at start; `nps5 cache prepare` is optional (it reads the library, compiles and exits)"
+
+
+def ue5_row(p):
+    """The `ue5 decoder= fp= abi=` row of a `cache ... code=ue5` title as a dict, else None (every other title, ASTRO included)."""
+    if "code=ue5" not in (p.one("cache", "") or "").split() or not p.one("ue5"):
+        return None
+    return dict(w.partition("=")[::2] for w in p.one("ue5").split())
+
+
+def ue5_words(ctx):
+    """Run environment of a code=ue5 title (I2): the player's code store, the decoder, its fingerprint and the call convention."""
+    u = ue5_row(ctx.p)
+    if not u:
+        return []
+    return [("KYTY_PIPELINE_LIST_CODE_STORE", os.path.join(ctx.dir, ctx.tid + ".codestore")), ("KYTY_UE5_DECODER", u["decoder"]),
+            ("KYTY_UE5_DECODER_FP", u["fp"]), ("KYTY_UE5_DECODER_ABI", u["abi"]),
+            ("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", "1")]      # the game starts after the compile, as on ASTRO
+
+
 def launch_words(ctx, app0):
     """The launch phase of a normal run on a prepared cache: every pipeline of the list (and of the player's own journal) is created
     again before the game starts, behind the loading card (KYTY_PIPELINE_REPLAY_ALL), together with the renderer's helper pipelines
     (KYTY_HELPER_PREWARM). On a prepared cache each one is a cache hit (about 3 s for 1,500 pipelines); whatever the caches lost since
     compiles there, not at its first draw."""
     o = cache_opts(ctx.p)
-    return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", "")),
-            ("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin")), ("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1"),
-            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ)))] + \
+    ue5 = ue5_words(ctx)                    # code=ue5: no eboot shaders to read (the code comes from the game's shader library)
+    exe = [] if ue5 else [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]
+    return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", ""))] + exe + \
+        [("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1"),
+            ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ)))] + ue5 + \
         metalmod.launch_words(ctx.dir, os.path.join(ctx.p.dir, metalmod.LIST_NAME), ctx.environ)[0]
 
 
@@ -360,6 +384,8 @@ def status(ctx):
         lines.append("  warning: no commit known for %s (set NPS5_KYTY_DIR / NPS5_KK_DIR / NPS5_RECOMP_DIR to git checkouts, or NPS5_STACK_KYTY / "
                      "NPS5_STACK_KK / NPS5_STACK_RECOMP to an identity): the key does not track them, so a cache built by another build of them "
                      "would be reused" % ", ".join(unk))
+    if ue5_row(ctx.p) and ctx.list_sha != "none":
+        return "prepared", lines + ["  " + UE5_NOTE + " (cache dir %s)" % ctx.dir]
     if ctx.list_sha == "none":
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]
     prep = read_kv(os.path.join(ctx.dir, "prepared.tsv"))
@@ -605,8 +631,12 @@ def cmd_share(ctx, o, runner):
     exp = []
     for i, d in enumerate(dirs):
         out = os.path.join(work, "j%d.kyplst" % i)
+        xw = []
+        if ue5_row(ctx.p):     # code=ue5: nearly every journaled shader is runtime code, found only in the player's code store
+            store = next((q for q in (os.path.join(d, ctx.tid + ".codestore"), os.path.join(ctx.dir, ctx.tid + ".codestore")) if os.path.isfile(q)), "")
+            xw = ["--runtime-code"] + (["--code-store", store] if store else [])
         rc, text = runner([tool, "export", "--out", out, "--game", app0, "--shaders", os.path.join(d, ctx.tid + ".shaders.journal"),
-                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer], env=ctx.environ, capture=True)
+                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer] + xw, env=ctx.environ, capture=True)
         if rc != 0:
             print("share: could not export journal set %d: %s" % (i + 1, scrub(text.strip().splitlines()[-1] if text.strip() else "?", ctx.environ))); continue
         exp.append(out)
@@ -847,7 +877,17 @@ def cmd_prepare(ctx, o, runner):
             shutil.rmtree(keep, ignore_errors=True); os.replace(lcdir, keep)
         if keep_libcache and os.path.isdir(mdir):
             shutil.rmtree(mkeep, ignore_errors=True); os.replace(mdir, mkeep)
+        # the player's own data in a dir=player cache (journals = harvest input, the code store) is never deleted by a prepare
+        pkeep = ctx.dir + ".playerkeep"; kept = []
+        if ue5_row(ctx.p) and os.path.isdir(ctx.dir):
+            shutil.rmtree(pkeep, ignore_errors=True); os.makedirs(pkeep)
+            for f in os.listdir(ctx.dir):
+                if f.endswith(".journal") or f.endswith(".codestore"):
+                    os.replace(os.path.join(ctx.dir, f), os.path.join(pkeep, f)); kept.append(f)
         rmtree_inside(ctx.dir, ctx.root); os.makedirs(ctx.dir)
+        for f in kept:
+            os.replace(os.path.join(pkeep, f), os.path.join(ctx.dir, f))
+        shutil.rmtree(pkeep, ignore_errors=True)
         if os.path.isdir(keep):
             os.replace(keep, lcdir)
         if os.path.isdir(mkeep):
