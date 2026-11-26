@@ -67,9 +67,10 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - Closing the window can hit the 5-second save timeout, leaving about 20 Metal archive pipelines unflushed (they compile again next time).
 - The first start after an update is longer (the one-time cache preparation).
 - `KYTY_SAROS_PROGRAM_CACHE=1`: per-launch cost not measured.
+- SAROS (`PPSA07631`) cannot be built with v1.4.0: the shipped profile has empty translate settings so the translator stops on unsupported instructions, a required translate option is missing, and the translator does not follow symlinked folders, so the folder of links the SAROS note tells you to make leaves the libc and audio modules unlinked. This was also true in v1.3.x. All v1.4 SAROS checks used a hand-built binary. A fix is coming in v1.4.1; until then SAROS is not playable from a v1.4.0 build. ASTRO BOT is not affected.
 - `nps5 cache metal --reproduce`: the bundled fixtures no longer cover all committed Metal rows (v1.4 fixture 69 of 409); rows still install as you play.
 
-- **SAROS (`PPSA07631`): starts and plays with known limits on v1.4; frame rate PENDING.** v1.3.x was not playable (about 1 fps with the hand shaders, no background without them); that text is replaced.
+- **SAROS (`PPSA07631`): cannot be built with v1.4.0 (fix in v1.4.1); the v1.4 checks below used a hand-built binary.** v1.3.x was not playable (about 1 fps with the hand shaders, no background without them); that text is replaced.
   What changed: the generic indirect-image path, the Nanite raw raster parameters and the shader-bundle compaction (Kyty), and a SAROS player profile in `games/PPSA07631/game.tsv`: MetalFX temporal in the game's FSR3 slot
   (720p scene to 4K), the 32-bit integer target fix (`KYTY_PS_UINT32_TARGETS=1`, the clay-coat look of the main character), Nanite compute culling and raster modes set by Unreal console variables (persistent threads culling, primitive and mesh
   shader raster off), ray tracing off, a bounded buffer-device-address reach, and the command-processor, readback and fault switches the bring-up runs needed. `nps5 run PPSA07631` now starts (the preset's `KYTY_EOP_TIMESTAMPS=gpu` is overridden to
