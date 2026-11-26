@@ -23,7 +23,8 @@ Everything in v1.4.0, plus the fix that lets players build SAROS. **Update:** `n
   - three runs ended `DONE_FIXED` with 0 unimplemented-function calls and 0 unsupported-instruction hits; the last frame dump of the longest run shows the title's animated background;
   - motion worked on a virtual pad, with 0 live shader compiles at the peak on a warm cache and a peak footprint of 13.0 to 13.8 GiB (13,292 to 14,114 MiB; 3.3 GiB with the v1.4.0 build).
 
-  In-level play has not yet been verified on a v1.4.1 build (the runs pressed no button, so they never left the title); no frame rate is claimed.
+  A user played SAROS in-level on a v1.4.1 build (M5 Pro, DualSense): it plays well. No frame rate is claimed.
+- **Known issue: no warm shader list for SAROS yet.** SAROS has no prebuilt warm shader list yet, so shaders compile while you play: expect a stutter roughly every 2 seconds in new areas. ASTRO BOT's list compiles at the start behind the progress card; SAROS's does not exist yet (its shaders cannot use ASTRO's list format). Shaders compiled during play are kept in your per-player cache, so areas you have already played stutter less on the next start. A warm list compiled at the start for SAROS is the next fix.
 - **SAROS: the console-variable list recipe works from the public tools.** `uecvar xref` + `uecvar dumplist` on the eboot gives 5,095 entries. It is identical to the
   list the development checks used.
 
