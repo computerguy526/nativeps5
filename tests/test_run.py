@@ -462,7 +462,7 @@ class CacheKinds(unittest.TestCase):
         for k in ("KYTY_PIPELINE_LIST", "KYTY_PIPELINE_LIST_APP_VER", "KYTY_PIPELINE_REPLAY_ALL", "KYTY_HELPER_PREWARM"):
             self.assertIn(k, p.env, k)
         self.assertEqual(p.env["KYTY_PIPELINE_LIST_APP_VER"], "01.005.002")
-        self.assertNotIn("KYTY_PIPELINE_LIST_EXE", p.env)
+        self.assertIn("KYTY_PIPELINE_LIST_EXE", p.env)      # kept: a ue5 list may hold executable shaders
         self.assertEqual(p.env["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
         self.assertTrue(p.env["KYTY_PROGRAM_CACHE_PATH"].startswith(pdir + "/"))           # the player dir = the uewarmC dir
         self.assertFalse([w for w in p.warnings if "not prepared" in w])                   # nothing to prepare ahead

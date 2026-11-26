@@ -262,8 +262,8 @@ def compile_jobs(environ):
 
 def prepare_words(ctx, app0):
     o = cache_opts(ctx.p)
-    ue5 = ue5_words(ctx)        # code=ue5: extract at guest_ready, compile, exit (no eboot shaders to read)
-    exe = [] if ue5 else [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]
+    ue5 = ue5_words(ctx)        # code=ue5: extract at guest_ready, compile, exit (the eboot is still passed: the list may hold a few executable shaders)
+    exe = [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]   # a code=ue5 list can still hold executable shaders (SAROS: 41); without the eboot Kyty ignores the whole list
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_PREPARE", "1"),
             ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", ""))] + exe + ue5 + [
             ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ))), ("KYTY_PIPELINE_STATS", "1"), ("KYTY_PROGRESS_TITLE_LOG", "1"),
@@ -300,8 +300,8 @@ def launch_words(ctx, app0):
     (KYTY_HELPER_PREWARM). On a prepared cache each one is a cache hit (about 3 s for 1,500 pipelines); whatever the caches lost since
     compiles there, not at its first draw."""
     o = cache_opts(ctx.p)
-    ue5 = ue5_words(ctx)                    # code=ue5: no eboot shaders to read (the code comes from the game's shader library)
-    exe = [] if ue5 else [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]
+    ue5 = ue5_words(ctx)                    # code=ue5: the eboot is still passed (a few executable shaders; the rest of the code comes from the game's shader library)
+    exe = [("KYTY_PIPELINE_LIST_EXE", os.path.join(app0, "eboot.bin"))]   # a code=ue5 list can still hold executable shaders (SAROS: 41); without the eboot Kyty ignores the whole list
     return [("KYTY_PIPELINE_LIST", ctx.list_path), ("KYTY_PIPELINE_LIST_APP_VER", o.get("app_ver", ""))] + exe + \
         [("KYTY_PIPELINE_REPLAY_ALL", "1"), ("KYTY_HELPER_PREWARM", "1"),
             ("KYTY_PIPELINE_LIST_CACHE_LIMIT_MB", replay_limit_mb(o, driver_cap_mb(ctx.environ))), ("KYTY_DRIVER_CACHE_MAX_MB", str(driver_cap_mb(ctx.environ)))] + ue5 + \

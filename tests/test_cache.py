@@ -342,7 +342,7 @@ class T(unittest.TestCase):
         c = self.ctx()
         self.assertEqual(c.dir, os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001", "kyty-player"))
         w = dict(cache.launch_words(c, app0))
-        self.assertNotIn("KYTY_PIPELINE_LIST_EXE", w)
+        self.assertIn("KYTY_PIPELINE_LIST_EXE", w)
         self.assertEqual(w["KYTY_PIPELINE_LIST_CODE_STORE"], c.dir + "/PPSA00001.codestore")
         self.assertEqual((w["KYTY_UE5_DECODER"], w["KYTY_UE5_DECODER_FP"], w["KYTY_UE5_DECODER_ABI"]), ("0x926510", "1f82e44a65371db3", "oodlelz14"))
         self.assertEqual(w["KYTY_PIPELINE_REPLAY_ALL"], "1")
@@ -407,7 +407,7 @@ class T(unittest.TestCase):
         cmd = " ".join(calls[0])
         for w in ("KYTY_UE5_DECODER=0x926510", "KYTY_UE5_DECODER_FP=1f82e44a65371db3", "KYTY_UE5_DECODER_ABI=oodlelz14", "KYTY_PIPELINE_LIST_CODE_STORE=" + c.dir + "/PPSA00001.codestore", "KYTY_PIPELINE_LIST_PREPARE=1"):
             self.assertIn(w, cmd)
-        self.assertNotIn("KYTY_PIPELINE_LIST_EXE", cmd)
+        self.assertIn("KYTY_PIPELINE_LIST_EXE", cmd)
 
     def test_interrupted_prepare_keeps_the_players_files_and_the_next_one_restores_them(self):
         # ue5fix2 n-n1: the player's journals / code store only ever move to a marked keep dir; an interruption between the move and the

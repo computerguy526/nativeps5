@@ -15,7 +15,7 @@ per title or per UE version is a row in `games/<id>/game.tsv`; adding a title or
    <eboot.bin>` then `uecvar dumplist x.json > <title>.list`; without it `NPS5_UECVAR_SET` sets nothing). `scripts/check.sh` refuses a
    `code=ue5` profile without those three rows, without `app_ver`, or with an `app_ver` that is not a build row / the package version.
    `nps5 run` then adds the code store, decoder, fingerprint and abi
-   words, drops `KYTY_PIPELINE_LIST_EXE` and sets `KYTY_LAUNCH_WAIT_BEFORE_ENTRY=1`. `scripts/check.sh` validates the rows.
+   words, keeps `KYTY_PIPELINE_LIST_EXE` (a list may hold a few executable shaders; without the eboot Kyty ignores the whole list) and sets `KYTY_LAUNCH_WAIT_BEFORE_ENTRY=1`. `scripts/check.sh` validates the rows.
 3. **Harvest.** Play sessions fill `<id>[.session_<tag>].shaders.journal` and `.pipelines.journal` (static journals are skipped).
    `scripts/harvest_ue5.sh <id> --game <app0> [--code-store <file>] --require-runtime 100 <cache dir>...` exports every pair with
    `--runtime-code`, merges, checks and verifies; `--write` adopts `pipelines.kyplst` and `.verified` into `games/<id>/`.
