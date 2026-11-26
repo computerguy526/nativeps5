@@ -93,7 +93,12 @@ class CheckTests(Base):
 
     def test_saros_cache_rows(self):
         p = game.Profile(os.path.join(game.REPO, "games", "PPSA07631"))
-        self.assertEqual(p.one("cache"), "kind=journal")
+        self.assertEqual(p.one("cache"), "kind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.005.002\tlimit_mb=896")
+        self.assertEqual(p.one("ue5"), "decoder=0x924e80\tfp=1f82e44a65371db3\tabi=oodlelz14")
+        self.assertTrue([r for r in p.get("env") if r[0].startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=1800000" in r[0]])
+        c = game.Profile(os.path.join(game.REPO, "games", "PPSA24096"))
+        self.assertEqual(c.one("ue5"), "decoder=0x6ea51c0\tfp=de94b558d54b8f29\tabi=oodlelz14")
+        self.assertIn("NPS5_UECVAR_SET=g.TimeoutForBlockOnRenderFence=1800000", [r[0] for r in c.get("env")])
         rows = {r[0] for r in p.get("env")}
         for w in ("ASTROHYBRID_CACHE_TITLE_ID=PPSA07631", "KYTY_PIPELINE_CACHE_SAVE_INTERVAL_S=300", "KYTY_PIPELINE_CACHE_SAVE_QUIET_S=5",
                   "KYTY_PIPELINE_CACHE_SAVE_MIN_NEW=64", "KYTY_PIPELINE_CACHE_SAVE_ON_TERM=1"):

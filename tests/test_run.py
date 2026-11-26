@@ -463,10 +463,12 @@ class CacheKinds(unittest.TestCase):
             self.assertNotIn(k, p2.env)
 
     def test_ue5_without_a_list_and_plain_kyplst_have_no_ue5_words(self):
-        # data rows still placeholders (no list yet): no cache words at all; a plain kyplst title never gets a ue5 word
+        # no list yet: the journal cache of v1.4 (list-less words, KYTY_PIPELINE_LIST=0), none of the ue5 words; a plain kyplst title never gets one
         d, env = self.mk(self.UE5ROWS)
         p = run.compose(*run.parse_args(["PPSA00001"]), env)
-        self.assertEqual([k for k, l in p.layers.items() if l == "cache"], [])
+        self.assertEqual(p.env["KYTY_PIPELINE_LIST"], "0")
+        for k in self.UE5_KEYS + ("KYTY_PIPELINE_REPLAY_ALL", "KYTY_PIPELINE_LIST_EXE"):
+            self.assertNotIn(k, p.env, k)
         d, env = self.mk("cache\tkind=kyplst")
         open(os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"list")
         p = run.compose(*run.parse_args(["PPSA00001"]), env)

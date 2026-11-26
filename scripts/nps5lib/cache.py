@@ -350,7 +350,7 @@ def status(ctx):
         lines.append("  warning: no commit known for %s (set NPS5_KYTY_DIR / NPS5_KK_DIR / NPS5_RECOMP_DIR to git checkouts, or NPS5_STACK_KYTY / "
                      "NPS5_STACK_KK / NPS5_STACK_RECOMP to an identity): the key does not track them, so a cache built by another build of them "
                      "would be reused" % ", ".join(unk))
-    if ue5_row(ctx.p):
+    if ue5_row(ctx.p) and ctx.list_sha != "none":
         return "prepared", lines + ["  " + UE5_NOTE + " (cache dir %s)" % ctx.dir]
     if ctx.list_sha == "none":
         return "fresh", lines + ["  no games/%s/pipelines.kyplst: nothing to prepare" % ctx.tid]

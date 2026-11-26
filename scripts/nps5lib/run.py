@@ -574,7 +574,7 @@ def shader_cache_words(tid, environ, app0):
             sys.path.insert(0, here)
         import cache as cachemod
         cx = cachemod.context(tid, environ, kinds=("kyplst", "journal"))
-        if cx.kind == "journal":
+        if cx.kind == "journal" or (cachemod.ue5_row(cx.p) and not os.path.isfile(cx.list_path)):   # code=ue5 without its list yet = the journal cache
             fresh = not os.path.isdir(cx.dir) or not os.listdir(cx.dir)
             os.makedirs(cx.dir, exist_ok=True)
             out = [(k, v, None) for k, v in cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=False, environ=environ) + cachemod.journal_words(cx)]
