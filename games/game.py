@@ -297,6 +297,21 @@ def check_profile(p, schema):
     cw = (p.one("cache", "") or "").split()
     if "code=ue5" in cw and not p.one("ue5"): E("game.tsv", None, "cache code=ue5 needs a `ue5 decoder=<vaddr> fp=<fnv> abi=oodlelz14` row")
     if p.one("ue5") and "code=ue5" not in cw: E("game.tsv", None, "a `ue5` row needs `cache ... code=ue5`")
+    if len(cw) != len(set(cw)): E("game.tsv", None, "cache row repeats a word")
+    if "code=ue5" in cw:
+        av = next((w[8:] for w in cw if w.startswith("app_ver=")), "")
+        bv = [b[0] for b in p.builds()]
+        if not av: E("game.tsv", None, "cache code=ue5 needs app_ver=<version> (the list is tied to one build)")
+        elif av not in bv: E("game.tsv", None, "cache app_ver %s is not a build row (%s): the ue5 decoder row belongs to one build" % (av, ", ".join(bv)))
+        elif p.one("package") and av != p.one("package").split()[0]: E("game.tsv", None, "cache app_ver %s is not the package version %s" % (av, p.one("package")))
+        # the render-fence wait must outlast the first start's compile (30 min), and that cvar only applies with the cvar machinery configured
+        envs = [c[0] for c in p.get("env") if c]
+        if not any(e.startswith("NPS5_UECVAR_SET=") and "g.TimeoutForBlockOnRenderFence=" in e for e in envs):
+            E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET=...g.TimeoutForBlockOnRenderFence=<ms>` row")
+        if not any(e.startswith("NPS5_UECVAR_SET_FOR=") for e in envs):
+            E("game.tsv", None, "code=ue5 needs an `env NPS5_UECVAR_SET_FOR=<ms>` row (the cvars are re-applied only 120 s by default)")
+        if not any(c and c[0] == "NPS5_UECVAR_LIST" for c in p.get("env_required")):
+            E("game.tsv", None, "code=ue5 needs `env_required NPS5_UECVAR_LIST` (without the cvar list NPS5_UECVAR_SET sets nothing)")
     tid = p.one("title_id")
     if tid and tid != p.id: E("game.tsv", None, "title_id %s does not match folder name %s" % (tid, p.id))
     builds = p.builds()
