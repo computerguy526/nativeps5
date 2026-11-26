@@ -30,13 +30,35 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - Upstream fixes taken (neutral in the Astro A/B): memory log no longer prints clamped buffer ranges (KytyPS5 #2540), `V_CMPX_NGE_F16` is decoded (#2532).
   The IPO/PGO build switches exist and are off by default.
 
+- **Motion (gyro, tilt, shake) works while the game window has no keyboard focus (Kyty; DualSense and Switch Pro).** SDL drops every pad event, the sensor samples
+  included, while the process owns a window that is not the key window, and a game started from a terminal or script opens its window without focus until it is
+  clicked. Kyty now sets `SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS` (`KYTY_PAD_BACKGROUND_INPUT=0` restores SDL's default). Reproduced without the game on a DualSense:
+  with a window and no focus 0 sensor events, with the hint about 250 events/s (USB; about 65/s over Bluetooth). Also: neutral motion is never published as live data and
+  stalled sensors are re-armed with a back-off, the window loop handles every queued SDL event per step, and a pad that has motion sensors while the host library lacks the
+  motion export now logs one loud ERROR naming `DYLD_LIBRARY_PATH` (before it was silent). The new end-to-end test drives an SDL virtual DualSense and Switch Pro through to the game's pose.
+  `nps5 run` refuses a missing host-library folder, and after launch checks that the loaded `libnps5_gpu` and `kyty_gpu` are the planned ones (verdict `LOADED_MISMATCH` when not;
+  `NPS5_LOADED_CHECK=0` skips the check).
+- **Shader cache: saved when you close the window, and the shipped list covers every recorded session.** Closing the window now flushes KosmicKrisp's pipeline archive
+  (it was lost on that exit: a 120 s test run after 2,734 compiles wrote 0 archive segments and the next start compiled 2,717 again). The flush time is logged ("Close: KosmicKrisp archive flush ... in N ms");
+  PENDING: the effect on the next start's compile count on the final library. The list tool reads `programs.bin` as a source (compute programs that no journal held), and the
+  `harvestall` tool builds one union list from all sessions with a coverage and override gate. The ASTRO list above is that union.
+- **Exit and window fixes (Kyty).** The window title is always valid UTF-8 (an invalid byte made the title call throw on the main thread: crash). A mutex that saver threads
+  outlived at exit is never destroyed (the process could hang after a window close or SIGTERM instead of exiting).
+- **Astro Bot: entering "Apes on the Loose" no longer ends in a Kyty assert.** The indirect-draw argument base is kept across command buffers (a reset dropped it, then the level's first indirect draw hit
+  the assert and the run ended with exit code 65; seen on an rc13 run). It skips an indirect draw without a base instead of exiting.
+- **Astro Bot: footprint governor** (`KYTY_FOOTPRINT_GOVERNOR=1`, set by the ASTRO profile, default off elsewhere): above 86 % of the memory self-limit the GC planning budget is scaled to 0.6 and the native image pool is flushed once, so stale resources
+  go before the exit-86 guard (a 24 GB M4 Pro run entered "Apes on the Loose" after a long world-map idle and hit the guard at 19,067 MiB). The limit itself is never raised. On the rc17 run of that level (same 24 GB Mac, 1,194 s, closed by the player) the governor
+  activated once and released 7 s later, the peak footprint was 18,663 MiB and there was no exit 86 (one run; not a guarantee). The profile row `KYTY_RSCALE_HOLD_ON_LOAD=1` (no automatic 720p to 540p switch while a level streams) is inert in v1.4.0: it needs the next
+  `nativeps5-recomp` and a re-translation of the title.
+- **KosmicKrisp patch 0042** (counted above) also has a unit test (`kosmickrisp/tests/memflags`: every variable-kind bit maps to a valid flag); with it a gate prepare built 0 failed pipelines and logged 0 library errors.
+
 - **Astro Bot: Metal shader rows follow your play.** After a session `nps5 run` regenerates our Metal kernels/pairs when `programs.bin` has grown (`NPS5_METAL_REFRESH=0` turns it off).
   A fresh prepare installs 30 of 70 kernels and 67 of 218 pairs on an M5 Pro (the list does not contain the other kernels' programs); they join as you play levels.
 
 - First start after updating: the shader cache is rebuilt behind the loading card (several minutes, once). The OS Metal cache id is now per title and GPU/OS build, so later updates keep the compiled work of unchanged shaders.
 
 **Known issues (v1.4):**
-- ASTRO BOT: entering "Apes on the Loose" right after other levels can end the game with exit code 86 (the memory self-limit) on 24 GB Macs. Restart and enter the level from the world map. A fix is in progress.
+- ASTRO BOT: entering "Apes on the Loose" right after other levels can end the game with exit code 86 (the memory self-limit) on 24 GB Macs. The footprint governor (above) lowers the footprint in the one run measured, but is not proven to prevent it; if it happens restart and enter the level from the world map.
 - The first start after installing or updating can crash once at the end of the loading card (an Apple Metal bug that is hit when MetalFX starts while the shader archive is being saved). Start the game again. Fixed in the next version.
 - The first start after updating rebuilds the shader cache behind the loading card (several minutes on ASTRO BOT).
 - ASTRO BOT: catching the ape very quickly at the end of "Apes on the Loose" can stop the level from finishing; let it run for a moment first.
@@ -46,11 +68,14 @@ start the title. The first start on a v1.3.x cache prepares it once behind the l
 - The first start after an update is longer (the one-time cache preparation).
 - `KYTY_SAROS_PROGRAM_CACHE=1`: per-launch cost not measured.
 
-- **SAROS (`PPSA07631`): pending SAROS verification run.** The v1.4 Kyty carries the generic indirect-image path, the Nanite raw raster
-  parameters and the shader-bundle compaction, and `nps5 run PPSA07631` now starts (the preset's `KYTY_EOP_TIMESTAMPS=gpu` is overridden to
-  `cbtime`, as for ASTRO BOT; before, the safety check refused the run) and refuses to run without the Unreal console-variable list
-  `NPS5_UECVAR_LIST` (without it the profile's cvar fixes silently did not apply). Whether SAROS is playable on v1.4, and at what frame
-  rate, is not yet verified: the status in the README and the game note stays "not playable" until a run on the merged tip says otherwise.
+- **SAROS (`PPSA07631`): starts and plays with known limits on v1.4; frame rate PENDING.** v1.3.x was not playable (about 1 fps with the hand shaders, no background without them); that text is replaced.
+  What changed: the generic indirect-image path, the Nanite raw raster parameters and the shader-bundle compaction (Kyty), and a SAROS player profile in `games/PPSA07631/game.tsv`: MetalFX temporal in the game's FSR3 slot
+  (720p scene to 4K), the 32-bit integer target fix (`KYTY_PS_UINT32_TARGETS=1`, the clay-coat look of the main character), Nanite compute culling and raster modes set by Unreal console variables (persistent threads culling, primitive and mesh
+  shader raster off), ray tracing off, a bounded buffer-device-address reach, and the command-processor, readback and fault switches the bring-up runs needed. `nps5 run PPSA07631` now starts (the preset's `KYTY_EOP_TIMESTAMPS=gpu` is overridden to
+  `cbtime`, as for ASTRO BOT) and refuses to run without the Unreal console-variable list `NPS5_UECVAR_LIST` made from your own eboot (without it the cvar fixes silently did not apply).
+  Measured on the release candidate (rc17, box 3, M5 Pro, `nps5 run`, two sessions): both sessions ended with verdict DONE_FIXED, motion works (PASS), 0 live shader compiles at the peak in both, peak footprint 13.7 and 14.5 GB.
+  Frame rate on a v1.4 library: PENDING (no number is claimed; the 2026-11-24 development runs are not v1.4 measurements). Limits: needs about 15 GB of memory (a 16 GB Mac cannot run it), no shipped pipeline list (the first session compiles shaders while you play,
+  see the next entry), the two crashes and the decal shader in its note stay, audio, saves and trophies are not verified.
 - **SAROS (`PPSA07631`): a player's second session starts from the saved caches** (`nps5 run` keeps a per-player cache directory with the pipeline and shader journals, the program cache and the KosmicKrisp archive). In a 150 s run on an M5 Pro the first 100 pipelines needed 4 unoptimized builds instead of 94 and 95 of them hit the driver cache; draws waited on shader builds 17 s instead of 126 s (2 consecutive runs; the second reached a smaller part of the game in the same time, so the 120 s ratio is not the cleaner number).
 - **Cronos: The New Dawn (`PPSA24096`)** had the same refusal and gets the same override.
 - **Switches removed from the docs:** `KYTY_SAROS_HS_DYNIDX`, `KYTY_SAROS_ASYNC_CS` and `KYTY_SAROS_ASYNC_CS_WAIT_MS` do not exist in v1.4.

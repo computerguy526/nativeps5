@@ -1,20 +1,20 @@
 # SAROS (`PPSA07631`)
 
 Game note. No game data is here and none is accepted; you need your own dump ([CONTRIBUTING.md](../../CONTRIBUTING.md)).
-**v1.4: pending SAROS verification run (no playable claim yet).** The v1.4 Kyty and the profile of `nativeps5-recomp` are the candidate; the status below is the last verified one.
-**Status for v1.3.x: not playable.** With the SAROS hand shaders (`KYTY_SAROS_HANDSHADERS`, `KYTY_SAROS_NANITE_RAW`, `KYTY_BUNDLE_COMPACT`) on, the title stalls at about 1 fps; with them off the background is missing. No switch combination on the v1.3.0 Kyty gives a correct picture at a playable frame rate. Support is coming in v1.4. The rest of this note describes the bring-up configuration and is kept as the starting point for v1.4; do not expect a playable game from it on v1.3.x.
+**Status (v1.4): starts and plays with known limits; frame rate PENDING.** Release-candidate check (rc17, M5 Pro with 24 GB or more, `nps5 run`, two sessions): both ended with verdict DONE_FIXED, motion works, 0 live shader compiles at the peak in both, peak footprint 13.7 and 14.5 GB. No frame-rate number is claimed for v1.4: the figures below from development builds are not v1.4 measurements.
+**Was not playable on v1.3.x:** with the hand shaders on the title stalled at about 1 fps; with them off the background was missing. v1.4 carries the generic indirect-image path, the Nanite raw raster parameters, the shader-bundle compaction and the player profile in [game.tsv](game.tsv) (MetalFX temporal 720p to 4K, the 32-bit integer target fix, the Unreal cvar settings).
 
 - **Version:** 01.005.002 (SDK 11.00), eboot Build ID `6d383b3837ff06b8`.
 - **Engine and graphics:** Unreal Engine 5.5 line (Nanite, Lumen, virtual shadow maps, TSR, MegaLights and Substrate present); AGC; the
   title outputs 3840x2160 from a scene rendered at about 720p.
 - **Back end:** `kyty` (KytyPS5's renderer on KosmicKrisp), with the KosmicKrisp patches 0031-0040 (64-bit image and buffer atomics,
   the switch tree, the residency lock).
-- **Status (v1.3.x):** not playable (see the top of this note). Earlier development builds booted, played the intro and gameplay with a controller at
-  about 19 fps at a 720p scene on an M5 Pro with a 15-16 GB footprint; the v1.3.0 release line does not reproduce that. A 16 GB Mac cannot run it.
+- **Status:** see the top of this note. Earlier development builds booted, played the intro and gameplay with a controller at
+  about 19 fps at a 720p scene on an M5 Pro with a 15-16 GB footprint; these are development-build figures, not v1.4 measurements. A 16 GB Mac cannot run it.
 - **Profile files:** [game.tsv](game.tsv). The title's runtime switches live in the translator profile `profiles/PPSA07631.json` of
   `nativeps5-recomp` (they are baked into the translated program). No `patches.py`, no pipeline list (see "Shader cache").
 
-## Set it up (bring-up only: not playable on v1.3.x; this recipe is for v1.4)
+## Set it up (v1.4)
 
 1. **Pack the dump first** (79 GB instead of 153 GB; the largest `.ucas` is 64 GB and APFS cannot compress a file over 2 GiB by
    itself): [disk-space](../../docs/reference/disk-space.md). The runtime reads the packed copy with no setting
