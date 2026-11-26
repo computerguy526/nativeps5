@@ -196,6 +196,12 @@ class TestPipelineList(Base):
         self.assertEqual(self.problems(data), [])
         self.clean({self.P: data, self.P + ".verified": sidecar(data), "games/PPSA00000/game.tsv": b"title_id\tPPSA00000\n"})
 
+    def test_files_section_of_a_runtime_list_is_accepted(self):
+        # section 6 = the Files table (a UE5 list's `<runtime>` entry); a section 7 is still refused
+        data = kyplst([section(1, info()), section(3, os.urandom(64) * 4), section(6, b"\x01\x00\x00\x00\x09\x00\x00\x00<runtime>")])
+        self.assertEqual(self.problems(data), [])
+        self.assertTrue(self.problems(kyplst([section(1, info()), section(7, b"x" * 32)])))
+
     def test_record_with_runtime_coverage_line_is_accepted(self):
         data = kyplst([section(1, info()), section(3, os.urandom(64) * 4)])
         side = sidecar(data) + b"runtime=0 runtime shaders not covered by a --shaders journal (of 12)\n"

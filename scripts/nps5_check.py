@@ -244,7 +244,7 @@ CONTRIB_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/contrib/\d{4}-\d
 # pad scripts (input timings only): games/<title id>/pad/<name>.vpad
 PROFILE_PAD_RE = re.compile(r"^games/(?:PPSA|CUSA|PCAS|PLAS)\d{5}/pad/[A-Za-z0-9_.-]+\.vpad$")
 KYPLST_MAGIC = b"KYPLST1\0"
-KYPLST_SECTIONS = {1, 2, 3, 4, 5}   # info, levels, shaders, permutations, pipelines (pipelineList.h in the kyty fork)
+KYPLST_SECTIONS = {1, 2, 3, 4, 5, 6}   # info, levels, shaders, permutations, pipelines, files (the `<runtime>` entry of a UE5 list) (pipelineList.h in the kyty fork)
 KYPLST_MAX_BYTES, KYPLST_MAX_RAW = 4 << 20, 64 << 20   # the committed list is 70 kB; a section may not unpack to more than 64 MiB
 KYPLST_OK_LINE = "verify: no shader code in the list"
 # Things that must not occur inside a decompressed list section: shader binaries and shader text in any form.
