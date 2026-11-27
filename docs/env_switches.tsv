@@ -1825,7 +1825,7 @@ KYTY_SAROS_SAMPLE_LOD0	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAVE_LOAD_MAX_DEFER_S	kyty		src/common/nps5Frame.h
 KYTY_SAVE_LOAD_QUIET_S	kyty	periodic cache saves held during and N s after a level load (v1.1.2 profile default 20)	src/common/nps5Frame.h
 KYTY_SAVE_LOAD_VFS_MBS	kyty		src/common/nps5Frame.h
-KYTY_SCENE_KEYS	kyty	`1` = scenery hotkeys F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other decoration (default off: the keys reach the game); set by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
+KYTY_SCENE_KEYS	kyty	`1` = scenery hotkeys F1 help panel, F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other decoration (default off: the keys reach the game); set by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SCENE_SKIP_FILE	kyty	path of the table of presets and scene-gated draw-skip program pairs (default off); written by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SCENE_STATE_FILE	kyty	path Kyty writes (atomically) on every scenery key press for the launcher's watcher (seq, preset, keep percent per category)	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SERVICE_PRIORITY	kyty		src/common/threads.cpp

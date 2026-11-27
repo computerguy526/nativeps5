@@ -13,7 +13,7 @@ unset) changes nothing. `reduced` / `minimal` / `balanced` / `performance` / `cu
 has `scenery` rows for: a copy of your own level files is generated under <scratch>/scenery/<id>/<setting>/ and mounted by the runtime
 (NPS5_OVERLAY_DIR); the game folder is never written. A file that is not the one the row was made for is left alone with one warning.
 Combined with your own NPS5_OVERLAY_DIR (your file wins on the same path).
---scenery-keys on  (NPS5_SCENERY_KEYS=1; default off; Kyty only) hotkeys F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other
+--scenery-keys on  (NPS5_SCENERY_KEYS=1; default off; Kyty only) hotkeys F1 help panel, F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other
 decoration: the overlay becomes a folder of links the launcher repoints when a key is pressed; the level-data part applies when the level
 is entered again, the instant draw skip (profile `drawskip` rows) on the next frame. NPS5_SCENERY_EXTRA=<file>: local-only extra rows.
 --play  a person playing at the keyboard, not a test: sound on, no --until target and no early stop by the watcher, up
@@ -478,7 +478,7 @@ def scenery_overlay(plan, p, opts, environ, scratch, app0, dry, gpu="kyty"):
             _, lines = live.repoint(mask)
             lines = ["%s: live links for %d files, start mask %s" % (p.id, len(live.items), sc.mask_text(mask))] + live.warnings + lines
             cycle = [(x["preset"], dict(x["cats"])) for x in sets if x["preset"] in ("balanced", "performance")]
-            sc.write_skip_table(_scene_paths(sc, scratch, p.id)[1], cycle, {c: mask.get(c, 100) for c in sc.CATS}, skips)
+            sc.write_skip_table(_scene_paths(sc, scratch, p.id)[1], cycle, {c: mask.get(c, 100) for c in sc.CATS}, skips, catrows)
         else:
             target, lines = sc.generate(app0, scratch, p.id, name if rows else "full", rows, fixes)
         if user:

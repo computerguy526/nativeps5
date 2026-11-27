@@ -650,14 +650,30 @@ def parse_state(text):
     return dict(seq=int(kv["seq"]), preset=kv.get("preset", "custom"), mask=mask)
 
 
-def write_skip_table(path, presets, start, skips=()):
+def level_hows(rows, skips=()):
+    """How each category applies per level, for the F1 help panel: {level: {cat: "instant" | "entry" | "both"}}. `entry` = a category row
+    (the level data of the next level load), `instant` = a drawskip row naming the category. Pure; rows without a category are ignored."""
+    how = {}
+    for r in rows:
+        if r.get("cat"):
+            how.setdefault(r["level"], {}).setdefault(r["cat"], set()).add("entry")
+    for k in skips:
+        for c in k["cats"]:
+            how.setdefault(k["level"], {}).setdefault(c, set()).add("instant")
+    return {lv: {c: ("both" if len(h) == 2 else next(iter(h))) for c, h in cs.items()} for lv, cs in how.items()}
+
+
+def write_skip_table(path, presets, start, skips=(), rows=()):
     """The table Kyty reads (KYTY_SCENE_SKIP_FILE; atomic). presets = [(name, {cat: keep})] in F3 cycle order (full is implicit first),
     start = the launch mask, skips = parsed `drawskip` rows. Lines (tab separated):
-      preset <name> <cat=keep,...>      start <cat=keep,...>      skip <level> <cat+cat> <vs hash16> <ps hash16 or ->"""
+      preset <name> <cat=keep,...>      start <cat=keep,...>      skip <level> <cat+cat> <vs hash16> <ps hash16 or ->
+      level <level> <cat=instant|entry|both,...>   (F1 panel; from the category `rows` and the drawskip rows; levels sorted, categories in CATS order)"""
     out = ["# nps5 scenery table: read by Kyty (KYTY_SCENE_SKIP_FILE)"]
     out += ["preset\t%s\t%s" % (n, mask_text(m)) for n, m in presets]
     out.append("start\t" + mask_text(start))
     out += ["skip\t%s\t%s\t%s\t%s" % (k["level"], "+".join(k["cats"]), k["vs"], k["ps"] or "-") for k in skips]
+    hows = level_hows(rows, skips)
+    out += ["level\t%s\t%s" % (lv, ",".join("%s=%s" % (c, hows[lv][c]) for c in CATS if c in hows[lv])) for lv in sorted(hows)]
     _atomic_write(path, ("\n".join(out) + "\n").encode())
 
 

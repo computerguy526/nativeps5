@@ -142,7 +142,24 @@ class Keys(Base):
         self.assertIn("start\tflowers=0,grass=0,moss=0,other=0", tb)
         self.assertIn("preset\tbalanced\tflowers=50,grass=50,moss=100,other=100", tb); self.assertIn("preset\tperformance\tflowers=0,grass=0,moss=0,other=0", tb)
         self.assertIn("skip\tlv\tflowers\t%s\t-" % ("a" * 16), tb)
+        self.assertIn("level\tlv\tflowers=both,grass=entry", tb)       # F1 panel: flowers has a category row and a drawskip row, grass only the row
         self.assertLess(tb.index("preset\tbalanced\tflowers=50,grass=50,moss=100,other=100"), tb.index("preset\tperformance\tflowers=0,grass=0,moss=0,other=0"))
+
+    def test_level_hows_for_the_f1_panel(self):
+        pr = lambda lv, cat: S.parse_row([lv, cat, "src=" + "0" * 64, "class=bg", "drop=" + KEY_F])
+        sk = lambda lv, cats: S.parse_skip([lv, cats, "vs=" + "a" * 16, "ps=-"])
+        self.assertEqual(S.level_hows([], []), {})
+        self.assertEqual(S.level_hows([pr("l1", "moss"), pr("l1", "moss"), pr("l2", "other")], [sk("l1", "moss+grass"), sk("l3", "flowers")]),
+                         {"l1": {"moss": "both", "grass": "instant"}, "l2": {"other": "entry"}, "l3": {"flowers": "instant"}})
+        # legacy rows (no category) are not a key's business
+        self.assertEqual(S.level_hows([S.parse_row(["l9", "reduced", "src=" + "0" * 64, "class=bg", "drop=" + KEY_F])], []), {})
+        # the table text: sorted levels, categories in the fixed order, nothing for a table without rows
+        path = os.path.join(self.d, "t.tsv")
+        S.write_skip_table(path, [], {c: 100 for c in S.CATS}, [sk("l3", "flowers")], [pr("l2", "other"), pr("l1", "moss"), pr("l1", "flowers")])
+        tb = open(path).read().splitlines()
+        self.assertEqual([l for l in tb if l.startswith("level")], ["level\tl1\tflowers=entry,moss=entry", "level\tl2\tother=entry", "level\tl3\tflowers=instant"])
+        S.write_skip_table(path, [], {c: 100 for c in S.CATS})
+        self.assertFalse([l for l in open(path).read().splitlines() if l.startswith("level")])
 
     def test_keys_need_kyty_and_category_rows(self):
         pl = self.plan(["--scenery-keys", "on", "--gpu", "anyps5"])
