@@ -81,3 +81,12 @@ gfx	383bf9ae9d27e23b/51a10cb604145615	g16	nopipe	the pipeline list has this pair
 gfx	170b21d93e803a30/86f6bbe65e307ab6	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	30694d820384704c/02db1d938f8728b2	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	39478dacd8a02253/d74ca4c1accb712c	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	f347191aba839bf5/c9aa916974c8d223	g16	moved	alias dropped 2026-11-27: re-keyed alias 07c231aa/50e4d770 not validatable (no A text, 65a9f17), the row cannot match today's key
+gfx	f347191aba839bf5/c9aa916974c8d223	g18	moved	alias dropped 2026-11-27: re-keyed alias 07c231aa/50e4d770 not validatable (no A text, 65a9f17), the row cannot match today's key
+gfx	fc219b571e464b4f/44b6758459ad7061	g18	moved	alias dropped 2026-11-27: re-keyed alias fc219b57/fd2dd3e1 has no local draw evidence profile, not validated (65a9f17)
+gfx	3742e8411bf49354/c3e52ec8914d5c78	g16	moved	alias dropped 2026-11-27: re-keyed alias 3742e841/e99f1c00 VACUOUS (no draw evidence, coverage 0), not shipped (65a9f17)
+gfx	3742e8411bf49354/c3e52ec8914d5c78	g18	moved	alias dropped 2026-11-27: re-keyed alias 3742e841/e99f1c00 VACUOUS (no draw evidence, coverage 0), not shipped (65a9f17)
+gfx	14a6b8704088a930/212b0122ee269e02	g18	moved	alias dropped 2026-11-27: re-keyed alias 14a6b870/e88e339f not validatable: our B vertex text not available (65a9f17)
+gfx	14a6b8704088a930/d9f92a3b6bab1300	g18	moved	alias dropped 2026-11-27: re-keyed alias 14a6b870/2366977c not validatable: our B vertex text not available (65a9f17)
+gfx	e85ea5f10c69e66e/52c49b0876253c2e	g18	moved	alias dropped 2026-11-27: re-keyed alias e85ea5f1/7e52168d has no local draw evidence profile, not validated (65a9f17)
+gfx	705290fd687d3ed4/3335e87da3837901	g18	moved	alias dropped 2026-11-27: re-keyed alias 705290fd/a9e5c0d8 is in the narrowed hang denylist, not run (65a9f17)
