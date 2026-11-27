@@ -435,6 +435,19 @@ class AstroComputeAliasRowTests(unittest.TestCase):
         d = os.path.join(game.REPO, "games", "PPSA21564")
         guests = {l.split("\t")[1]: l.split("\t")[2] for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if l.startswith("cs\t")}
         self.assertEqual(guests["68d59c988691ec1a"], guests["ef0b262245d9f2dc"])
+        self.assertEqual(guests["b98b48c2745e55a7"], guests["84b2db9850828961"])
+
+    def test_g16_alias_row_only_for_the_kernel_that_is_faster_on_the_laptop(self):
+        """osgaps 2026-11-27, M4 Pro laptop macOS 27.2.1: 84b2db98 > b98b48c2 timed B/A 0.883 0.879 0.881; ef0b2622 (1.09) and e1216d46 (1.13) slower, fba4b753 FAIL."""
+        al = [r for r in self.rows() if r[7] == "g16" and r[5].startswith("exact+rekey")]
+        self.assertEqual([(r[2], r[5], r[8], r[9]) for r in al], [("b98b48c2745e55a7", "exact+rekey84b2db98", "exact", "faster")])
+        self.assertLess(float(al[0][10]), 1.0)
+        old = [r for r in self.rows() if r[2] == "84b2db9850828961"]
+        self.assertEqual(len(old), 1)
+        self.assertEqual((old[0][0], old[0][1], old[0][3]), (al[0][0], al[0][1], al[0][3]))
+        keys = {r[2] for r in self.rows()}
+        for k in ("33a534f1bb01ad53", "7f80c1e653ea1124"): self.assertNotIn(k, keys)
+        self.assertEqual([r[7] for r in self.rows() if r[2] == "68d59c988691ec1a"], ["g17"])    # ef0b2622's alias stays g17 only (slower on g16)
 
 
 class Ue5RowTests(Base):
