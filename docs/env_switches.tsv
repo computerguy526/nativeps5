@@ -1826,6 +1826,7 @@ KYTY_SAVE_LOAD_MAX_DEFER_S	kyty		src/common/nps5Frame.h
 KYTY_SAVE_LOAD_QUIET_S	kyty	periodic cache saves held during and N s after a level load (v1.1.2 profile default 20)	src/common/nps5Frame.h
 KYTY_SAVE_LOAD_VFS_MBS	kyty		src/common/nps5Frame.h
 KYTY_SCENE_KEYS	kyty	`1` = scenery hotkeys on the number row (numpad digits too): 4 help panel, 5 preset cycle, 6 flowers, 7 grass, 8 small moss, 9 other decoration (default off: the digits reach the game as before); set by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
+KYTY_SCENE_KEYS_SCRIPT	kyty	automated checks only (default off, needs KYTY_SCENE_KEYS=1): scripted scenery key presses `<seconds>:<digit>[,...]` (S before the digit = Shift), seconds after the first presented frame, e.g. `3:6,25:6`; goes through the real key path (state file, log line, toast)	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SCENE_SKIP_FILE	kyty	path of the table of presets and scene-gated draw-skip program pairs (default off); written by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SCENE_STATE_FILE	kyty	path Kyty writes (atomically) on every scenery key press for the launcher's watcher (seq, preset, keep percent per category)	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SERVICE_PRIORITY	kyty		src/common/threads.cpp
