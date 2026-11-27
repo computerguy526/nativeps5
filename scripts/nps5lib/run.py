@@ -390,9 +390,10 @@ def scenery_overlay(plan, p, opts, environ, scratch, app0, dry):
     sc = _scenery()
     setting = opts.get("scenery") or plan.env.get("NPS5_SCENERY") or environ.get("NPS5_SCENERY") or "full"
     fixset = plan.env.get("NPS5_LEVELFIX", environ.get("NPS5_LEVELFIX", "1"))
-    for k in ("NPS5_SCENERY", "NPS5_LEVELFIX"):
-        if k in plan.env:
-            del plan.env[k]; plan.order.remove(k); plan.layers.pop(k, None)
+    # NPS5_SCENERY is read only here and is removed; NPS5_LEVELFIX stays when the plan carries it (--env, ENV=, profile word):
+    # the runtime (recomp nps5_levelfix.h, every launch path) reads it too, so `--env NPS5_LEVELFIX=0` must reach it.
+    if "NPS5_SCENERY" in plan.env:
+        del plan.env["NPS5_SCENERY"]; plan.order.remove("NPS5_SCENERY"); plan.layers.pop("NPS5_SCENERY", None)
     if setting not in sc.PRESETS:
         raise Refuse("scenery %r: full, reduced or minimal" % setting, 2)
     if fixset not in ("0", "1"):

@@ -317,7 +317,7 @@ def merge_overlay(gen_dir, user_dir, out_dir):
     import shutil
     def walk(root):
         out = {}
-        for r, ds, fs in os.walk(root):
+        for r, ds, fs in os.walk(root, followlinks=True):      # a symlinked sub-folder of the player's overlay is part of it (a loop ends at MERGE_MAX)
             ds[:] = [d for d in ds if not d.startswith(".")]
             for f in fs:
                 if f.startswith("."): continue

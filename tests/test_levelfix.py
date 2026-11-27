@@ -218,6 +218,22 @@ class Wiring(unittest.TestCase):
         self.titles("PPSA00001"); open(os.path.join(self.app0, self.rel), "ab").write(b" ")
         pl = self.plan(["--env", "NPS5_OVERLAY_DIR=/mine"]); self.assertEqual(pl.env["NPS5_OVERLAY_DIR"], "/mine")
 
+    def test_level_fix_word_reaches_the_runtime_when_set_through_the_plan(self):
+        # rvv143: the recomp VFS applies the same fix on every launch path and reads NPS5_LEVELFIX itself; the launcher must not eat the word
+        self.titles("PPSA00001")
+        for pl in (self.plan(["--env", "NPS5_LEVELFIX=0"]), self.plan(["--env", "NPS5_LEVELFIX=1"])):
+            self.assertIn(pl.env["NPS5_LEVELFIX"], ("0", "1")); self.assertIn("NPS5_LEVELFIX", pl.order); self.assertIn("NPS5_LEVELFIX", pl.layers)
+        self.assertEqual(self.plan(["--env", "NPS5_LEVELFIX=0"]).env["NPS5_LEVELFIX"], "0")
+        self.titles("PPSA00001", 'ENV="NPS5_LEVELFIX=0"\n'); self.assertEqual(self.plan([]).env["NPS5_LEVELFIX"], "0")
+
+    def test_merge_follows_a_symlinked_subfolder_of_the_players_overlay(self):
+        real = os.path.join(self.d, "real"); os.makedirs(os.path.join(real, "sub")); wr(os.path.join(real, "sub", "a.ini"), "z")
+        uo = os.path.join(self.d, "uo2"); os.makedirs(uo); os.symlink(real, os.path.join(uo, "linked"))
+        gen = os.path.join(self.d, "gen2"); os.makedirs(os.path.join(gen, "data")); wr(os.path.join(gen, "data", "x.lvx"), "g")
+        out, left = S.merge_overlay(gen, uo, os.path.join(self.d, "merged2"))
+        self.assertTrue(os.path.isfile(os.path.join(out, "linked", "sub", "a.ini"))); self.assertTrue(os.path.isfile(os.path.join(out, "data", "x.lvx")))
+        self.assertEqual(left, [])
+
     def test_dry_run_writes_nothing(self):
         self.titles("PPSA00001"); t, opts = run.parse_args(["PPSA00001", "--dry-run"])
         pl = run.compose(t, opts, dict(self.env)); self.assertIn("NPS5_OVERLAY_DIR", pl.env)
