@@ -86,7 +86,9 @@ f947736a15e8117f9d9d2a8a24cd1c0a	753eed0965b52721	4942998556bbe4da	7bec16b6f4777
 0c5e2c1b72357b350de42b5923370a07	4468924a469440bf	72fe3c538dca14b2	512564156fc9ed64ac386d37cb68717328eed15704bb820f804fb8cd4a84864f	32x1x1	cscap_real,extra	base	g16	exact	faster	0.570
 f947736a15e8117f9d9d2a8a24cd1c0a	753eed0965b52721	4942998556bbe4da	7bec16b6f4777857dfa2f318519714c00c7517992cea81beea0d0ffccc729eb4	64x1x1	cscap_real,extra	base	g16	exact	faster	0.046
 # reprofix/keyfit alias rows: the v1.4 runtime SPIR-V moves these 3 kernels' KosmicKrisp key (statement multiset of KK's text unchanged = instruction
-# order only), same verified text, evidence +rekey<old key>
+# order only), same verified text, evidence +rekey<old key>. The g17 (M5 family) row below: KK logs the new key on g17 / macOS 27.0 (box 3, computereval
+# 2026-11-27), pair exact on synthetic inputs, B/A 0.886 0.895 0.878 (3 timings, worst 0.895).
 64b3226f3fb2cb9efe02914fd8a469a9	4e36645574603230	70b1925c46ad3099	04f87f2ba032b29e09a98f5d80ecf6179b039c9c4da1b0d9d860fdfc5b9fc94f	32x1x1	exact+rekey04073ec4	base	*	exact	shipped	-
 fdb2b5867aa94b484cd891b97a399de1	b6fbf5ca1b31228c	e137f95c065d6669	254c0211d35587dd181fdecd200ce1f9ffc663268752cc969f53545a2c53d9e0	32x1x1	exact+rekey2c0b331d	base	*	exact	shipped	-
 d621839f256a81a1dc891d99b35f6565	45aed4c41ecbb476	8d213eba821b3296	e742e5a4281cbb8127535ea2bbdad197c2131fcb33b23584daa314b36367ca0b	32x1x1	exact+rekey5dbf4ad2	base	*	exact	shipped	-
+9ca9aa0d80cca0be640fa6455229f60e	2a2a199898d48a9a	68d59c988691ec1a	135f9b350e4293cc376afff9b88e02ade237024bb8ae34e3b367d27d765da7a2	32x1x1	exact+rekeyef0b2622	base	g17	exact	faster	0.895

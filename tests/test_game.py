@@ -415,6 +415,28 @@ class AstroPairRowTests(unittest.TestCase):
         self.assertIn("reproduced=%d of %d" % (len(self.rows()), len(self.rows())), rec)
 
 
+class AstroComputeAliasRowTests(unittest.TestCase):
+    """keyalias 2026-11-27: the g17 alias row of a compute kernel whose KosmicKrisp key moved (computereval, box 3 M5 Pro, macOS 27.0)."""
+    def rows(self):
+        p = os.path.join(game.REPO, "games", "PPSA21564", "metal-shaders.tsv")
+        return [l.split("\t") for l in open(p).read().splitlines() if re.match(r"^[0-9a-f]{32}\t", l)]
+
+    def test_g17_alias_row_only_for_the_kernel_that_is_faster(self):
+        g17 = [r for r in self.rows() if r[7] == "g17"]
+        self.assertEqual([(r[2], r[5], r[8], r[9]) for r in g17], [("68d59c988691ec1a", "exact+rekeyef0b2622", "exact", "faster")])
+        self.assertLess(float(g17[0][10]), 1.0)
+        old = [r for r in self.rows() if r[2] == "ef0b262245d9f2dc"]
+        self.assertEqual(len(old), 1)                                    # the old key row stays for every other class / build
+        self.assertEqual((old[0][0], old[0][1], old[0][3]), (g17[0][0], g17[0][1], g17[0][3]))     # same program, spec and verified text
+        keys = {r[2] for r in self.rows()}
+        self.assertNotIn("33a534f1bb01ad53", keys); self.assertNotIn("7f80c1e653ea1124", keys)      # not faster / FAIL: no row
+
+    def test_alias_key_has_a_guest_sidecar_entry(self):
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        guests = {l.split("\t")[1]: l.split("\t")[2] for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if l.startswith("cs\t")}
+        self.assertEqual(guests["68d59c988691ec1a"], guests["ef0b262245d9f2dc"])
+
+
 class Ue5RowTests(Base):
     """UE5 extraction profile rows (cache code=ue5 + ue5 decoder row): every form the schema accepts or refuses, synthetic values only."""
     UE5C, UE5, UE5ENV = CheckTests.UE5C, CheckTests.UE5, CheckTests.UE5ENV
