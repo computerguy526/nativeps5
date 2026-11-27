@@ -73,6 +73,13 @@ The folder holds:
   KosmicKrisp. A class row ships only when it was validated on every pipeline of its key AND timed faster on that class.
   A list with class rows needs its `.verified` record (`metal-shaders.tsv.verified`, `metal-gfx-pairs.tsv.verified`) with the
   per-class reproduction counts.
+- **`metal-expected.tsv`** (optional, metal; v1.4.4): the presence manifest of the two Metal lists. One line per (row key, GPU class g16 / g17 / g18):
+  `kind<TAB>key<TAB>class<TAB>state<TAB>prev`, state `ship` (the list must carry the row on that class) or `off:<reason>` (`slower-g18`,
+  `dropped-correctness:<commit>`, `mesh-pending`, `untested-g17`, ...), prev = 1 when the previous release shipped it; sorted, hashes and words only.
+  `tests/test_metal_expected.py` (`scripts/check.sh --tests`) fails when a `ship` row is not in the list or lacks its `.verified` record, a list row
+  is not in the manifest (a new row: run `python3 scripts/nps5lib/metalexpected.py update <id>`; a row that leaves a class needs
+  `--off KIND:KEY:CLASS=off:<reason>`), or a row of the previous release vanishes without a reason. The release rehearsal's family gate compares
+  a warm run's override hits per family with this manifest's `ship` rows for the machine's class.
 - **`fast-math-deny.txt`** (optional, v1.1.2): 64-bit guest shader hashes, one per line, plus comments; nothing else
   (`scripts/check.sh`). `nps5 run` passes it as `KYTY_FAST_MATH_DENY` on the Kyty back end: these shaders keep exact math
   at every `KYTY_GPU_ACCURACY`, which keeps KosmicKrisp's keys (and the verified texts) of the shaders the Metal lists replace.

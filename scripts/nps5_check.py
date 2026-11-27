@@ -80,7 +80,7 @@ PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
                  "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt",
                  "metal-guests.tsv", "metal-digests.tsv", "override-guard.baseline", "promotions.tsv",
-                 "keyguard-account.tsv", "keyguard.record"}
+                 "keyguard-account.tsv", "keyguard.record", "metal-expected.tsv"}
 # keyguard (scripts/nps5lib/keyguard.py): games/<id>/keyguard.record is the release gate's PASS "every shipped Metal row is reachable by the key
 # this stack produces", bound to the Kyty commit of components.lock, kosmickrisp/EXPECTED_TREE and the sha256 of the lists. A tree whose
 # record names another Kyty, KosmicKrisp tree or list is refused (the 2026-11-27 lesson: a code-generation change silently de-keyed 116 rows);

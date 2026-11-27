@@ -40,3 +40,5 @@ python3 -I -m py_compile scripts/nps5lib/data.py tests/test_data.py
 python3 -I tests/test_data.py   # the APFS part is skipped off macOS
 python3 -I -m py_compile scripts/nps5lib/keyguard.py tests/test_keyguard.py
 python3 -I tests/test_keyguard.py
+python3 -I -m py_compile scripts/nps5lib/metalexpected.py tests/test_metal_expected.py
+python3 -I tests/test_metal_expected.py   # presence manifest games/<id>/metal-expected.tsv vs the Metal row lists (ship rows present, list rows listed, previous-release rows kept)
