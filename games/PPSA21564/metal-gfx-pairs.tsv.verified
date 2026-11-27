@@ -1,12 +1,12 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=ac0c956f8c2da036901b777471f61e1ab2ab315ca38371a87318ece2c7e02d6c
+sha256=323bb14b603f4634104e3ad4b27bb121828de96d8ba986fc94987d3d877b04b2
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
-reproduced=448 of 448
+reproduced=449 of 449
 class gfx *: 37 of 37
-class gfx g16: 188 of 188
+class gfx g16: 189 of 189
 class gfx g17: 49 of 49
 class gfx g18: 174 of 174
 emitter=794b61d671400780b8ba3952a24c18002a1393ec nps5-kyty nps5-one-kyty-v144 (v1.4.3 pin 93d944fff + vregion ad698867 + perfmode 7a769133; codegen fp-753d1d73; vregion token default off)
@@ -16,3 +16,4 @@ evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FAS
 date=2026-11-27
 # 2026-11-27 (g17gate, USER): g17 row eb9f0e4b/0d7ff969 exact -> outprec:1; g17 row fc219b57/44b67584 removed (361 rows).
 # 2026-11-27 (rekeymerge): 96 of the 107 alias rows validated (79 cloud M6, 17 laptop M4 Pro), pendval removed. 11 dropped (listed in metal-gfx-pairs.tsv). The 9 mesh alias rows are not in this list (branch nps5-one-nps5-v144-fol). Evidence line above unchanged, correctness only (no timing) for rows whose key moved.
+# 2026-11-27 (383alias, USER): row 383bf9ae/001316dd g16 (re-keyed alias of the approved 383bf9ae/40a5c3f4 + /51a10cb6 rows) restored with rule outprec:1; laptop M4 Pro autoval OS27 PASS under outprec:1 (AB_p7 rt4 bad=0). 449 rows.

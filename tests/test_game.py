@@ -357,6 +357,16 @@ class AstroPairRowTests(unittest.TestCase):
             self.assertRegex(r[5] + r[6], r"^[0-9a-f]{32}$")
         self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 3, "g17": 7, "g18": 4})
 
+    def test_383alias_row_is_outprec1_like_its_approved_twins(self):
+        """USER 2026-11-27: 383bf9ae/001316dd g16 (re-keyed alias of the approved 40a5c3f4 and 51a10cb6 rows) ships as outprec:1."""
+        rows = [r for r in self.rows() if r[5].startswith("383bf9ae")]
+        by = {r[6][:8]: r for r in rows if r[16] == "g16"}
+        for fs in ("40a5c3f4", "51a10cb6", "001316dd"):
+            self.assertEqual(by[fs][17], "outprec:1", fs)
+        self.assertEqual(by["001316dd"][14], "rekey-383bf9ae-40a5c3f4")     # validated alias row (no pendval)
+        self.assertEqual(by["001316dd"][9], by["40a5c3f4"][9])               # same twin class and same program digests as its source
+        self.assertEqual(by["001316dd"][7:9], by["40a5c3f4"][7:9])
+
     def test_g17_macos27_decisions(self):
         """USER 2026-11-27 (g17 on 26A428): eb9f0e4b/0d7ff969 g17 rows are outprec:1, no g17 row of fc219b57 44b67584 / fd2dd3e1 is shipped."""
         for r in self.rows():
@@ -608,13 +618,13 @@ class AstroPairAliasRowTests(unittest.TestCase):
         fs_only = [r for r in al if r[5].startswith(tok(r)[0])]
         mesh = []
         al, fs_only = [r for r in al if r not in mesh], [r for r in fs_only if r not in mesh]
-        self.assertEqual((len(al), len(fs_only)), (96, 84))      # rekeymerge: 107 - 11 dropped (not validated or failed)
+        self.assertEqual((len(al), len(fs_only)), (97, 85))      # rekeymerge: 107 - 11 dropped, 383alias: one of them (383bf9ae/001316dd g16) restored under outprec:1
         for r in fs_only:
             self.assertFalse(r[6].startswith(tok(r)[1]), r[6])
         by_cls = {}
         for r in al:
             by_cls[r[16]] = by_cls.get(r[16], 0) + 1
-        self.assertEqual(by_cls, {"*": 5, "g16": 52, "g17": 5, "g18": 34})
+        self.assertEqual(by_cls, {"*": 5, "g16": 53, "g17": 5, "g18": 34})
         self.assertEqual(len(rows) - len(al) - len(mesh), 352)               # the v1.4.4 rows are all still there
         self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_aliases
 
