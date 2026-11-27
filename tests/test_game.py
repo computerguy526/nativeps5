@@ -373,7 +373,7 @@ class AstroPairRowTests(unittest.TestCase):
         self.assertRegex(emitter[1], r"^[0-9a-f]{40}$")
         rows = self.rows()
         vr = [r for r in rows if "vregion" in r[15].split("+")]
-        self.assertEqual({c: sum(1 for r in vr if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 12, "g17": 1, "g18": 16})  # 29 rows; the vsmodes (deb14f6d) rows have no vregion token
+        self.assertEqual({c: sum(1 for r in vr if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 12, "g17": 1, "g18": 17})  # 30 rows (g18 incl. 2301c3b7/efe411f8 after 6 timings); the vsmodes (deb14f6d) rows have no vregion token
         self.assertIn(("g17", "713f3ea8c4014632", "6200c07426976d4f"), {(r[16], r[5], r[6]) for r in vr})
         for r in vr:
             self.assertEqual(r[18], "faster"); self.assertLess(float(r[19]), 1.0)
