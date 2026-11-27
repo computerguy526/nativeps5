@@ -295,6 +295,85 @@ class T(unittest.TestCase):
         os.remove(os.path.join(cx.dir, "PPSA00001.programs.bin"))
         self.assertIsNone(cache.metal_autogen(cx, step=ok))                       # no programs.bin: nothing to generate from
 
+    def stale_rows(self, cx):
+        """a finished (stamped) metal-shaders dir made for ANOTHER list: what a changed metal-gfx-pairs.tsv leaves behind"""
+        out = os.path.join(cx.dir, "metal-shaders"); os.makedirs(out)
+        open(os.path.join(out, "k.metal"), "w").write("m")
+        open(os.path.join(out, "index.tsv"), "w").write("list_sha\t%s\nk\tx\ty\tz\n" % ("0" * 64))
+        open(os.path.join(out, cache.PROGRAMS_STAMP), "w").write("1\n")
+
+    def test_metalstale_autogen_regenerates_rows_made_for_other_lists(self):
+        cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
+        open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\n")
+        self.stale_rows(cx)
+        self.assertTrue(cache.metalmod.launch_words(cx.dir, os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), cx.environ)[1])   # refused today
+        calls = []
+        def ok(c, runner, rd, label=""):
+            calls.append(label); shutil.rmtree(os.path.join(c.dir, "metal-shaders")); os.makedirs(os.path.join(c.dir, "metal-shaders"))
+            open(os.path.join(c.dir, "metal-shaders", "k.metal"), "w").write("new"); return dict(written=4)
+        self.assertIn("4 of our", cache.metal_autogen(cx, step=ok)); self.assertEqual(calls, ["start: "])
+        self.assertEqual(open(os.path.join(cx.dir, "metal-shaders", "k.metal")).read(), "new")
+        # a failed regeneration removes the stale set (never loaded) and says so; no rows are ever left half-valid
+        shutil.rmtree(os.path.join(cx.dir, "metal-shaders")); self.stale_rows(cx)
+        def zero(c, runner, rd, label=""): return dict(written=0)
+        n = cache.metal_autogen(self.sctx(env=self.stable_env(NPS5_METAL_AUTOGEN="force")), step=zero)
+        self.assertIn("not generated", n); self.assertFalse(os.path.exists(os.path.join(cx.dir, "metal-shaders")))
+
+    def test_metalstale_run_path_regenerates_before_launch_and_is_loud_on_failure(self):
+        cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
+        open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\n")
+        self.stale_rows(cx)
+        real = cache.metal_step
+        def gen(c, runner, rd, label=""):
+            import hashlib
+            out = os.path.join(c.dir, "metal-shaders"); shutil.rmtree(out); os.makedirs(out)
+            sha = hashlib.sha256(open(os.path.join(c.p.dir, cache.metalmod.LIST_NAME), "rb").read()).hexdigest()
+            open(os.path.join(out, "k.metal"), "w").write("m")
+            open(os.path.join(out, "index.tsv"), "w").write("list_sha\t%s\nk\tx\ty\tz\n" % sha)
+            return dict(written=1)
+        cache.metal_step = gen
+        try:
+            with redirect_stdout(io.StringIO()):
+                words = runmod.shader_cache_words("PPSA00001", dict(self.stable_env()), "/app0")
+            keys = [k for k, v, n in words if k]
+            self.assertIn("KK_MSL_OVERRIDE_DIR", keys); self.assertIn("KK_MSL_CANON_KEY", keys)       # custom shaders are on at THIS start
+            self.assertFalse([n for k, v, n in words if n and runmod.METAL_LOUD_MARK in n])
+            shutil.rmtree(os.path.join(cx.dir, "metal-shaders")); self.stale_rows(cx)
+            cache.metal_step = lambda c, r, rd, label="": dict(written=0)                              # regeneration writes nothing
+            with redirect_stdout(io.StringIO()):
+                words = runmod.shader_cache_words("PPSA00001", dict(self.stable_env(NPS5_METAL_AUTOGEN="force")), "/app0")
+            loud = [n for k, v, n in words if n and runmod.METAL_LOUD_MARK in n]
+            self.assertEqual(len(loud), 1); self.assertTrue(loud[0].startswith("WARNING")); self.assertIn("nps5 cache metal PPSA00001", loud[0])
+            self.assertNotIn("KK_MSL_OVERRIDE_DIR", [k for k, v, n in words if k])
+        finally:
+            cache.metal_step = real
+
+    def test_metalstale_plan_has_the_run_json_field(self):
+        self.assertEqual(runmod.Plan().metal_launch, "")
+
+    def test_metalstale_keep_store_note_names_the_fix(self):
+        cx = self.sctx(); g = dict(listed=277, written=0, reasons={"KosmicKrisp vertex text not in the library cache": 277})
+        n = cache.keep_store_note(cx, g)
+        self.assertIn(cx.root + ".kk-vs-keep", n); self.assertIn("missing or empty", n)
+        os.makedirs(cx.root + ".kk-vs-keep"); self.assertIn("missing or empty", cache.keep_store_note(cx, g))     # empty
+        open(os.path.join(cx.root + ".kk-vs-keep", "a.metal"), "w").write("t")
+        self.assertIsNone(cache.keep_store_note(cx, g))                                                            # store present: generic reason stands
+        self.assertIsNone(cache.keep_store_note(cx, dict(g, written=3)))
+
+    def test_metalstale_clone_scratch_cache_carries_the_keep_store(self):
+        src, dst = os.path.join(self.tmp, "srcscratch"), os.path.join(self.tmp, "dstscratch")
+        os.makedirs(os.path.join(src, "cache", "PPSA00001", "kyty-x")); os.makedirs(os.path.join(src, "cache", "PPSA00001.kk-vs-keep"))
+        open(os.path.join(src, "cache", "PPSA00001", "kyty-x", "f"), "w").write("1"); open(os.path.join(src, "cache", "PPSA00001.kk-vs-keep", "k.metal"), "w").write("2")
+        cache.clone_scratch_cache(src, dst, "PPSA00001")
+        self.assertTrue(os.path.isfile(os.path.join(dst, "cache", "PPSA00001", "kyty-x", "f")))
+        self.assertTrue(os.path.isfile(os.path.join(dst, "cache", "PPSA00001.kk-vs-keep", "k.metal")))
+
+    def test_metalstale_prepare_runs_the_metal_step_when_either_list_exists(self):
+        import inspect
+        src = inspect.getsource(cache.cmd_prepare)
+        self.assertIn("mlist = metal_list(ctx) or metal_gfx_list(ctx)", src)
+        self.assertIn("metal_step(ctx, runner, rd) if rc == 0 and mlist", src)    # a changed gfx list alone regenerates on a player's prepare
+
     def test_osadopt_metal_autogen_replaces_a_half_written_dir_and_keeps_a_finished_one(self):
         cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
         open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\n")

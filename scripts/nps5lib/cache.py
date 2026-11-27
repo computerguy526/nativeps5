@@ -1134,6 +1134,24 @@ def run_logs(rd):
     return t
 
 
+def keep_store_note(ctx, g):
+    """metalstale 2026-11-27: 0 graphics pairs written because KosmicKrisp's vertex texts are in no store: the sibling keep store
+    <cache root>.kk-vs-keep is missing or empty (a `cp -c` clone of the cache DIR alone does not carry it). -> the explicit fix, or None."""
+    n = (g.get("reasons") or {}).get("KosmicKrisp vertex text not in the library cache", 0)
+    if not g.get("listed") or g.get("written") or not n:
+        return None
+    keep = ctx.root + "." + metalmod.KK_VS_KEEP
+    try:
+        have = sum(1 for f in os.listdir(keep) if f.endswith(".metal"))
+    except OSError:
+        have = 0
+    if have:
+        return None
+    return ("ERROR: 0 of %d graphics pairs generated: the keep store of KosmicKrisp vertex texts is missing or empty (%s). It sits NEXT TO the cache "
+            "dir, not inside it, so cloning only the cache dir loses it. Copy it from the cache this one was cloned from (cp -c -R <source>.%s %s) "
+            "or run `nps5 cache prepare %s`, then `nps5 cache metal %s` again" % (g["listed"], keep, metalmod.KK_VS_KEEP, keep, ctx.tid, ctx.tid))
+
+
 def metal_step(ctx, runner, rd=None, label="prepare: "):
     """Generate <cache dir>/metal-shaders (compute kernels, then the verified vertex+fragment pairs) from the keys lists, this cache's
     programs.bin and KosmicKrisp's collected MSL (metal.py). Never fails a prepare: any problem means KosmicKrisp's own shaders, as in
@@ -1168,6 +1186,9 @@ def metal_step(ctx, runner, rd=None, label="prepare: "):
             st["gfx_listed"], st["gfx_written"] = g["listed"], g["written"]
             st["written"] += g["written"]
             print(label + metalmod.gfx_summary(g), flush=True)
+            note = keep_store_note(ctx, g)
+            if note:
+                print(label + note, flush=True)
             why = metalmod.emitter_problem(g, ctx.commits.get("kyty"))
             if why:
                 print("%sERROR: Metal graphics: %s" % (label, why), flush=True)
@@ -1602,11 +1623,14 @@ def autogen_fingerprint(ctx):
     return "programs=%s tool=%s@%s lists=%s" % (st(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)), tool, st(tool), h.hexdigest()[:16])
 
 
-def metal_autogen(ctx, step=None):
+def metal_autogen(ctx, step=None, show=False):
     """osadopt 2026-11-27: a normal start regenerates our Metal rows when the cache has a programs.bin but no metal-shaders/ (set aside because
     the Kyty build moved, or never generated in this dir: an adopted / OS-updated dir). Before, the rows stayed aside until someone ran
     `nps5 cache metal` by hand, so players (and the laptop since 2026-11-25) ran KosmicKrisp's shaders only. CPU only, ~2 s. A failed or
     mismatched generation leaves no metal-shaders/ (KosmicKrisp's own shaders, as before). NPS5_METAL_AUTOGEN=0 or NPS5_METAL_SHADERS=0: off.
+    metalstale 2026-11-27: rows that exist but were made for other lists / another GPU class (metal.launch_words refuses them) are regenerated
+    the same way. Before, such a start ran with NO custom shaders and no KK_MSL_CANON_KEY, which changed KosmicKrisp's driver identity and
+    made Kyty set the whole driver pipeline cache aside (a full rebuild). show=True prints the progress lines (the run path), else they are swallowed.
     -> a note, or None when nothing was to do."""
     e = ctx.environ
     if e.get("NPS5_METAL_AUTOGEN", "1") == "0" or e.get("NPS5_METAL_SHADERS", "1") == "0":
@@ -1615,14 +1639,16 @@ def metal_autogen(ctx, step=None):
     if not os.path.isfile(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)) or not (metal_list(ctx) or metal_gfx_list(ctx)):
         return None
     if os.path.isdir(out):
-        if os.path.isfile(os.path.join(out, PROGRAMS_STAMP)):
-            return None
+        if os.path.isfile(os.path.join(out, PROGRAMS_STAMP)) and not metalmod.launch_words(ctx.dir, os.path.join(ctx.p.dir, metalmod.LIST_NAME), e)[1]:
+            return None                                  # finished and current for these lists and this GPU class
         # rvtoday: every finished generation ends with the programs stamp. A dir without it is a generation that was killed half way (the graphics
         # step writes file by file into the dir): it was never refreshed (metal_stale needs the stamp) and never regenerated. Set it aside, generate anew.
-        part = out + ".partial"
-        if os.path.lexists(part):
-            rmtree_inside(part, ctx.dir)
-        os.rename(out, part)
+        if not os.path.isfile(os.path.join(out, PROGRAMS_STAMP)):
+            part = out + ".partial"
+            if os.path.lexists(part):
+                rmtree_inside(part, ctx.dir)
+            os.rename(out, part)
+        # else: finished but stale (lists / GPU class moved): never loaded; generate() replaces it, a failure below removes it
     import contextlib, io
     fp, mark = autogen_fingerprint(ctx), os.path.join(ctx.dir, AUTOGEN_FAILED)
     if e.get("NPS5_METAL_AUTOGEN") != "force" and os.path.isfile(mark):
@@ -1634,7 +1660,7 @@ def metal_autogen(ctx, step=None):
             return msg
     buf = io.StringIO()
     try:
-        with contextlib.redirect_stdout(buf):
+        with (contextlib.nullcontext() if show else contextlib.redirect_stdout(buf)):
             st = (step or metal_step)(ctx, None, None, label="start: ")
     except Exception as ex:                       # an optimisation: never fails a start
         st = dict(error=str(ex) or type(ex).__name__)
@@ -1665,6 +1691,17 @@ STABLE_DIR_CHECKS = (
     ("kk-libcache/", "KosmicKrisp: content key (MSL text, options, KK stamp, GPU); a stale entry can only miss"),
     ("metal-shaders/ (our generated rows)", "launcher: index sha of the lists + GPU class; NOT the emitter: set aside here when the Kyty commit moved (metal_rows_aside)"),
 )
+
+
+def clone_scratch_cache(src_scratch, dst_scratch, tid):
+    """metalstale 2026-11-27: a scratch copy of a title's cache (e.g. a playtest scratch) = the cache dir AND its sibling keep store
+    <cache root>.kk-vs-keep (KosmicKrisp vertex texts the graphics pairs are made from). Without the store `nps5 cache metal` generates 0 pairs."""
+    n = 0
+    for name in (tid, tid + "." + metalmod.KK_VS_KEEP):
+        s, d = os.path.join(src_scratch, "cache", name), os.path.join(dst_scratch, "cache", name)
+        if os.path.isdir(s):
+            clone_dir(s, d); n += 1
+    return n
 
 
 def clone_dir(src, dst):

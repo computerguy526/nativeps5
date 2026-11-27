@@ -157,6 +157,7 @@ class Plan:
     """Everything decided before a run. Plain data so tests can inspect it."""
     def __init__(self):
         self.env = {}; self.layers = {}; self.order = []; self.warnings = []
+        self.metal_launch = ""                 # non-empty: this start runs WITHOUT our Metal shaders (why); recorded in run.json
         self.live = None                       # (scenery.Live, state file) when the scenery keys are on
     def put(self, k, v, layer):
         if k not in self.env:
@@ -651,6 +652,8 @@ def compose(tid, opts, environ=None, g=None):
                 plan.put(k, v, "cache")
             elif note:
                 plan.warnings.append(note)
+                if METAL_LOUD_MARK in note:
+                    plan.metal_launch = note
     # 5. arm, then --env
     for k, v in arm["env"]:
         plan.put(k, v, "arm" + (":" + arm["label"] if arm["label"] else ""))
@@ -713,6 +716,12 @@ def guest_image_plan(sel):
                          "'Failed to open guest image file'. Use the translated program of `nps5 build` (build/native, or the .app's Contents/MacOS binary) as BIN" % path)
 
 
+METAL_LOUD = ("WARNING: " + "!" * 60 + "\n  OUR METAL SHADERS ARE NOT USED THIS START (%s).\n"
+              "  The game runs on KosmicKrisp's own shaders with a different driver identity: Kyty will set the driver pipeline cache\n"
+              "  aside and rebuild the whole list (minutes, a long loading card). Fix: `nps5 cache metal %s`, then start again.\n  " + "!" * 60)
+METAL_LOUD_MARK = "OUR METAL SHADERS ARE NOT USED"
+
+
 def shader_cache_words(tid, environ, app0, adopt=True):
     """-> [(key, value, None)] + [(None, None, warning)]: the environment that points a normal run at this stack's shader cache
     (nps5lib/cache.py: cache dir, Metal cache id, the pipeline list, the launch phase). Empty when the title has no list."""
@@ -732,11 +741,18 @@ def shader_cache_words(tid, environ, app0, adopt=True):
         if not os.path.isfile(cx.list_path):
             return []
         stable_notes = cachemod.prepare_stable_dir(cx) if cx.stable_dir and adopt else []   # cachekey: adopt a sibling / STACK.txt (never in a dry run)
+        # metalstale 2026-11-27: rows made for other lists / another GPU class are regenerated HERE, before the window opens (CPU only, progress
+        # lines on stdout), never dropped: a start without our shaders and without KK_MSL_CANON_KEY changes KosmicKrisp's driver identity and
+        # Kyty then sets the whole driver pipeline cache aside (~2,500 pipelines rebuilt). A failure is a loud warning, never a silent start.
+        regen = cachemod.metal_autogen(cx, show=True) if adopt else None
         words = cachemod.cache_env(tid, cx.dir, cx.metal, with_libcache=os.path.isdir(os.path.join(cx.dir, "kk-libcache", "lib")), environ=environ)
         out = [(k, v, None) for k, v in words + cachemod.launch_words(cx, app0)]
         mwarn = cachemod.metalmod.launch_words(cx.dir, os.path.join(cx.p.dir, cachemod.metalmod.LIST_NAME), environ)[1]
-        if mwarn:
-            out.append((None, None, mwarn))
+        failed = mwarn or (regen if regen and not regen.startswith("Metal shaders generated") else None)
+        if failed:
+            out.append((None, None, METAL_LOUD % (failed, tid)))
+        elif regen:
+            out.append((None, None, regen))
         out += [(None, None, n) for n in stable_notes]
         if cachemod.status(cx)[0] != "prepared":
             out.append((None, None, "the shader cache of this stack is not prepared: this start builds the whole list behind the loading card "
@@ -1058,7 +1074,8 @@ def new_run_json(plan, bininfo, hash16, commits):
                 binary=dict(path=plan.sel["path"], sha256_16=hash16, source=plan.sel["source"], sidecar=bininfo.get("sidecar"), patches_applied=bininfo.get("patches_applied")),
                 components=commits, env={k: plan.env[k] for k in plan.order}, machine=machine_class(),
                 command=command_line(plan) , timings=dict(start=None, end=None, wall_s=None), rc=None, verdict=None,
-                logs=dict(out=os.path.join(plan.run_dir, "run.out"), err=os.path.join(plan.run_dir, "run.err")), warnings=list(plan.warnings))
+                logs=dict(out=os.path.join(plan.run_dir, "run.out"), err=os.path.join(plan.run_dir, "run.err")), warnings=list(plan.warnings),
+                metal_launch=plan.metal_launch)
 
 
 def validate_run_json(d):
