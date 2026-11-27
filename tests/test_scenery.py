@@ -295,7 +295,7 @@ class Profile(unittest.TestCase):
 
     LEVEL = os.environ.get("NPS5_TEST_APE_LEVEL", "")
 
-    @unittest.skipUnless(os.path.isfile(LEVEL), "local game file not present (NPS5_TEST_APE_LEVEL)")
+    @unittest.skipUnless(bool(LEVEL) and os.path.isfile(LEVEL), "local game file not present (NPS5_TEST_APE_LEVEL)")
     def test_real_apes_level_removes_1058_and_keeps_the_collision_family(self):
         data = open(self.LEVEL, "rb").read()
         f = open(os.path.join(REPO, "games", "PPSA21564", "game.tsv")).read().splitlines()

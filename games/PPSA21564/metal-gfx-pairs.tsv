@@ -21,8 +21,8 @@
 # (KYTY_GPU_ACCURACY normal|low, KYTY_FAST_MATH>=1, the vertex stage only with KYTY_FAST_MATH_VS or KYTY_FAST_MATH>=3) the guest hash of every row's
 # fragment stage (and vertex stage under the vertex rule) must be in fast-math-deny.txt, or the key moves and the override silently misses.
 # metal-guests.tsv maps key -> guest hash, new rows need one there.
-# v1.4.4 (USER 2026-11-27, macOS 27 revalidation on g16): the two 383bf9ae twin/mipstats rows (40a5c3f4, 51a10cb6) are rule outprec:1 (1 word, 1 f16 ulp, D9 class),
-# the g16 row of fc219b57/44b67584 is not shipped (3 words, up to 8 f16 ulp on a non-1:1 re-draw), its g17 and g18 rows stay.
+# v1.4.4 (USER 2026-11-27, g16 on macOS 27): the 383bf9ae twin rows 40a5c3f4 and 51a10cb6 are rule outprec:1 (1 word, 1 f16 ulp, D9 class).
+# The g16 row of fc219b57/44b67584 is dropped (3 words, up to 8 f16 ulp on a non-1:1 re-draw). Its g17 and g18 rows stay.
 # folship (v1.4, 2026-11-25): + 25 rows (g16 12, g17 7, g18 6) for Sky Garden foliage and skinned-bone pairs, exact (autoval VERIFIED on every
 # pipeline of the key), FASTER in every timing on that class (at least 2), same modes as above.
 # relabel56 (v1.4, USER 2026-11-25): the 56 D9-class rows (within 1 stored-precision unit) are labelled outprec:1, not exact, texts unchanged.
