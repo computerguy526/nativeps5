@@ -5,9 +5,12 @@ pinned commits are in [components.lock](components.lock).
 
 ## Unreleased (v1.4.4)
 
-- ASTRO BOT `scenery minimal` ("Apes on the Loose"): no longer removes the moss patches. They carry collision bodies, so
-  removing them could take away ground Astro stands on. `minimal` is now the same as `reduced` (flowers and grass tufts).
-  Profile only (`games/PPSA21564/game.tsv`); no retranslate, no shader-cache re-prepare. Unit-tested (`test_scenery`).
+- **Updating macOS no longer throws away your shader history.** The cache folder name includes the macOS build, so an update (for example macOS 26 to 27) used to open an empty folder and the first start rebuilt only the shipped list. A start now adopts the newest cache folder of the same GPU family recorded for another macOS build: the pipeline journal and program cache come along, the shader stores that the old macOS compiled are dropped and rebuilt. If our Metal shader rows are missing for the new folder they are regenerated at the start (`NPS5_METAL_AUTOGEN=0` turns that off). A generation that was interrupted half way is set aside (`metal-shaders.partial`) and redone, and one that fails is not retried until an input changes (one `OFF` line per start). Unit-tested on synthetic folders.
+- **ASTRO BOT, M4 Pro class (g16) and M5 class (g17): two compute shaders keep our faster text after the macOS 27 key change.** KosmicKrisp names these kernels differently on macOS 27, so our rows no longer matched; alias rows (same verified text) were added where it is faster: 0.88 of the time on g16 (M4 Pro, macOS 27.2.1) and 0.90 on g17 (M5 Pro), worst of three timings. Two other kernels were slower or failed the check and get no row.
+- **ASTRO BOT, g16: the 5 mesh-shader rows can be generated again.** Kyty v1.4 records the same mesh program under a new digest, so the rows were skipped as "not in programs.bin". A small optional table (`games/<id>/metal-digests.tsv`) maps the old digest to the new one; our text must still match its checksum. Prepare also reads the mesh pipelines' canonical keys now. Note: on macOS 27 these rows only take effect with a KosmicKrisp that has the mesh canonical-key change (not in this release), so no speed-up is claimed.
+- **`nps5 run` keeps a copy of the override index (`index*.tsv`, `skipped*.tsv`) in the run folder**, so a later prepare cannot change what an earlier run's hit log means (tooling only).
+- **ASTRO BOT `scenery minimal` ("Apes on the Loose"): no longer removes the moss patches.** They carry collision bodies, so removing them could take away ground Astro stands on. `minimal` is now the same as `reduced` (flowers and grass tufts). Profile only (`games/PPSA21564/game.tsv`); no retranslate, no shader-cache re-prepare. Unit-tested (`test_scenery`).
+- **Fixes to v1.4.3 switches:** `NPS5_LEVELFIX=0` (flag, `--env` or profile) now reaches the game runtime (it was dropped from the launch plan, so only the shell environment worked); the scenery overlay merge follows symlinked sub-folders of your own overlay; README and switch-table wording corrected.
 
 ## v1.4.3
 
