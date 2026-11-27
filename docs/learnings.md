@@ -177,3 +177,17 @@ Secondary leads from these results (not yet tried or still open):
 4. A symlink swap (`os.replace` of a new link) is atomic for a reader that opens the path in a loop; a level load that opens a file twice can
    still see two versions (one press during loading is a USER test item).
 
+## keyguard: a code-generation change can silently de-key every Metal row (2026-11-27)
+
+1. Our Metal rows are found by KosmicKrisp's key of the text it writes for Kyty's SPIR-V. The v1.4 Kyty base changed the SPIR-V of 107 graphics
+   pairs (lane-63 read in a one-lane vertex shader, folded lane selects in fragments) and of the mesh program (no NoContraction, lerps as FMix):
+   116 rows never matched again and nothing failed for three releases. Text reproduction (`.verified`) does not see this: it proves OUR text,
+   not that the key still finds it.
+2. The guard is `scripts/nps5lib/keyguard.py` + `games/<id>/keyguard.record`: for the candidate Kyty library, KosmicKrisp build and shipped
+   lists, the key of every row's own pipeline is computed offline (recorded SPIR-V of a programs.bin of THAT code generation, collect-only
+   KosmicKrisp) and a row that is not reachable fails unless `keyguard-account.tsv` gives it a reason. `scripts/check.sh` refuses a tree whose
+   record names another Kyty commit, KosmicKrisp tree or list.
+3. SPIR-V recorded by another code generation is not evidence (the programs.bin header names its fingerprint): the first version of the
+   offline keyer was run on an older cache and would have passed rows the new library moves.
+4. A row that cannot be checked (program not in the cache, no list pipeline) is a FAIL until accounted, and an accounting entry that describes
+   another state than the row's fails too, so "not checkable" cannot hide "moved".

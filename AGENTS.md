@@ -26,6 +26,7 @@ each safety rule has its incident in [docs/reference/machine-safety.md](docs/ref
 | Build something | [BUILDING.md](BUILDING.md), `scripts/build.sh` |
 | Run a title | `scripts/run-title.sh` and "Running safely" below |
 | A KosmicKrisp change | `kosmickrisp/patches` (one file per change), `kosmickrisp/tests`, `tools/shaderlab/gate.sh` |
+| A Kyty pin, KosmicKrisp tree or Metal list change | the key guard must pass again: `scripts/nps5lib/keyguard.py` (`games/<id>/keyguard.record`, see games/README.md) |
 | How to scope, measure, hand off and report | [docs/agents/README.md](docs/agents/README.md) |
 | Checking a change before a pull request | [CONTRIBUTING.md](CONTRIBUTING.md), "A pull request" |
 
