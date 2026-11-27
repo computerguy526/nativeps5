@@ -3,6 +3,23 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## v1.4.3
+
+**Update:** `nativeps5-recomp`, `nativeps5-kyty` and this repository move to `v1.4.3`; `nativeps5-anyps5` stays at `v1.4.0` (see [components.lock](components.lock)). Pull, check out the tags, rebuild (`scripts/build.sh recomp`, Kyty) and translate again (`nps5 build`). ASTRO BOT's translation changes (5 host shims, 3 world-map entry points): rebuild it with `nps5 build`. The SAROS translation is unchanged.
+
+- **SAROS (`PPSA07631`): a bigger warm shader list.** 1,392 shaders, 1,550 permutations and 410 pipelines (was 650 / 707 / 222). Hashes only; the code comes from your own copy of the game. Measured on an M5 Pro, player path (`nps5 run PPSA07631 --play`) from an empty shader cache and with the old Metal caches deleted: the first start built the list behind the loading card in 206 s (1,550 of 1,550 shaders, 392 pipelines, 0 failed) and then compiled 0 shaders live (peak 16.5 GB, memory guard 17.4 GB, not raised); the second start waited 64 s and compiled 0 shaders live (peak 15.0 GB). `nps5 cache prepare` does the same work ahead of time (276 to 664 s depending on how busy the Mac is). Frame rates were not compared with v1.4.2.
+- **ASTRO BOT: bigger warm shader list** (2,567 pipelines, 1,602 permutations, 1,222 shaders; was 2,549 / 1,597 / 1,217): the union of the earlier list and the sessions since, checked against the game: no shader code in the list.
+- **ASTRO BOT: `KYTY_NATIVE_INDIRECT_MESH=1` is a profile word (Kyty).** The per-frame indirect mesh draw is converted on the GPU instead of the command processor waiting for its argument record. Measured (Apes on the Loose, A/B): p50 34.4 / 34.3 ms to 32.9 ms, CP commit 31 to 17 ms; Sky Garden neutral; the verify gate found 0 mismatches. The conversion's helper pipeline is built at start. Off: `--env KYTY_NATIVE_INDIRECT_MESH=` (an empty value; never `0`, which changes the shader fingerprint and starts a cold cache).
+- **ASTRO BOT: the world-map code is translated with the game, not while you play.** Three functions the world map reaches were translated live the first time the map opened: a stall of seconds, and a fatal error if the build folder had been moved or deleted. They are now entry points of the ASTRO profile (`profiles/seeds/PPSA21564.seeds`, only for that build of the game). Measured on an M5 (2 runs, build folder without its manifest): the world map opened at 22.5-22.8 s with 0 run-time translations, no fatal error and no stall record. If the build folder is missing, the message now says so ("rebuild with nps5 build").
+- **ASTRO BOT: Apes on the Loose 6th-catch soft-lock fix, applied to your own copy only.** One level-file value (`EnterDelay` 0.6 to 8.0) is changed in a copy of the level file that is mounted over the game folder; your game folder is never written. The copy lives in a cache folder next to the program cache (not in your save folder). `NPS5_LEVELFIX=0` turns it off; a game version whose level file differs gets no fix and one warning.
+- **`nps5 run --scenery full|reduced|minimal` (ASTRO BOT, off by default):** opt-in thinning of level objects in the Apes level through the same overlay. Effect not measured.
+- **UE5 titles: a program the recompiler refuses no longer ends every later start (Kyty, opt-in).** With `KYTY_REFUSED_PROGRAMS=1` (nps5 sets it for Unreal Engine 5 titles only, SAROS today) a program whose translation ends a start is written to `<program cache>.refused`, and the next start and `nps5 cache prepare` skip it, count it and log the first eight by hash. The first start still ends. Off by default for every other title.
+- **Harvest tooling:** `scripts/harvest_ue5.sh --probe` translates every program of a list in its own process before the list is made and drops the ones the recompiler refuses (and ray-tracing programs when the profile turns ray tracing off); an option with a missing value now exits 2. `nps5 check` refuses a proof record that reports uncovered runtime shaders.
+- **Diagnostics stay off:** the flight recorder (`KYTY_FLIGHTREC=1`), the Apes object tracer (`NPS5_APEDIAG=1`) and the frame-rate hotkey (`NPS5_FRAMERATE_HOTKEY=1`) are opt-in; no profile turns them on.
+- **Known:** starting `SAROS.app` directly skips the warm list; start SAROS with `nps5 run PPSA07631 --play`.
+
+No game content is included.
+
 ## v1.4.2
 
 Measured on an M5 Pro (24 GB, macOS 27), player path: `nps5 build` of both titles from the dump with the v1.4.2 tools, then `nps5 run` with no cache or library overrides; every run checked that the loaded `kyty_gpu` and `libnps5_gpu` were the planned libraries.

@@ -101,7 +101,7 @@ v1.3 update rebuilds every title's cache once (the shader recompiler changed). O
 - A decal pixel shader is known to render wrongly (open).
 - Frame dump and probe tools exist for development only and are off.
 - Audio, saves and trophies: not verified on this release.
-- **SAROS has a warm shader list since v1.4.2 (v1.4.3: 1,392 shaders, 1,550 permutations, 410 pipelines, was 650 / 707 / 222; hashes only, the code comes from your own game through the game's decoder).** `nps5 cache prepare` compiles it before the first play (v1.4.3 list, M5, player path: 315 s from an empty cache and 276 s from an existing player folder, peak 5.7 GB; the 650-shader list took 459 s in the v1.4.2 check, on a differently warm cache, so this is not an A/B); a warm start after it compiled 0 shaders live (peak 14.4 GB, guard 17.4 GB). Shaders that are not on the list still compile while you play and are kept in your per-player cache. Frame rates were not measured.
+- **SAROS has a warm shader list since v1.4.2 (v1.4.3: 1,392 shaders, 1,550 permutations, 410 pipelines, was 650 / 707 / 222; hashes only, the code comes from your own game through the game's decoder).** `nps5 cache prepare` compiles it before the first play (v1.4.3 list, M5 Pro: 276 to 664 s depending on load, peak 5.7 GB). Without it, the first `nps5 run PPSA07631 --play` builds the list behind the loading card (206 s from an empty cache with the old Metal caches deleted) and compiles 0 shaders live (peak 16.5 GB, guard 17.4 GB); the second start waits 64 s (peak 15.0 GB). Shaders that are not on the list still compile while you play and are kept in your per-player cache. Frame rates were not measured.
 
 ## Found on this game
 
