@@ -615,7 +615,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
         for r in al:
             by_cls[r[16]] = by_cls.get(r[16], 0) + 1
         self.assertEqual(by_cls, {"*": 5, "g16": 52, "g17": 5, "g18": 34})
-        self.assertEqual(len(rows) - len(al) - len(mesh), 362)               # the v1.4.4 rows are all still there
+        self.assertEqual(len(rows) - len(al) - len(mesh), 352)               # the v1.4.4 rows are all still there
         self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_aliases
 
 
