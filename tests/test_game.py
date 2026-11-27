@@ -595,7 +595,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
                 "f347191aba839bf5": "07c231aaec915562", "39478dacd8a02253": "75f24040fe7a4fc5", "b1c17b27db220a80": "abf97253b36aacd1"}
         old8 = {k[:8]: k for k in want}
         al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
-        self.assertEqual([r for r in rows if "pendval" in r[14]], [])   # rekeymerge: no alias row is pending in the release list (mesh rows held back)
+        self.assertEqual([r for r in rows if "pendval" in r[14]], [])   # rekeymerge: no alias row is pending in the release list (no mesh alias rows: the mesh rows are plain rows)
         moved = [r for r in al if REKEY_ROW_RE.match(r[14]).group(1) in old8 and not r[5].startswith(REKEY_ROW_RE.match(r[14]).group(1))]
         self.assertEqual(len(moved), 12)    # rekeymerge: the two 07c231aa rows (no reproducible A text) are dropped
         for r in moved:
@@ -616,7 +616,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
         al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
         tok = lambda r: REKEY_ROW_RE.match(r[14]).groups()
         fs_only = [r for r in al if r[5].startswith(tok(r)[0])]
-        mesh = []
+        mesh = [r for r in al if r[9].startswith("mesh")]
         al, fs_only = [r for r in al if r not in mesh], [r for r in fs_only if r not in mesh]
         self.assertEqual((len(al), len(fs_only)), (97, 85))      # rekeymerge: 107 - 11 dropped, 383alias: one of them (383bf9ae/001316dd g16) restored under outprec:1
         for r in fs_only:
@@ -625,8 +625,27 @@ class AstroPairAliasRowTests(unittest.TestCase):
         for r in al:
             by_cls[r[16]] = by_cls.get(r[16], 0) + 1
         self.assertEqual(by_cls, {"*": 5, "g16": 53, "g17": 5, "g18": 34})
-        self.assertEqual(len(rows) - len(al) - len(mesh), 352)               # the v1.4.4 rows are all still there
-        self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_aliases
+        self.assertEqual(len(rows) - len(al) - len(mesh), 361)               # the v1.4.4 rows are all still there (352 + the 9 mesh rows, plain rows)
+        self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_rows
+
+    def test_astro_mesh_rows(self):
+        """meshback 2026-11-27: the 9 mesh-twin rows (g16 5, g17 2, g18 2) under the pair KosmicKrisp gives their pipelines after the Kyty mesh
+        precision fix (rowkey.py with patch 0044's canonical mesh key, final tool fp-8c4b096b). Plain rows (the pre-fix rows are not listed):
+        one mesh key per old one (all 5 pairs share one guest mesh program), the fragment key moved only for the fb6239fe rows."""
+        rows, guests = self.real()
+        mesh = [r for r in rows if r[9].startswith("mesh")]
+        self.assertEqual({r[9] for r in mesh}, {"mesh-twin"})
+        got = sorted((r[16], r[5], r[6]) for r in mesh)
+        fb = [("4cfed5ecb35fda81", "1ddfff5e6fcff57c"), ("4cfed5ecb35fda81", "defd4f564acba8ce")]
+        g16 = [("739f3fc213b3e04d", "88fed1657d7c535c"), ("739f3fc213b3e04d", "ff81917e43b7d772"), ("35689ac49e4816bd", "15a08f9f5aa7e37c")] + fb
+        self.assertEqual(got, sorted([("g16",) + x for x in g16] + [(c,) + x for c in ("g17", "g18") for x in fb]))
+        for r in mesh:
+            self.assertEqual((r[15] == "fix6+meshspill"), r[16] == "g16")     # g16 spills the guest LDS (patch 0030), g17 / g18 do not
+            self.assertEqual((r[17], r[18]), ("exact", "faster"))
+            self.assertNotIn("pendval", r[14])
+            self.assertEqual(guests.get(("vs", r[5])), {"c739f9614016bed4"})   # every mesh key is the one guest mesh program
+        self.assertEqual({r[7] for r in mesh if r[16] == "g16"}, {"ee0bd14226f02129bc7b1bff61be6a82b0092b0ead2a2e078aa9a5fad952f635"})
+        self.assertEqual({r[7] for r in mesh if r[16] != "g16"}, {"dc562afbb8318b9589e39522f33ddd4c608904add21f3486928184f3e82464a7"})
 
 
 class Ue5RowTests(Base):
