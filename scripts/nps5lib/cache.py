@@ -1546,8 +1546,17 @@ def metal_autogen(ctx, step=None):
     if e.get("NPS5_METAL_AUTOGEN", "1") == "0" or e.get("NPS5_METAL_SHADERS", "1") == "0":
         return None
     out = os.path.join(ctx.dir, metalmod.OUT_NAME)
-    if os.path.isdir(out) or not os.path.isfile(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)) or not (metal_list(ctx) or metal_gfx_list(ctx)):
+    if not os.path.isfile(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)) or not (metal_list(ctx) or metal_gfx_list(ctx)):
         return None
+    if os.path.isdir(out):
+        if os.path.isfile(os.path.join(out, PROGRAMS_STAMP)):
+            return None
+        # rvtoday: every finished generation ends with the programs stamp. A dir without it is a generation that was killed half way (the graphics
+        # step writes file by file into the dir): it was never refreshed (metal_stale needs the stamp) and never regenerated. Set it aside, generate anew.
+        part = out + ".partial"
+        if os.path.lexists(part):
+            rmtree_inside(part, ctx.dir)
+        os.rename(out, part)
     import contextlib, io
     buf = io.StringIO()
     try:

@@ -294,6 +294,19 @@ class T(unittest.TestCase):
         os.remove(os.path.join(cx.dir, "PPSA00001.programs.bin"))
         self.assertIsNone(cache.metal_autogen(cx, step=ok))                       # no programs.bin: nothing to generate from
 
+    def test_osadopt_metal_autogen_replaces_a_half_written_dir_and_keeps_a_finished_one(self):
+        cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
+        open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\n")
+        out = os.path.join(cx.dir, "metal-shaders"); os.makedirs(out); open(os.path.join(out, "half.metal"), "w").write("torn")   # no programs stamp
+        calls = []
+        def ok(c, runner, rd, label=""):
+            calls.append(1); os.makedirs(os.path.join(c.dir, "metal-shaders")); open(os.path.join(c.dir, "metal-shaders", "k.metal"), "w").write("m")
+            return dict(written=1)
+        self.assertIn("1 of our", cache.metal_autogen(cx, step=ok)); self.assertEqual(len(calls), 1)
+        self.assertTrue(os.path.isfile(os.path.join(out + ".partial", "half.metal")))          # kept for diagnosis, not loaded
+        self.assertFalse(os.path.exists(os.path.join(out, "half.metal")))
+        self.assertIsNone(cache.metal_autogen(cx, step=ok)); self.assertEqual(len(calls), 1)    # stamped = finished: left alone
+
     def test_t6_adoption_takes_dirs_that_do_not_say_their_hw_and_skips_empty_ones(self):
         self.mkdir_old("kyty-aaaaaaaa")                                             # a player-filled dir: no prepared.tsv
         self.assertEqual(cache.adopt_sibling(self.sctx())[0], "adopted")
