@@ -79,7 +79,55 @@ PROFILE_RE = re.compile(r"^games/((?:PPSA|CUSA|PCAS|PLAS)\d{5})/([^/]+)$")
 PROFILE_FILES = {"README.md", "game.tsv", "patches.py", "bench.tsv", "validated.tsv",
                  "pipelines.kyplst", "pipelines.kyplst.verified", "pipelines.contrib.tsv", "scenes.tsv", "smoke.tsv",
                  "metal-shaders.tsv", "metal-shaders.tsv.verified", "metal-gfx-pairs.tsv", "metal-gfx-pairs.tsv.verified", "fast-math-deny.txt",
-                 "metal-guests.tsv", "metal-digests.tsv", "override-guard.baseline", "promotions.tsv"}
+                 "metal-guests.tsv", "metal-digests.tsv", "override-guard.baseline", "promotions.tsv",
+                 "keyguard-account.tsv", "keyguard.record"}
+# keyguard (scripts/nps5lib/keyguard.py): games/<id>/keyguard.record is the release gate's PASS "every shipped Metal row is reachable by the key
+# this stack produces", bound to the Kyty commit of components.lock, kosmickrisp/EXPECTED_TREE and the sha256 of the lists. A tree whose
+# record names another Kyty, KosmicKrisp tree or list is refused (the 2026-11-27 lesson: a code-generation change silently de-keyed 116 rows);
+# a title with Metal rows and no record is a warning. keyguard-account.tsv = the reasoned exceptions (hashes and words).
+KEYGUARD_FILES = ("metal-shaders.tsv", "metal-gfx-pairs.tsv", "pipelines.kyplst", "keyguard-account.tsv", "keyguard.record")
+KEYGUARD_PINS = ("components.lock", "kosmickrisp/EXPECTED_TREE")
+KEYGUARD_ACCOUNT_RE = re.compile(rb"^(?:gfx\t[0-9a-f]{16}/[0-9a-f]{16}|cs\t[0-9a-f]{16})\t(?:\*|g\d{1,3}(?:@os\d{1,3})?)\t(?:moved|nopipe|noprog)\t[^\t;{}]{16,240}$")
+KEYGUARD_RECORD_RE = re.compile(rb"^(?:result=(?:PASS|FAIL)|(?:kyty|kk_tree)=[0-9a-f]{40}|(?:kyty_codegen|[a-z_]+_sha256)=[0-9a-f]{0,64}|rows=[A-Za-z+:0-9 ]{0,200}"
+                                rb"|date=\d{4}-\d\d-\d\d|(?:note|carried)=[^;{}]{0,200})$")
+
+
+def check_keyguard_text(name, data):
+    """-> reasons a games/<id>/keyguard-account.tsv or keyguard.record is refused: short text of hashes, counts and reason words only."""
+    if b"\0" in data or len(data) > (64 << 10):
+        return ["a keyguard file is a short text file"]
+    rx, fmt = (KEYGUARD_ACCOUNT_RE, b"format\tnps5-keyguard-account\t1") if name == "keyguard-account.tsv" else (KEYGUARD_RECORD_RE, None)
+    bad = []
+    for n, line in enumerate(data.split(b"\n"), 1):
+        if not line or rx.match(line) or line == fmt or (line.startswith(b"#") and len(line) <= 200 and not re.search(rb"[;{}]", line)):
+            continue
+        bad.append("line %d is not a %s line or a short comment" % (n, "`gfx|cs key class moved|nopipe|noprog reason`" if fmt else "record `key=value`"))
+        if len(bad) >= 3:
+            break
+    return bad
+
+
+def keyguard_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("nps5_keyguard", os.path.join(os.path.dirname(os.path.abspath(__file__)), "nps5lib", "keyguard.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+def check_keyguard_record(game, sibling):
+    """-> (failures, warnings) for games/<game>: is the committed keyguard record this tree's? sibling(path) -> blob bytes (b'' = absent)."""
+    g = "games/%s/" % game
+    sha = lambda p: hashlib.sha256(sibling(g + p)).hexdigest() if sibling(g + p) else ""
+    rows = any(l.startswith(b"gfx\t") for l in sibling(g + "metal-gfx-pairs.tsv").split(b"\n")) or \
+        any(re.match(rb"^[0-9a-f]{32}\t", l) for l in sibling(g + "metal-shaders.tsv").split(b"\n"))
+    record = sibling(g + "keyguard.record")
+    if not record:
+        return [], (["%skeyguard.record: this title ships Metal rows and has no keyguard record (rehearse.sh r7: every row must be reachable by today's key)" % g]
+                    if rows else [])
+    kg = keyguard_module()
+    bad = kg.record_problems(record.decode(errors="replace"), sibling("components.lock").decode(errors="replace"), sibling("kosmickrisp/EXPECTED_TREE").decode(errors="replace"),
+                             dict(gfx_sha256=sha("metal-gfx-pairs.tsv"), cs_sha256=sha("metal-shaders.tsv"), kyplst_sha256=sha("pipelines.kyplst")), sha("keyguard-account.tsv"))
+    return ["%skeyguard.record: %s" % (g, b) for b in bad], []
 # games/<title id>/metal-shaders.tsv (scripts/nps5lib/metal.py): keys only. Comment lines, the three header lines, then rows of
 # program digest, specialization key, KosmicKrisp MSL key, sha256 of our MSL, local size, evidence tag: hashes, never shader text.
 # v1.2.1 (keys format 2, pairs format 3): per GPU class rows end with five short words: emitter mode, GPU class, near-exact rule,
@@ -565,6 +613,14 @@ class Check:
                     if size is None:
                         self.fail.append(f"{label}{path}: cannot read the object from git; not accepted unchecked"); continue
                     self.one(label, path, mode, size, data, sibling, diff)
+                # keyguard: a change of the Kyty pin, the KosmicKrisp tree, a Metal list or the accounting needs the record of that very state
+                ids = {m.group(1) for m in map(PROFILE_RE.match, changed) if m and m.group(2) in KEYGUARD_FILES}
+                if any(p in changed for p in KEYGUARD_PINS):
+                    names = entries.keys() if entries is not None else git("ls-tree", "-r", "--name-only", unit[4], "--", "games", cwd=self.root, check=False).splitlines()
+                    ids |= {m.group(1) for m in map(PROFILE_RE.match, names) if m and m.group(2) == "keyguard.record"}
+                for game in sorted(ids):
+                    bad, warn = check_keyguard_record(game, sibling)
+                    self.fail += [label + b for b in bad]; self.warn += [label + w for w in warn]
         finally:
             blobs.close()
         return self
@@ -610,6 +666,10 @@ class Check:
             return
         if profile and profile.group(2) == "promotions.tsv":
             for why in check_promotions_list(data):
+                F(f": {why}")
+            return
+        if profile and profile.group(2) in ("keyguard-account.tsv", "keyguard.record"):
+            for why in check_keyguard_text(profile.group(2), data):
                 F(f": {why}")
             return
         if profile and profile.group(2) == "metal-guests.tsv":
@@ -721,6 +781,8 @@ def selftest():
     clean["games/PPSA00000/metal-gfx-pairs.tsv.verified"] = b"# proof\nsha256=" + hashlib.sha256(g1).hexdigest().encode() + b"\n" + METAL_GFX_OK_LINE + b"\n"
     planted["games/PPSA00003/metal-gfx-pairs.tsv"] = gfx2                   # pair rows without the proof record
     clean["games/PPSA00000/fast-math-deny.txt"] = b"# guest hashes\n" + b"0123456789abcdef\n" * 3             # v1.1.2 deny list: hashes only
+    planted["games/PPSA00005/keyguard.record"] = b"# keyguard\nresult=PASS\nkyty=" + b"1" * 40 + b"\nkk_tree=" + b"2" * 40 + b"\n"   # a record for another Kyty / KosmicKrisp / list
+    planted["games/PPSA00006/keyguard-account.tsv"] = b"format\tnps5-keyguard-account\t1\nfloat4 main0(float4 v) { return v; }\n"   # code in an accounting file
     planted["games/PPSA00004/fast-math-deny.txt"] = b"0123456789abcdef\nfloat4 main0(float4 v) { return v; }\n"   # code in a deny list
     with tempfile.TemporaryDirectory() as d:
         git("init", "-q", cwd=d)
