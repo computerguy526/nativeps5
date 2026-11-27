@@ -357,6 +357,15 @@ class AstroPairRowTests(unittest.TestCase):
             self.assertRegex(r[5] + r[6], r"^[0-9a-f]{32}$")
         self.assertEqual({c: sum(1 for r in fs if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 3, "g17": 7, "g18": 4})
 
+    def test_g17_macos27_decisions(self):
+        """USER 2026-11-27 (g17 on 26A428): eb9f0e4b/0d7ff969 g17 rows are outprec:1, no g17 row of fc219b57 44b67584 / fd2dd3e1 is shipped."""
+        for r in self.rows():
+            if r[16] == "g17" and r[5].startswith("eb9f0e4b") and r[6][:8] in ("0d7ff969", "0f2cc7c4"):
+                self.assertEqual(r[17], "outprec:1")
+            if r[16] == "g17" and r[5].startswith("fc219b57"):
+                self.assertNotIn(r[6][:8], ("44b67584", "fd2dd3e1"))
+        self.assertTrue(any(r[16] == "g17" and r[5].startswith("eb9f0e4b") for r in self.rows()))
+
     def test_folship_rows_do_not_shadow_other_rows(self):
         rows = self.rows()
         old = {(r[5], r[6], r[16]) for r in rows if r[14] != "autoval,folship"}
