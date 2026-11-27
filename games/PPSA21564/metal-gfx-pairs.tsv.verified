@@ -1,7 +1,7 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=10c9c49a3f23e5c6ba2836480d26be93b686e6f677da64277dac5ec4ddc04154
+sha256=1b4d6e5fce54a71b20b03e9590742f41ec5f48a9ea57909d147a286b3a43502c
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
 reproduced=448 of 448
