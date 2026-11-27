@@ -1352,6 +1352,9 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         with open(rj["logs"]["err"], "w") as ef:
             ef.write(config_block(plan)); ef.flush()
             with open(rj["logs"]["out"], "w") as of:
+                sw = None
+                if plan.live:                      # the scenery keys: repoint the live links when Kyty writes a new state (v1.4.4 fix: was never started)
+                    sw = _scenery().Watcher(plan.live[0], plan.live[1]).start()
                 pr = popen(command_line(plan, tmo), env=env, cwd=os.path.join(plan.run_dir, "frames"), stdout=of, stderr=ef, stdin=subprocess.DEVNULL)
                 fp = footprint(pr.pid).start() if isinstance(getattr(pr, "pid", None), int) else None
                 mism = []
@@ -1375,6 +1378,7 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
                     rc = pr.wait() if wv is None else wv[2]
                 finally:
                     rj["timings"]["peak_footprint_mib"] = fp.peak() if fp else None
+                    if sw: sw.stop()
                     end_child(pr)
         t1 = time.time()
         rj["rc"] = rc; rj["timings"].update(end=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t1)), wall_s=round(t1 - t0, 1))

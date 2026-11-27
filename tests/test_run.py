@@ -720,6 +720,34 @@ class Exec(unittest.TestCase):
 
     def rj(self): return json.load(open(os.path.join(self.plan_.run_dir, "run.json")))
 
+    def _exec_with_scenery(self, S, live):
+        tid, opts = run.parse_args(["PPSA00001", "--tag", "t1"])
+        plan = run.compose(tid, opts, dict(self.env)); self.plan_ = plan; plan.live = live
+        import contextlib, io
+        saved = run._scenery; run._scenery = lambda: S
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                return run.execute(plan, opts, plan.environ, queue_factory=FakeQueue, popen=lambda *a, **k: FakeProc(124), hasher=lambda p: "abcd")
+        finally:
+            run._scenery = saved
+
+    def test_scenery_keys_watcher_runs_for_the_child(self):
+        # v1.4.4 fix: plan.live was set but execute() never started the watcher, so key presses never repointed the level files
+        seen = []
+        class W:
+            def __init__(self, live, state): seen.append(("init", live, state))
+            def start(self): seen.append("start"); return self
+            def stop(self): seen.append("stop")
+        class S: Watcher = W
+        self.assertEqual(self._exec_with_scenery(S, ("LIVE", "/x/live.state")), 0)
+        self.assertEqual(seen, [("init", "LIVE", "/x/live.state"), "start", "stop"])
+
+    def test_no_scenery_watcher_without_keys(self):
+        class S:
+            class Watcher:
+                def __init__(self, *a): raise AssertionError("watcher started without the keys")
+        self.assertEqual(self._exec_with_scenery(S, None), 0)
+
     def test_guest_image_beside_out_is_linked_into_frames(self):
         os.makedirs(os.path.join(self.d, "out")); open(os.path.join(self.d, "out", "guest_image.bin"), "w").write("i")
         self.assertEqual(self.go([], FakeProc(124)), 0)
