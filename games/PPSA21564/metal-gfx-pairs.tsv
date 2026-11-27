@@ -14,9 +14,9 @@
 # (here 1 f16 ulp of a packed RG16F half), D9 class, used by 8d47e44f940f0721/808d81213bdb7bac.
 # meshpath (USER approved 2026-11-22): variant mesh-twin = a mesh pipeline (our mesh-stage text + the twin FS), mode meshspill = guest LDS in
 # KosmicKrisp's mesh scratch (patch 0030), exact on rebased real inputs, B/A from the mesh microbench per class.
-# v1.4.4 (USER 2026-11-27, meshback): the 9 mesh-twin rows (g16 5, g17 2, g18 2) are back under the keys KosmicKrisp gives their pipelines after the Kyty mesh
-# precision fix (evidence rekey-<old pair>). Texts regenerated with the final Kyty tool (codegen fp-8c4b096b), positions, indices, cull flags and render targets
-# bit-exact against KosmicKrisp's own mesh text of the same SPIR-V on the laptop GPU (rebased real inputs, 3 windows, AA / AB / mutant), no re-timing (ba kept).
+# v1.4.4 (USER 2026-11-27, meshback): the 9 mesh-twin rows (g16 5, g17 2, g18 2) are back under the keys KosmicKrisp gives their pipelines after the Kyty
+# mesh precision fix. Texts regenerated with the final Kyty tool (codegen fp-8c4b096b). Positions, indices, cull flags and render targets are bit-exact against
+# KosmicKrisp's own mesh text of the same SPIR-V on the laptop GPU: rebased real inputs, 3 windows, AA / AB / mutant. No re-timing, the ba column is kept.
 # emitmodes (USER approved 2026-11-23): rule edgeword:32 = at most 32 differing words per render target of 4096 or more,
 # KosmicKrisp against itself identical, mutant caught, NaN and out-of-bounds identical, vertex stage verified alone with exact positions.
 # emitmodes (USER approved 2026-11-23): rule vary:1e-3 = positions bit-exact, other vertex outputs within 1e-3 relative.
