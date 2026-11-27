@@ -60,7 +60,7 @@ class Base(unittest.TestCase):
         put(os.path.join(self.g, "metal-shaders.tsv"), "# c\nformat\tnps5-metal-keys\t2\ntitle\tPPSA00000\t1\nemitter\tabcdef1\tv1.0\n" + "\n".join(self.cs_lines) + "\n")
         put(os.path.join(self.g, "metal-gfx-pairs.tsv"), "# c\nformat\tnps5-metal-gfx-pairs\t3\ntitle\tPPSA00000\t1\nemitter\tabcdef1\tv1.0\n" + "\n".join(self.gfx_lines) + "\n")
 
-    def keys(self, live, name="k.jsonl", fp=FP, shas=None):
+    def keys(self, live, name="k.jsonl", fp=FP, shas=None, prec=None):
         """live: {('cs'|'gfx', index of the row in its list): live key list | 'err text' | None (no entry)}; default = the row's own key."""
         out = []
         for lst, lines in (("cs", self.cs_lines), ("gfx", self.gfx_lines)):
@@ -72,6 +72,8 @@ class Base(unittest.TestCase):
                     continue
                 e = dict(list=lst, row=5 + i, old=old)
                 e.update(err=v) if isinstance(v, str) else e.update(key=v)
+                if prec and (lst, i) in prec and "key" in e:
+                    e["prec"] = list(prec[(lst, i)])
                 out.append(e)
         p = os.path.join(self.t, name)
         put(p, "".join(json.dumps(e) + "\n" for e in out))
@@ -90,6 +92,91 @@ class Base(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             rc = kg.main(argv)
         return rc, buf.getvalue()
+
+
+class Precision(Base):
+    """2026-11-27 mesh regression: a re-keyed (alias) row must not hide that Kyty's float precision for the program changed."""
+
+    def alias(self):
+        self.lists(["A"], ["x"], gfx_extra=[grow("x2", text=H("bvx", 64)).replace(H("bfx2", 64), H("bfx", 64))])   # same texts, today's pair
+
+    def precision(self, *lines):
+        put(os.path.join(self.g, kg.PRECISION_NAME), kg.PRECISION_FORMAT + "\n" + "".join("\t".join(map(str, l)) + "\n" for l in lines))
+
+    def record(self, keys, *extra):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = kg.main(["precision-record", "--game", self.g, "--keys", keys] + list(extra))
+        return rc, buf.getvalue()
+
+    def test_no_file_is_information_only(self):
+        rc, out = self.run_check(self.keys({}, prec={("gfx", 0): [10, 20]}))
+        self.assertEqual(rc, 0, out); self.assertIn("INFO precision: no %s" % kg.PRECISION_NAME, out)
+
+    def test_alias_with_equal_census_passes(self):
+        self.alias()
+        self.precision((H("kvx"), 2364, 2400))
+        rc, out = self.run_check(self.keys({("gfx", 0): pair("x2")}, prec={("gfx", 0): [2364, 2400], ("gfx", 1): [2364, 2400]}))
+        self.assertEqual(rc, 0, out); self.assertNotIn("PRECISION", out)
+
+    def test_alias_across_a_precision_change_fails(self):
+        """The mesh case: 2,364 NoContraction decorations when validated, 0 under the key the alias row carries."""
+        self.alias()
+        self.precision((H("kvx"), 2364, 2400))
+        k = self.keys({("gfx", 0): pair("x2")}, prec={("gfx", 0): [0, 2400], ("gfx", 1): [0, 2400]})
+        rc, out = self.run_check(k)
+        self.assertEqual(rc, 1); self.assertIn("FAIL PRECISION: gfx %s" % "/".join(pair("x")), out)
+        self.assertIn("validated at 2364 NoContraction of 2400 float ops, today 0 NoContraction of 2400 float ops", out)
+        # accepted only with a real reason and the census of today's key
+        self.assertEqual(self.record(k, "--accept", H("kvx2"), "--reason", "todo")[0], 1)
+        rc, out = self.record(k, "--accept", H("kvx2"), "--reason", "mesh differential on the GPU bit exact against the new baseline, 3 levels")
+        self.assertEqual(rc, 0, out)
+        rc, out = self.run_check(k)
+        self.assertEqual(rc, 0, out)
+        # ... and a later drift of the accepted key fails again
+        rc, out = self.run_check(self.keys({("gfx", 0): pair("x2")}, "k2.jsonl", prec={("gfx", 0): [7, 2400], ("gfx", 1): [7, 2400]}))
+        self.assertEqual(rc, 1); self.assertIn("FAIL PRECISION", out)
+
+    def test_alias_without_a_recorded_census_fails(self):
+        self.alias()
+        self.precision((H("kvother"), 1, 2))
+        rc, out = self.run_check(self.keys({("gfx", 0): pair("x2")}, prec={("gfx", 0): [5, 9], ("gfx", 1): [5, 9]}))
+        self.assertEqual(rc, 1); self.assertIn("no census was recorded for the row's own key", out)
+
+    def test_own_key_with_other_census_fails(self):
+        self.precision((H("kvx"), 5, 9))
+        rc, out = self.run_check(self.keys({}, prec={("gfx", 0): [4, 9]}))
+        self.assertEqual(rc, 1); self.assertIn("same key, other census", out)
+
+    def test_mesh_row_without_any_nocontraction_fails_even_without_a_file(self):
+        self.lists(["A"], [], gfx_extra=[grow("m", variant="mesh-twin")])
+        rc, out = self.run_check(self.keys({}, prec={("gfx", 0): [0, 1700]}))
+        self.assertEqual(rc, 1); self.assertIn("mesh program with float arithmetic and no NoContraction at all", out)
+        rc, out = self.run_check(self.keys({}, "k2.jsonl", prec={("gfx", 0): [2888, 2900]}))
+        self.assertEqual(rc, 0, out)
+
+    def test_record_learns_only_rows_on_their_own_key_and_refuses_a_changed_census(self):
+        self.alias()
+        k = self.keys({("gfx", 0): pair("x2")}, prec={("gfx", 0): [3, 9], ("gfx", 1): [3, 9]})
+        rc, out = self.record(k)
+        self.assertEqual(rc, 0, out)
+        got, bad = kg.read_precision(os.path.join(self.g, kg.PRECISION_NAME))
+        self.assertEqual(bad, []); self.assertEqual(sorted(got), [H("kvx2")])          # the moved row's old key is NOT learned from today's SPIR-V
+        self.assertEqual(got[H("kvx2")][:2], (3, 9))
+        rc, out = self.record(self.keys({("gfx", 0): pair("x2")}, "k2.jsonl", prec={("gfx", 0): [4, 9], ("gfx", 1): [4, 9]}))
+        self.assertEqual(rc, 1); self.assertIn("another census", out)
+
+    def test_file_format_is_checked(self):
+        put(os.path.join(self.g, kg.PRECISION_NAME), kg.PRECISION_FORMAT + "\nnot-a-key\t1\t2\n%s\t1\t2\n%s\t1\t2\n" % (H("kvx"), H("kvx")))
+        rc, out = self.run_check(self.keys({}))
+        self.assertEqual(rc, 1); self.assertIn("FAIL precision file", out); self.assertIn("listed twice", out)
+
+    def test_compute_rows_and_lines_without_census_are_not_judged(self):
+        self.precision((H("kvx"), 5, 9))
+        rc, out = self.run_check(self.keys({}))                                          # an older keyer: no "prec" anywhere
+        self.assertEqual(rc, 0, out)
 
 
 class Verdicts(Base):

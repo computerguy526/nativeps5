@@ -28,7 +28,20 @@ Record = games/<id>/keyguard.record: the PASS, bound to the Kyty commit of compo
 tree (kosmickrisp/EXPECTED_TREE), and the sha256 of both lists, the pipeline list and the accounting. scripts/check.sh refuses a tree whose
 record is for another Kyty commit, KosmicKrisp tree or list (record_problems). Hashes and counts only, no shader code, no paths.
 
+Precision (2026-11-27, the mesh regression): a key that moves tells nothing about WHY. The v1.4 Kyty base stopped emitting NoContraction
+in mesh programs (2,364 decorations -> 0); the rows were re-keyed by alias and only a hand-made SPIR-V diff showed that the validated text
+now stood against other float semantics. So a keys line may carry "prec": [NoContraction decorations, float arithmetic ops] of the pipeline's
+FIRST stage (vertex / mesh: the stage that computes positions), counted by the keyer from the recorded SPIR-V, and
+games/<id>/keyguard-precision.tsv records that census per first-stage key at the time the row was validated (`precision-record`):
+  - a row served by its own key whose census differs from the recorded one                      -> FAIL (never accountable)
+  - a row reached through an alias (key moved) whose census today differs from the census recorded for its old key, or has none recorded
+    -> FAIL "PRECISION": the alias carries a text validated against other arithmetic. Re-validate on the GPU, then accept today's key with
+       its census and a reason (`precision-record --accept <key> --reason ...`).
+  - a mesh row whose program has float arithmetic and no NoContraction at all                    -> FAIL (positions are not exact)
+Without the precision file nothing is compared (one INFO line); the mesh rule always applies when the evidence has "prec".
+
 usage:
+  keyguard.py precision-record --game games/<id> --keys K.jsonl [...] [--accept KEY16 --reason TEXT]   record the census of rows served by their own key
   keyguard.py check --game games/<id> --keys K.jsonl [--keys K2.jsonl ...] [--account FILE] [--kyty-lib kyty_gpu.dylib] [--kk-lib libvulkan_kosmickrisp.dylib]
                     [--report OUT.tsv] [--record --repo REPO]        exit 0 PASS, 1 FAIL
   keyguard.py record-check --repo REPO [--game <id>] [--kyty-lib LIB]   is the committed record the tree's (and this lib's)? exit 0 / 1
@@ -45,6 +58,7 @@ import re
 import sys
 
 ACCOUNT_NAME, RECORD_NAME = "keyguard-account.tsv", "keyguard.record"
+PRECISION_NAME, PRECISION_FORMAT = "keyguard-precision.tsv", "format\tnps5-keyguard-precision\t1"
 ACCOUNT_FORMAT = "format\tnps5-keyguard-account\t1"
 STATUSES = ("moved", "nopipe", "noprog")
 OK_STATES, NEVER = ("LIVE", "COVERED"), ("NOKEY", "NOEVID")
@@ -193,6 +207,95 @@ def row_states(rows, keys):
             st[c] = "COVERED" if ok else "MOVED"
         out.append((r, st, "today's key %s" % ", ".join(sorted("/".join(k) for k in live))))
     return out
+
+
+# ---------------------------------------------------------------- precision
+def read_precision(path):
+    """-> ({first-stage key: (noc, arith, note)} or None when there is no file, [problems])."""
+    try:
+        lines = _read(path).split("\n")
+    except OSError:
+        return None, []
+    out, bad = {}, []
+    for n, l in enumerate(lines, 1):
+        if not l or l.startswith("#") or l == PRECISION_FORMAT:
+            continue
+        c = l.split("\t")
+        if len(c) not in (3, 4) or not re.fullmatch(r"[0-9a-f]{16}", c[0]) or not c[1].isdigit() or not c[2].isdigit():
+            bad.append("precision line %d is not `<first-stage key> <NoContraction> <float ops> [reason]`" % n)
+            continue
+        if c[0] in out:
+            bad.append("precision line %d: key %s is listed twice" % (n, c[0]))
+        out[c[0]] = (int(c[1]), int(c[2]), c[3] if len(c) == 4 else "")
+    return out, bad
+
+
+def _prec(e):
+    p = e.get("prec")
+    return (int(p[0]), int(p[1])) if isinstance(p, (list, tuple)) and len(p) == 2 else None
+
+
+def precision_judge(rows, keys, recorded, is_mesh=lambda r: False):
+    """-> (results [(ok, name, detail)], learn {first-stage key: (noc, arith)} of the rows served by their own key).
+    recorded = read_precision's dict, or None (no file: only the mesh rule). Graphics rows only (compute has no position)."""
+    res, learn, n_checked, n_noprec = [], {}, 0, 0
+    for r in rows:
+        if r["list"] != "gfx":
+            continue
+        kname = "gfx %s (%s, line %d)" % ("/".join(r["key"]), r["cls"], r["line"])
+        ents = [e for e in keys.get((r["list"], r["line"]), []) if "key" in e and tuple(e.get("old", ())) == r["key"]]
+        if not ents:
+            continue
+        cens = {_prec(e) for e in ents}
+        if None in cens:
+            n_noprec += 1
+            cens.discard(None)
+        if not cens:
+            continue
+        n_checked += 1
+        own = any(tuple(e["key"]) == r["key"] for e in ents)
+        today = sorted(cens)
+        say = lambda c: "%d NoContraction of %d float ops" % c
+        if is_mesh(r) and any(c[1] > 0 and c[0] == 0 for c in today):
+            res.append((False, "PRECISION: %s" % kname, "mesh program with float arithmetic and no NoContraction at all: its positions are not exact (Kyty MadMode::Position contract)"))
+            continue
+        if recorded is None:
+            if own and len(today) == 1:
+                learn[r["key"][0]] = today[0]
+            continue
+        want = recorded.get(r["key"][0])
+        if own:
+            if len(today) == 1:
+                learn[r["key"][0]] = today[0]
+            if want is not None and any(c != want[:2] for c in today):
+                res.append((False, "PRECISION: %s" % kname, "same key, other census: recorded %s, today %s (evidence of another program?)" % (say(want[:2]), "; ".join(map(say, today)))))
+            continue
+        # the key moved: the row is reached through today's key(s)
+        for e in ents:
+            c, k2 = _prec(e), e["key"][0]
+            if c is None or tuple(e["key"]) == r["key"]:
+                continue
+            acc = recorded.get(k2)
+            if acc is not None and acc[:2] == c and (k2 == r["key"][0] or not reason_problem(acc[2])):
+                continue                                  # today's key was accepted with this census after re-validation
+            if want is None:
+                res.append((False, "PRECISION: %s" % kname, "the key moved (today %s, %s) and no census was recorded for the row's own key: the alias cannot be shown to keep the float semantics the text was validated against" % (k2, say(c))))
+            elif want[:2] != c:
+                res.append((False, "PRECISION: %s" % kname, "the key moved to %s AND Kyty's precision for the program changed: validated at %s, today %s. Re-validate the text, then `precision-record --accept %s --reason ...`" % (k2, say(want[:2]), say(c), k2)))
+            break
+    if recorded is None:
+        res.append((None, "precision", "no %s: census not compared (%d rows carry one; `precision-record` writes it)" % (PRECISION_NAME, n_checked)))
+    elif n_noprec:
+        res.append((None, "precision", "%d rows have evidence without a census (keyer older than the precision check)" % n_noprec))
+    return res, learn
+
+
+def precision_text(entries):
+    lines = ["# keyguard precision census (scripts/nps5lib/keyguard.py): per first-stage key, NoContraction decorations and float arithmetic ops of",
+             "# the SPIR-V Kyty emitted when the row was validated. Counts only. A 4th column = why a re-keyed row was accepted with another census.",
+             PRECISION_FORMAT]
+    lines += ["\t".join([k, str(v[0]), str(v[1])] + ([v[2]] if len(v) > 2 and v[2] else [])) for k, v in sorted(entries.items())]
+    return "\n".join(lines) + "\n"
 
 
 def read_account(path):
@@ -367,6 +470,9 @@ def cmd_check(o):
     res = [(False, "evidence", b) for b in bad + evidence_problems(metas, shas, lib)] + [(False, "accounting file", b) for b in abad]
     jr, table = judge(rows, keys, account)
     res += jr
+    recorded, pbad = read_precision(os.path.join(o.game, PRECISION_NAME))
+    res += [(False, "precision file", b) for b in pbad]
+    res += precision_judge(rows, keys, recorded, _mesh_test(o.game))[0]
     if o.kyty_lib is None:
         res.append((None, "candidate Kyty library not given", "the SPIR-V's code generation was not compared with a library (--kyty-lib): not recordable"))
     nf = _print(res)
@@ -392,6 +498,51 @@ def cmd_check(o):
         _write(os.path.join(o.game, RECORD_NAME), text)
         print("keyguard: recorded %s (Kyty %s, code generation %s, KosmicKrisp tree %s)" % (os.path.join("games", game, RECORD_NAME), lock_kyty(inp["lock"])[:10], fp[:8], inp["kk_tree"][:10]))
     return 1 if nf else 0
+
+
+def _mesh_test(game_dir):
+    """is_mesh(row) for the rows of this game's graphics list (variant column, as nps5lib.metal.is_mesh)."""
+    from nps5lib import metal
+    p = os.path.join(game_dir, "metal-gfx-pairs.tsv")
+    if not os.path.isfile(p):
+        return lambda r: False
+    text = _read(p)
+    _m, rows = metal.parse_gfx_list(text)
+    lines = [i + 1 for i, l in enumerate(text.split("\n")) if l.startswith("gfx\t")]
+    mesh = {n for n, r in zip(lines, rows) if metal.is_mesh(r)}
+    return lambda r: r["list"] == "gfx" and r["line"] in mesh
+
+
+def cmd_precision_record(o):
+    rows = load_rows(o.game)
+    keys, _metas, bad = read_keys(o.keys)
+    path = os.path.join(o.game, PRECISION_NAME)
+    recorded, pbad = read_precision(path)
+    if bad or pbad:
+        print("keyguard precision-record: refused:\n  " + "\n  ".join(bad + pbad))
+        return 1
+    entries = dict(recorded or {})
+    _res, learn = precision_judge(rows, keys, recorded, _mesh_test(o.game))
+    added = 0
+    for k, c in learn.items():
+        if k not in entries:
+            entries[k] = (c[0], c[1], "")
+            added += 1
+        elif entries[k][:2] != c:
+            print("keyguard precision-record: refused: key %s is recorded with another census (%d/%d, today %d/%d)" % ((k,) + entries[k][:2] + c))
+            return 1
+    if o.accept:
+        why = reason_problem(o.reason or "")
+        cens = {_prec(e) for es in keys.values() for e in es if e.get("key") and e["key"][0] == o.accept} - {None}
+        if why or len(cens) != 1:
+            print("keyguard precision-record: --accept refused: %s" % (why or "the keys files give %d censuses for %s (need exactly one)" % (len(cens), o.accept)))
+            return 1
+        c = cens.pop()
+        entries[o.accept] = (c[0], c[1], o.reason.strip())
+        added += 1
+    _write(path, precision_text(entries))
+    print("keyguard precision-record: %s now has %d keys (%d new)" % (os.path.join(os.path.basename(os.path.normpath(o.game)), PRECISION_NAME), len(entries), added))
+    return 0
 
 
 def cmd_record_check(o):
@@ -451,8 +602,10 @@ def main(argv):
     c = sub.add_parser("record-check"); c.add_argument("--repo", required=True); c.add_argument("--game"); c.add_argument("--kyty-lib")
     c = sub.add_parser("carry"); c.add_argument("--repo", required=True); c.add_argument("--game", required=True); c.add_argument("--kyty-lib", required=True)
     c = sub.add_parser("propose"); c.add_argument("--game", required=True); c.add_argument("--keys", action="append", required=True); c.add_argument("--account")
+    c = sub.add_parser("precision-record"); c.add_argument("--game", required=True); c.add_argument("--keys", action="append", required=True)
+    c.add_argument("--accept"); c.add_argument("--reason")
     o = ap.parse_args(argv)
-    return {"check": cmd_check, "record-check": cmd_record_check, "carry": cmd_carry, "propose": cmd_propose}[o.cmd](o)
+    return {"precision-record": cmd_precision_record, "check": cmd_check, "record-check": cmd_record_check, "carry": cmd_carry, "propose": cmd_propose}[o.cmd](o)
 
 
 if __name__ == "__main__":

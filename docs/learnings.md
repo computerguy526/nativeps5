@@ -191,3 +191,10 @@ Secondary leads from these results (not yet tried or still open):
    offline keyer was run on an older cache and would have passed rows the new library moves.
 4. A row that cannot be checked (program not in the cache, no list pipeline) is a FAIL until accounted, and an accounting entry that describes
    another state than the row's fails too, so "not checkable" cannot hide "moved".
+5. A moved key does not say WHY it moved. The mesh rows moved because the v1.4 Kyty base emitted the mesh program with no NoContraction at
+   all and every MAD as a fused FMA (not FMix: the lerps are untouched, FSub + FMul + FAdd): the position slice never followed a position
+   through LDS, and v1.2.3 was exact only by accident. Re-keying by alias would have shipped a text validated against other arithmetic. So the
+   keyer writes a precision census of each row's first stage (`"prec": [NoContraction, float ops]`) and `keyguard-precision.tsv` records it
+   per key when the row is validated (`keyguard.py precision-record`): an alias row whose program has another census than the row it copies
+   fails until it is re-validated and accepted with a reason, and a mesh row with float arithmetic and no NoContraction always fails. Kyty
+   pins the contract itself (precision_spirv_tests + tests/data/precision_census.golden, Kyty branch nps5-one-kyty-v144-precise).
