@@ -460,6 +460,12 @@ class AstroComputeAliasRowTests(unittest.TestCase):
         keys = {r[2] for r in self.rows()}
         self.assertNotIn("33a534f1bb01ad53", keys); self.assertNotIn("7f80c1e653ea1124", keys)      # not faster / FAIL: no row
 
+    def test_two_compute_rows_carry_rule_ulp4(self):
+        """m4checks 2026-11-27 (USER): 83d00d01 / f55326d9 (relaxed mul+add vs explicit fma, at most 1 ulp on sane inputs) are rule ulp:4, nothing else is."""
+        got = {r[2]: r[5 + 3] for r in self.rows() if r[2] in ("83d00d01e31034c3", "f55326d99d2e50dd")}
+        self.assertEqual(got, {"83d00d01e31034c3": "ulp:4", "f55326d99d2e50dd": "ulp:4"})
+        self.assertEqual(sorted({r[2] for r in self.rows() if r[8].startswith("ulp:")}), ["83d00d01e31034c3", "f55326d99d2e50dd"])
+
     def test_alias_key_has_a_guest_sidecar_entry(self):
         d = os.path.join(game.REPO, "games", "PPSA21564")
         guests = {l.split("\t")[1]: l.split("\t")[2] for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if l.startswith("cs\t")}
