@@ -262,6 +262,26 @@ class Profile(unittest.TestCase):
             if t == "PPSA21564": found = rows
         self.assertEqual(sorted(S.parse_row(r)["preset"] for r in found), ["minimal", "reduced"])
 
+    def test_keep_word_parser(self):
+        good = ["lv", "reduced", "src=" + "a" * 64, "class=bg", "drop=9:" + "b" * 16, "keep=20:" + "c" * 16]
+        self.assertEqual(S.parse_row(good)["keeps"], [(20, "c" * 16)])
+        self.assertEqual(S.parse_row(good[:5])["keeps"], [])
+        self.assertEqual(S.parse_row(good[:5] + ["keep=3:" + "c" * 16 + ",12:" + "d" * 16])["keeps"], [(3, "c" * 16), (12, "d" * 16)])
+        for bad in ("keep=", "keep=20:abc", "keep=0:" + "c" * 16, "keep=20:" + "C" * 16, "drop=20:" + "c" * 16, "keep=20:" + "c" * 16 + ",", "keep=x:" + "c" * 16):
+            with self.assertRaises(ValueError, msg=bad):
+                S.parse_row(good[:5] + [bad])
+        with self.assertRaises(ValueError):
+            S.parse_row(good + ["extra"])
+
+    def test_keep_excludes_a_model_family_and_changes_the_rules_id(self):
+        blocks = [obj(1, model="fakebloom_a"), obj(2, model="fakebloom_solid_a"), obj(3, model="fakebloom_solid_b"), obj(4, model="fakebush_a")]
+        row = dict(ROW, keeps=[(len("fakebloom_solid"), S.name_hash("fakebloom_solid"))])
+        out, n, k = S.thin(level(blocks), row)
+        self.assertEqual(k, 1)                                        # only fakebloom_a goes
+        self.assertEqual(out.count(b"fakebloom_solid"), 2)
+        self.assertEqual(S.thin(level(blocks), ROW)[2], 3)               # without keep the family goes too
+        self.assertNotEqual(S.rules_id([row]), S.rules_id([ROW]))
+
     def test_minimal_keeps_collision_objects(self):
         # v1.4.4: the moss family (19-char prefix key below) has collision bodies; no preset may drop it. minimal == reduced for now.
         f = open(os.path.join(REPO, "games", "PPSA21564", "game.tsv")).read().splitlines()
@@ -270,6 +290,23 @@ class Profile(unittest.TestCase):
         self.assertEqual(rows["minimal"]["src"], rows["reduced"]["src"])
         for r in rows.values():
             self.assertNotIn((19, "9645c26dad834bc3"), r["drops"])
+            self.assertIn((20, "e0e9ae7d18a3dd97"), r["keeps"])      # the grass_bump family (collision shapes) is kept by both presets
+            self.assertNotIn((20, "e0e9ae7d18a3dd97"), r["drops"])
+
+    LEVEL = os.environ.get("NPS5_TEST_APE_LEVEL", "")
+
+    @unittest.skipUnless(os.path.isfile(LEVEL), "local game file not present (NPS5_TEST_APE_LEVEL)")
+    def test_real_apes_level_removes_1058_and_keeps_the_collision_family(self):
+        data = open(self.LEVEL, "rb").read()
+        f = open(os.path.join(REPO, "games", "PPSA21564", "game.tsv")).read().splitlines()
+        rows = [S.parse_row(l.split("\t")[1:]) for l in f if l.startswith("scenery\t")]
+        for r in rows:
+            if r["src"] != S.sha256_bytes(data):
+                self.skipTest("another version of the level file")
+            _, n, k = S.thin(data, r)
+            self.assertEqual((n, k), (5203, 1058), r["preset"])        # was 1070 before the keep word: 12 collision objects stay
+            objs, cand = S.plan(data, r["cls"], r["drops"], r["keeps"])
+            self.assertFalse([o for o in objs if o["uuid"] in cand and o["model"] and S.name_hash(o["model"][:20]) == "e0e9ae7d18a3dd97"])
 
     def test_no_model_name_in_shipped_files(self):
         # the names stay out of the repository: scan the rows' files for readable name fragments of the kind the keys stand for

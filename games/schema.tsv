@@ -25,7 +25,7 @@
 #   cache     kind=kyplst|journal|none [dir=player] [code=ue5] [limit_mb=<n>] [app_ver=<x.y.z>]   (journal = no list: a stable per-player dir the title fills while played)
 #   ue5row    decoder=<0x guest vaddr> fp=<16 hex FNV-1a 64 of the 64 bytes at it> abi=oodlelz14 (all three; needs cache code=ue5, which needs kind=kyplst dir=player)
 #   addrbuild guest address (hex) [build=<version or eboot prefix>]
-#   scenery   <level> <preset> src=<sha256> class=<class> drop=<len>:<hash16>[,...]; preset = reduced | minimal; names only as hashes of model-name prefixes (scripts/nps5lib/scenery.py)
+#   scenery   <level> <preset> src=<sha256> class=<class> drop=<len>:<hash16>[,...] [keep=<len>:<hash16>[,...]]; keep = models never removed (collision shapes); preset = reduced | minimal; names only as hashes of model-name prefixes (scripts/nps5lib/scenery.py)
 #   levelfix  <level> src=<sha256> class=<class> object=<len>:<hash16> attr=<Attribute> old=<v> new=<v>; one level-file value, applied to your own copy through the overlay (default on, NPS5_LEVELFIX=0 off; scripts/nps5lib/scenery.py)
 #   stage     S0..S8 (evidence per stage is checked: see game.py STAGE_EVIDENCE)
 # Free keys: fact.<anything> is never read by a tool (people and the README only). Any other unknown key is an error.

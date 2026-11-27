@@ -11,7 +11,8 @@ and sets nothing.
 Profile rows (games/<id>/game.tsv, schema type `scenery`; the profile carries no asset names):
   scenery <level> <preset> src=<sha256 of the level file this row was made for> class=<object class> drop=<len>:<hash>[,...]
   An object is a drop candidate when its class equals `class=` and its model name's first <len> characters hash (sha256, first 16
-  hex digits) to <hash>. Names are matched by hash in the same spirit as shader keys; the names themselves stay out of the repository.
+  hex digits) to <hash>. An optional last word `keep=<len>:<hash>[,...]` (same hashing) excludes models from that set: an object whose
+  model name matches a keep key is never removed (used for models that carry collision shapes). Names are matched by hash in the same spirit as shader keys; the names themselves stay out of the repository.
 
 Level attribute fixes (the same overlay, schema type `levelfix`; default ON for a title that has rows, NPS5_LEVELFIX=0 opts out):
   levelfix <level> src=<sha256> class=<object class> object=<len>:<hash> attr=<Attribute> old=<value> new=<value>
@@ -59,12 +60,20 @@ def parse_drop(word):
     return out
 
 
+def parse_keep(word):
+    """'keep=20:abcd...[,...]' -> [(20, 'abcd...'), ...]; raises ValueError on a bad word."""
+    if not word.startswith("keep="):
+        raise ValueError("keep=<len>:<hash16>[,...] expected")
+    return parse_drop("drop=" + word[5:])
+
+
 def parse_row(cols):
-    """Columns after the key -> dict(level, preset, src, cls, drops). Raises ValueError with the reason."""
+    """Columns after the key -> dict(level, preset, src, cls, drops, keeps). Raises ValueError with the reason."""
     w = " ".join(cols).split()
-    if len(w) != 5:
-        raise ValueError("needs <level> <preset> src=<sha256> class=<class> drop=<len>:<hash>[,...]")
-    level, preset, src, cls, drop = w
+    if len(w) not in (5, 6):
+        raise ValueError("needs <level> <preset> src=<sha256> class=<class> drop=<len>:<hash>[,...] [keep=<len>:<hash>[,...]]")
+    level, preset, src, cls, drop = w[:5]
+    keeps = parse_keep(w[5]) if len(w) == 6 else []
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", level):
         raise ValueError("level must be a plain folder name (no leading dot, no path)")
     if preset not in PRESETS or preset == "full":
@@ -73,7 +82,7 @@ def parse_row(cols):
         raise ValueError("src= must be a lower-case sha256")
     if not re.fullmatch(r"class=[A-Za-z0-9_]+", cls):
         raise ValueError("class=<word> expected")
-    return dict(level=level, preset=preset, src=src[4:], cls=cls[6:], drops=parse_drop(drop))
+    return dict(level=level, preset=preset, src=src[4:], cls=cls[6:], drops=parse_drop(drop), keeps=keeps)
 
 
 FIX_VALUE = r"[A-Za-z0-9_.+-]+"
@@ -157,11 +166,12 @@ def _model(b):
     return m.group(1).decode() if m else None
 
 
-def matches(model, drops):
-    return any(len(model) >= n and name_hash(model[:n]) == h for n, h in drops)
+def matches(model, drops, keeps=()):
+    hit = lambda ks: any(len(model) >= n and name_hash(model[:n]) == h for n, h in ks)
+    return hit(drops) and not hit(keeps)
 
 
-def plan(data, cls, drops):
+def plan(data, cls, drops, keeps=()):
     """-> (objects, removable uuid set). objects: dicts with span/uuid/parent. Pure."""
     objs = []
     for m in OBJ.finditer(data):
@@ -176,7 +186,7 @@ def plan(data, cls, drops):
     cand = set()
     for o in objs:
         u = o["uuid"]
-        if not u or o["cls"] != cls or not o["model"] or not matches(o["model"], drops):
+        if not u or o["cls"] != cls or not o["model"] or not matches(o["model"], drops, keeps):
             continue
         # mentions in its own block (<Uuid>, a prefab's own <RootUuid>) and one <Parent> per child are not references;
         # any other mention (a link, a prefab root, anything) means something depends on it: keep
@@ -220,7 +230,7 @@ def check_output(src, out, n_src, n_removed):
 
 def thin(data, row):
     """-> (output bytes, objects, removed). Raises Skip on a sanity failure."""
-    objs, cand = plan(data, row["cls"], row["drops"])
+    objs, cand = plan(data, row["cls"], row["drops"], row.get("keeps", ()))
     out = apply(data, objs, cand)
     check_output(data, out, len(objs), len(cand))
     return out, len(objs), len(cand)
@@ -255,7 +265,7 @@ def overlay_dir(scratch, tid, preset, fixed=False):
 
 
 def rules_id(rows, fixes=()):
-    return sha256_bytes(json.dumps([[(r["level"], r["src"], r["cls"], r["drops"]) for r in rows],
+    return sha256_bytes(json.dumps([[(r["level"], r["src"], r["cls"], r["drops"]) + ((r["keeps"],) if r.get("keeps") else ()) for r in rows],
                                     [(f["level"], f["src"], f["cls"], f["obj"], f["attr"], f["old"], f["new"]) for f in fixes]],
                                    sort_keys=True).encode())[:16]
 
