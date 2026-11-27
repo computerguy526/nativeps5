@@ -13,8 +13,8 @@ unset) changes nothing. `reduced` / `minimal` / `balanced` / `performance` / `cu
 has `scenery` rows for: a copy of your own level files is generated under <scratch>/scenery/<id>/<setting>/ and mounted by the runtime
 (NPS5_OVERLAY_DIR); the game folder is never written. A file that is not the one the row was made for is left alone with one warning.
 Combined with your own NPS5_OVERLAY_DIR (your file wins on the same path).
---scenery-keys on  (NPS5_SCENERY_KEYS=1; default off; Kyty only) hotkeys F1 help panel, F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other
-decoration: the overlay becomes a folder of links the launcher repoints when a key is pressed; the level-data part applies when the level
+--scenery-keys on  (NPS5_SCENERY_KEYS=1; default off; Kyty only) hotkeys on the number row: 4 help panel, 5 preset cycle, 6 flowers, 7 grass, 8 small moss, 9 other
+decoration (digits, not F keys: macOS intercepts those): the overlay becomes a folder of links the launcher repoints when a key is pressed; the level-data part applies when the level
 is entered again, the instant draw skip (profile `drawskip` rows) on the next frame. NPS5_SCENERY_EXTRA=<file>: local-only extra rows.
 --play  a person playing at the keyboard, not a test: sound on, no --until target and no early stop by the watcher, up
 to 7200 s (the default) without NPS5_RUN_REASON. Every other safety rule stays. Not for scripts or agents: the 180 s cap

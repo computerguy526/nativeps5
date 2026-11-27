@@ -651,7 +651,7 @@ def parse_state(text):
 
 
 def level_hows(rows, skips=()):
-    """How each category applies per level, for the F1 help panel: {level: {cat: "instant" | "entry" | "both"}}. `entry` = a category row
+    """How each category applies per level, for the 4 help panel: {level: {cat: "instant" | "entry" | "both"}}. `entry` = a category row
     (the level data of the next level load), `instant` = a drawskip row naming the category. Pure; rows without a category are ignored."""
     how = {}
     for r in rows:
@@ -664,10 +664,10 @@ def level_hows(rows, skips=()):
 
 
 def write_skip_table(path, presets, start, skips=(), rows=()):
-    """The table Kyty reads (KYTY_SCENE_SKIP_FILE; atomic). presets = [(name, {cat: keep})] in F3 cycle order (full is implicit first),
+    """The table Kyty reads (KYTY_SCENE_SKIP_FILE; atomic). presets = [(name, {cat: keep})] in the preset-key (5) cycle order (full is implicit first),
     start = the launch mask, skips = parsed `drawskip` rows. Lines (tab separated):
       preset <name> <cat=keep,...>      start <cat=keep,...>      skip <level> <cat+cat> <vs hash16> <ps hash16 or ->
-      level <level> <cat=instant|entry|both,...>   (F1 panel; from the category `rows` and the drawskip rows; levels sorted, categories in CATS order)"""
+      level <level> <cat=instant|entry|both,...>   (help panel, key 4; from the category `rows` and the drawskip rows; levels sorted, categories in CATS order)"""
     out = ["# nps5 scenery table: read by Kyty (KYTY_SCENE_SKIP_FILE)"]
     out += ["preset\t%s\t%s" % (n, mask_text(m)) for n, m in presets]
     out.append("start\t" + mask_text(start))

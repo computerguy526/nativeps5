@@ -142,7 +142,7 @@ class Keys(Base):
         self.assertIn("start\tflowers=0,grass=0,moss=0,other=0", tb)
         self.assertIn("preset\tbalanced\tflowers=50,grass=50,moss=100,other=100", tb); self.assertIn("preset\tperformance\tflowers=0,grass=0,moss=0,other=0", tb)
         self.assertIn("skip\tlv\tflowers\t%s\t-" % ("a" * 16), tb)
-        self.assertIn("level\tlv\tflowers=both,grass=entry", tb)       # F1 panel: flowers has a category row and a drawskip row, grass only the row
+        self.assertIn("level\tlv\tflowers=both,grass=entry", tb)       # help panel (key 4): flowers has a category row and a drawskip row, grass only the row
         self.assertLess(tb.index("preset\tbalanced\tflowers=50,grass=50,moss=100,other=100"), tb.index("preset\tperformance\tflowers=0,grass=0,moss=0,other=0"))
 
     def test_level_hows_for_the_f1_panel(self):
