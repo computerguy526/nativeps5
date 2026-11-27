@@ -816,6 +816,8 @@ KK_METAL_CACHE_ID	nativeps5		scripts/nps5lib/cache.py
 KK_MSL_CACHE_BUST	kosmickrisp		bridge/mtl_compiler.m
 KK_MSL_CANON_KEY	kosmickrisp	1 = also key every shader by the MSL text macOS 26 / Apple GPU family 9 writes (canonical key, log field canon=); an override is looked up under this Mac's own key first, then the canonical key. Default 0 (v1.2.2 oskey)	vulkan/kk_physical_device.c
 KK_MSL_CANON_KEY	nativeps5		scripts/nps5lib/cache.py
+KK_MSL_CANON_MESH	kosmickrisp	1 = mesh pipelines (mesh + fragment) also get the canonical key of KK_MSL_CANON_KEY, so the mesh override rows (keyed by the macOS 26 text) are found on macOS 27. Default 0, read once; without it nothing changes (v1.4.4, patch 0044)	vulkan/kk_shader.c
+KK_MSL_CANON_MESH	nativeps5	set to 1 by prepare (only when the list has mesh rows) and at launch next to KK_MSL_OVERRIDE_MESH; a KosmicKrisp without patch 0044 ignores it	scripts/nps5lib/metal.py
 KK_MSL_COLLECT_DIR	anyps5		core/libs/prx/libSceAgcDriver/Graphics/src/DriverPipelineArchive.cpp
 KK_MSL_COLLECT_DIR	kosmickrisp		bridge/mtl_compiler.m
 KK_MSL_COLLECT_DIR	nativeps5		kosmickrisp/tests/vecload/run.sh
