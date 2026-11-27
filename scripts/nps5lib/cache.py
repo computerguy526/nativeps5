@@ -291,7 +291,8 @@ def ue5_words(ctx):
         return []
     return [("KYTY_PIPELINE_LIST_CODE_STORE", os.path.join(ctx.dir, ctx.tid + ".codestore")), ("KYTY_UE5_DECODER", u["decoder"]),
             ("KYTY_UE5_DECODER_FP", u["fp"]), ("KYTY_UE5_DECODER_ABI", u["abi"]),
-            ("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", "1")]      # the game starts after the compile, as on ASTRO
+            ("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", "1"),      # the game starts after the compile, as on ASTRO
+            ("KYTY_REFUSED_PROGRAMS", "1")]             # refused programs (<program cache>.refused): code=ue5 titles only, off in Kyty without the word (ASTRO never gets it)
 
 
 def launch_words(ctx, app0):

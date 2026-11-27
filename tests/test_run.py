@@ -457,7 +457,7 @@ class CacheKinds(unittest.TestCase):
         self.assertEqual(got["KYTY_PIPELINE_LIST"], os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"))      # the list path, never the journal "0"
 
     UE5ROWS = "cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.005.002\tlimit_mb=448\nue5\tdecoder=0x926510\tfp=1f82e44a65371db3\tabi=oodlelz14"
-    UE5_KEYS = ("KYTY_PIPELINE_LIST_CODE_STORE", "KYTY_UE5_DECODER", "KYTY_UE5_DECODER_FP", "KYTY_UE5_DECODER_ABI", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY")
+    UE5_KEYS = ("KYTY_PIPELINE_LIST_CODE_STORE", "KYTY_UE5_DECODER", "KYTY_UE5_DECODER_FP", "KYTY_UE5_DECODER_ABI", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY", "KYTY_REFUSED_PROGRAMS")
 
     def test_ue5_plan_has_the_code_words_and_no_eboot_reader(self):
         d, env = self.mk(self.UE5ROWS)
@@ -518,6 +518,20 @@ class CacheKinds(unittest.TestCase):
         for row in ("cache\tkind=journal", "cache\tkind=kyplst", ""):
             d, env, q = self.plan(row)
             self.assertNotIn("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", q.env, row)
+
+    def test_refused_programs_word_is_ue5_only_and_never_on_astro(self):
+        # bring-up changes are config gated: a fatal unrelated to translation must not blacklist an ASTRO program
+        d, env, p = self.ue5plan()
+        self.assertEqual(p.env["KYTY_REFUSED_PROGRAMS"], "1"); self.assertEqual(p.layers["KYTY_REFUSED_PROGRAMS"], "cache")
+        d2, env2, q = self.ue5plan(["--env", "KYTY_REFUSED_PROGRAMS=0"])
+        self.assertEqual(q.env["KYTY_REFUSED_PROGRAMS"], "0")                                  # the player can still turn it off
+        for row in ("cache\tkind=journal", "cache\tkind=kyplst", "cache\tkind=kyplst\tdir=player\tapp_ver=01.001.000", ""):
+            d, env, a = self.plan(row)                                                         # ASTRO-like rows: list / journal / none
+            self.assertNotIn("KYTY_REFUSED_PROGRAMS", a.env, row)
+        # a code=ue5 cache row without its ue5 decoder row is not a ue5 plan either
+        d, env = self.mk("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001.000")
+        open(os.path.join(d, "games", "PPSA00001", "pipelines.kyplst"), "wb").write(b"list")
+        self.assertNotIn("KYTY_REFUSED_PROGRAMS", run.compose(*run.parse_args(["PPSA00001"]), env).env)
 
     def test_ue5_without_a_list_and_plain_kyplst_have_no_ue5_words(self):
         # no list yet: the journal cache of v1.4 (list-less words, KYTY_PIPELINE_LIST=0), none of the ue5 words; a plain kyplst title never gets one
@@ -851,6 +865,28 @@ class ShippedGames(unittest.TestCase):
             keys = {l.split("\t")[1].split("=")[0] for l in open(os.path.join(games, t, "game.tsv")).read().splitlines() if l.startswith("env\t")}
             self.assertEqual(keys & set(self.OFF_BY_DEFAULT), set(), t)
             self.assertEqual([k for k in keys if "CHEAT" in k.upper()], [], t)
+
+    def test_refused_programs_word_only_on_the_shipped_code_ue5_titles(self):
+        # ASTRO (PPSA21564) must keep Kyty's default (off): no word in its plan or profile text; the shipped code=ue5 titles get it
+        root = os.path.abspath(os.path.join(HERE, ".."))
+        games = os.path.join(root, "games")
+        env = dict(NPS5_GAMES_DIR=games, NPS5_PUBLIC_DIR=root, NPS5_SCRATCH=tempfile.mkdtemp(), NPS5_SELF_MEM_LIMIT_MB="18944", NPS5_RUN_REASON="refused-programs gate test",
+                   NPS5_KK_ICD="/kk/icd.json", NPS5_ANYPS5_BUILD="/any/build-arm64", NPS5_KYTY_DIR="/kyty", NPS5_BREW_PREFIX="/brew")
+        lst = os.path.join(env["NPS5_SCRATCH"], "cvars.list"); open(lst, "w").close()
+        seen = {}
+        for t in sorted(x for x in os.listdir(games) if os.path.isfile(os.path.join(games, x, "game.tsv"))):
+            text = open(os.path.join(games, t, "game.tsv")).read()
+            ue5 = any(l.startswith("cache\t") and "code=ue5" in l.split("\t") for l in text.splitlines())
+            plan = run.compose(*run.parse_args([t, "--bin", "/x/native", "--env", "NPS5_UECVAR_LIST=" + lst]), dict(env))
+            self.assertNotIn("KYTY_REFUSED_PROGRAMS", text, t)                                  # never a profile row: only the cache layer sets it
+            seen[t] = ue5
+            if t == "PPSA21564":
+                self.assertFalse(ue5); self.assertNotIn("KYTY_REFUSED_PROGRAMS", plan.env)
+            elif ue5 and "KYTY_PIPELINE_LIST" in plan.env and plan.env["KYTY_PIPELINE_LIST"] != "0":
+                self.assertEqual(plan.env.get("KYTY_REFUSED_PROGRAMS"), "1", t)
+            if not ue5:
+                self.assertNotIn("KYTY_REFUSED_PROGRAMS", plan.env, t)
+        self.assertIn("PPSA21564", seen)
 
     def test_the_players_own_env_can_still_turn_the_recorder_on(self):
         root = os.path.abspath(os.path.join(HERE, ".."))

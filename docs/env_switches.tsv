@@ -1756,7 +1756,7 @@ KYTY_REBIND_AFTER_JOIN	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors
 KYTY_REBIND_AFTER_JOIN	nativeps5		titles/kyty-preset.env
 KYTY_RECORDER_DESCRIPTOR_SETS	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_RECORDER_DESCRIPTOR_SETS	nativeps5		titles/kyty-preset.env
-KYTY_REFUSED_PROGRAMS	kyty	file of programs the recompiler refused with a fatal error in an earlier start (one `0x<hash>` per line, then the first line of the error): the shader precompile skips them, counts them (`N of refused programs`) and logs the first 8 by hash. A fatal error while a program is translated appends it. Default `<KYTY_PROGRAM_CACHE_PATH>.refused`; `0` turns it off; delete a line to retry a program	src/graphics/host_gpu/renderer/pipeline/refusedPrograms.h
+KYTY_REFUSED_PROGRAMS	kyty	file of programs the recompiler refused with a fatal error in an earlier start (one `0x<hash>` per line, then the first line of the error): the shader precompile skips them, counts them (`N of refused programs`) and logs the first 8 by hash. A fatal error while a program is translated appends it. OFF unless set: `1` = `<KYTY_PROGRAM_CACHE_PATH>.refused`, another value = that path; `0` or empty = off. nps5 sets `1` for code=ue5 titles only (SAROS), never ASTRO; delete a line to retry a program	src/graphics/host_gpu/renderer/pipeline/refusedPrograms.h
 KYTY_REGISTERED_SHADER_CODE	kyty		src/graphics/shader/shader.cpp
 KYTY_RELAUNCHED	kyty		src/common/logging/log.h
 KYTY_REMAP_TRACKER_PROTECTION	kyty		src/kernel/memory.cpp

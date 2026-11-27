@@ -356,6 +356,11 @@ class T(unittest.TestCase):
         self.assertEqual(st, "prepared"); self.assertIn("optional", "\n".join(lines))
         self.assertEqual(w["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
         self.assertNotIn("KYTY_LAUNCH_WAIT_BEFORE_ENTRY", dict(cache.launch_words(plain, app0)))
+        # refused programs: code=ue5 only (prepare and launch); ASTRO's plain kyplst plan has no such word, so Kyty's default (off) holds
+        self.assertEqual(w["KYTY_REFUSED_PROGRAMS"], "1")
+        self.assertEqual(dict(cache.prepare_words(c, app0))["KYTY_REFUSED_PROGRAMS"], "1")
+        self.assertNotIn("KYTY_REFUSED_PROGRAMS", dict(cache.launch_words(plain, app0)))
+        self.assertNotIn("KYTY_REFUSED_PROGRAMS", dict(cache.prepare_words(plain, app0)))
 
     # ---- status
     def test_status_fresh_partial_prepared_stale(self):
@@ -1001,12 +1006,12 @@ class T(unittest.TestCase):
         self.set_cache_row("cache\tkind=kyplst\tdir=player\tcode=ue5\tapp_ver=01.001.000\nue5\tdecoder=0xABC123\tfp=0123456789abcdef\tabi=oodlelz14")
         c = self.ctx(); w = dict(cache.ue5_words(c))
         self.assertEqual(w, {"KYTY_PIPELINE_LIST_CODE_STORE": c.dir + "/PPSA00001.codestore", "KYTY_UE5_DECODER": "0xABC123",
-                             "KYTY_UE5_DECODER_FP": "0123456789abcdef", "KYTY_UE5_DECODER_ABI": "oodlelz14", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY": "1"})
+                             "KYTY_UE5_DECODER_FP": "0123456789abcdef", "KYTY_UE5_DECODER_ABI": "oodlelz14", "KYTY_LAUNCH_WAIT_BEFORE_ENTRY": "1", "KYTY_REFUSED_PROGRAMS": "1"})
         self.assertNotIn("KYTY_UE5_CODE", w)                                                    # the off switch is the player's, never a profile word
         # the same words reach the prepare run and the launch phase, nothing else adds them
         pw, lw = dict(cache.prepare_words(c, "/app0")), dict(cache.launch_words(c, "/app0"))
         for k, v in w.items():
-            if k != "KYTY_LAUNCH_WAIT_BEFORE_ENTRY": self.assertEqual((pw[k], lw[k]), (v, v), k)
+            if k != "KYTY_LAUNCH_WAIT_BEFORE_ENTRY": self.assertEqual((pw[k], lw[k]), (v, v), k)   # incl. KYTY_REFUSED_PROGRAMS
         self.assertEqual(lw["KYTY_LAUNCH_WAIT_BEFORE_ENTRY"], "1")
 
     def test_ue5_row_needs_both_the_code_word_and_the_decoder_row(self):
