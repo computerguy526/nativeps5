@@ -372,7 +372,7 @@ class AstroPairRowTests(unittest.TestCase):
         emitter = next(l for l in head if l.startswith("emitter\t")).split("\t")
         self.assertRegex(emitter[1], r"^[0-9a-f]{40}$")
         rows = self.rows()
-        vr = [r for r in rows if "vregion" in r[15].split("+") and "pendval" not in r[14]]   # folfix2 alias rows: AstroPairAliasRowTests
+        vr = [r for r in rows if "vregion" in r[15].split("+") and "pendval" not in r[14] and "rekey-" not in r[14]]   # folfix2 alias rows: AstroPairAliasRowTests
         self.assertEqual({c: sum(1 for r in vr if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 12, "g17": 1, "g18": 17})  # 30 rows (g18 incl. 2301c3b7/efe411f8 after 6 timings); the vsmodes (deb14f6d) rows have no vregion token
         self.assertIn(("g17", "713f3ea8c4014632", "6200c07426976d4f"), {(r[16], r[5], r[6]) for r in vr})
         for r in vr:
@@ -485,7 +485,7 @@ class AstroComputeAliasRowTests(unittest.TestCase):
         self.assertEqual([r[7] for r in self.rows() if r[2] == "68d59c988691ec1a"], ["g17"])    # ef0b2622's alias stays g17 only (slower on g16)
 
 
-REKEY_ROW_RE = re.compile(r"^rekey-([0-9a-f]{8})-([0-9a-f]{8}),pendval$")   # an alias row's whole evidence (the checker allows 48 characters)
+REKEY_ROW_RE = re.compile(r"^rekey-([0-9a-f]{8})-([0-9a-f]{8})(?:,pendval)?$")   # an alias row's whole evidence (the checker allows 48 characters)
 
 
 def pair_alias_problems(rows, guests):
@@ -537,7 +537,8 @@ class AstroPairAliasRowTests(unittest.TestCase):
         bad = lambda rows, gg=g: pair_alias_problems(rows, gg)
         self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev="autoval,pendval")])[0])    # pendval without its source row
         self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev="autoval," + tok)])[0])
-        self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev=tok[:-8])])[0])             # a re-keyed row not marked pending
+        self.assertEqual(bad([self.row(*old), self.row(*new, ev=tok[:-8])]), [])                         # rekeymerge: a validated alias row (no pendval) is sound
+        self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev=tok[:-8] + ",pend")])[0])  # any other suffix is refused
         self.assertIn("no single listed pair", bad([self.row(*new, ev=tok)])[0])                           # the source row is gone
         self.assertIn("no single listed pair", bad([self.row(*old, cls="g18"), self.row(*new, ev=tok)])[0])   # source only in another class
         self.assertIn("another pair", bad([self.row(*old), self.row(*old, ev=tok)])[0])
@@ -575,17 +576,17 @@ class AstroPairAliasRowTests(unittest.TestCase):
                 "f347191aba839bf5": "07c231aaec915562", "39478dacd8a02253": "75f24040fe7a4fc5", "b1c17b27db220a80": "abf97253b36aacd1"}
         old8 = {k[:8]: k for k in want}
         al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
-        self.assertEqual(len(al), len([r for r in rows if "pendval" in r[14]]))
+        self.assertEqual([r for r in rows if "pendval" in r[14] and not r[9].startswith("mesh")], [])   # rekeymerge: only the mesh alias rows are pending
         moved = [r for r in al if REKEY_ROW_RE.match(r[14]).group(1) in old8 and not r[5].startswith(REKEY_ROW_RE.match(r[14]).group(1))]
-        self.assertEqual(len(moved), 14)
+        self.assertEqual(len(moved), 12)    # rekeymerge: the two 07c231aa rows (no reproducible A text) are dropped
         for r in moved:
             self.assertEqual(r[5], want[old8[REKEY_ROW_RE.match(r[14]).group(1)]])
-        self.assertEqual({r[5] for r in moved}, set(want.values()))
+        self.assertEqual({r[5] for r in moved}, set(want.values()) - {"07c231aaec915562"})
         g16 = sorted((r[14][6:23], r[5][:8], r[6][:8]) for r in moved if r[16] == "g16")
         self.assertEqual(g16, [("4e832ad6-c9aa9169", "c896f56d", "50e4d770"), ("52ed886c-266ce5e7", "3cbdead3", "6aa6cde8"),
                                ("52ed886c-ccf8c6db", "3cbdead3", "f9ac37e2"), ("664068b2-46a52ea0", "e6452675", "70ffd7b9"),
                                ("9e7ca1d0-ff4af8d8", "71064d62", "629f8da4"), ("afb0260e-ff4af8d8", "6450e8d7", "629f8da4"),
-                               ("d1c15bc8-46a52ea0", "7cd72956", "70ffd7b9"), ("f347191a-c9aa9169", "07c231aa", "50e4d770")])
+                               ("d1c15bc8-46a52ea0", "7cd72956", "70ffd7b9")])
         for k in want:                                                       # the old rows stay (older Kyty builds, older caches)
             self.assertTrue([r for r in rows if r[5] == k and "pendval" not in r[14]], k)
 
@@ -598,13 +599,13 @@ class AstroPairAliasRowTests(unittest.TestCase):
         fs_only = [r for r in al if r[5].startswith(tok(r)[0])]
         mesh = [r for r in al if r[9].startswith("mesh")]
         al, fs_only = [r for r in al if r not in mesh], [r for r in fs_only if r not in mesh]
-        self.assertEqual((len(al), len(fs_only)), (107, 93))
+        self.assertEqual((len(al), len(fs_only)), (96, 84))      # rekeymerge: 107 - 11 dropped (not validated or failed)
         for r in fs_only:
             self.assertFalse(r[6].startswith(tok(r)[1]), r[6])
         by_cls = {}
         for r in al:
             by_cls[r[16]] = by_cls.get(r[16], 0) + 1
-        self.assertEqual(by_cls, {"*": 5, "g16": 55, "g17": 6, "g18": 41})
+        self.assertEqual(by_cls, {"*": 5, "g16": 52, "g17": 5, "g18": 34})
         self.assertEqual(len(rows) - len(al) - len(mesh), 362)               # the v1.4.4 rows are all still there
         self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_aliases
 
