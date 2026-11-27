@@ -904,7 +904,7 @@ class DigestAliases(unittest.TestCase):
         self.assertEqual(al, {"82c15f895e38ceb888324697b19930d2": ["12404e7aa5e9a8fe19976b870664d8aa"]})
         _, rows = metal.parse_gfx_list(open(os.path.join(d, metal.GFX_LIST_NAME)).read())
         mesh = [r for r in rows if metal.is_mesh(r)]
-        self.assertEqual(len(mesh), 9)                                                  # g16 5, g17 2, g18 2
+        self.assertEqual(len(mesh), 18)                                                 # g16 5, g17 2, g18 2 + their 9 keyguard alias rows
         self.assertEqual({r["vs"] for r in mesh}, set(al))                              # every mesh row's program is the aliased one
 
 
