@@ -576,7 +576,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
                 "f347191aba839bf5": "07c231aaec915562", "39478dacd8a02253": "75f24040fe7a4fc5", "b1c17b27db220a80": "abf97253b36aacd1"}
         old8 = {k[:8]: k for k in want}
         al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
-        self.assertEqual([r for r in rows if "pendval" in r[14] and not r[9].startswith("mesh")], [])   # rekeymerge: only the mesh alias rows are pending
+        self.assertEqual([r for r in rows if "pendval" in r[14]], [])   # rekeymerge: no alias row is pending in the release list (mesh rows held back)
         moved = [r for r in al if REKEY_ROW_RE.match(r[14]).group(1) in old8 and not r[5].startswith(REKEY_ROW_RE.match(r[14]).group(1))]
         self.assertEqual(len(moved), 12)    # rekeymerge: the two 07c231aa rows (no reproducible A text) are dropped
         for r in moved:
@@ -597,7 +597,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
         al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
         tok = lambda r: REKEY_ROW_RE.match(r[14]).groups()
         fs_only = [r for r in al if r[5].startswith(tok(r)[0])]
-        mesh = [r for r in al if r[9].startswith("mesh")]
+        mesh = []
         al, fs_only = [r for r in al if r not in mesh], [r for r in fs_only if r not in mesh]
         self.assertEqual((len(al), len(fs_only)), (96, 84))      # rekeymerge: 107 - 11 dropped (not validated or failed)
         for r in fs_only:
@@ -608,21 +608,6 @@ class AstroPairAliasRowTests(unittest.TestCase):
         self.assertEqual(by_cls, {"*": 5, "g16": 52, "g17": 5, "g18": 34})
         self.assertEqual(len(rows) - len(al) - len(mesh), 362)               # the v1.4.4 rows are all still there
         self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_aliases
-
-    def test_astro_mesh_aliases(self):
-        """keyguard 2026-11-27: the 9 mesh-twin rows (g16 5, g17 2, g18 2) under today's mesh pair (rowkey.py with patch 0044's canonical
-        mesh key; the old recorded SPIR-V still gives the old pair). One new mesh key per old one; the fragment key moved only for the
-        fb6239fe rows. Pending validation like every alias row; the old rows stay."""
-        rows, _ = self.real()
-        al = [r for r in rows if REKEY_ROW_RE.match(r[14]) and r[9].startswith("mesh")]
-        got = sorted((r[16], r[14][6:23], r[5], r[6]) for r in al)
-        fb = [("fb6239fe-599af389", "99b539c5ca0c8d08", "1ddfff5e6fcff57c"), ("fb6239fe-74915fa9", "99b539c5ca0c8d08", "defd4f564acba8ce")]
-        g16 = [("2b157b7b-88fed165", "04ed9f89dd056362", "88fed1657d7c535c"), ("2b157b7b-ff81917e", "04ed9f89dd056362", "ff81917e43b7d772"),
-               ("f4578014-15a08f9f", "f63a6b65a6536cd8", "15a08f9f5aa7e37c")] + fb
-        self.assertEqual(got, sorted([("g16",) + x for x in g16] + [(c,) + x for c in ("g17", "g18") for x in fb]))
-        src = [r for r in rows if r[9].startswith("mesh") and "pendval" not in r[14]]
-        self.assertEqual(len(src), 9)                                        # the old rows stay
-        self.assertEqual({r[9] for r in al}, {"mesh-twin"})
 
 
 class Ue5RowTests(Base):

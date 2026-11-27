@@ -1,18 +1,17 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=92a2fcdc9a713c448238ce253966d79e0777417b5ead4b4eed74fdf2c3a690b5
+sha256=2664aa47258981a7853f10a37cda8b72c957d1b1b24b1ad35d4c2ea6bd28709a
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
-reproduced=467 of 467
+reproduced=458 of 458
 class gfx *: 37 of 37
-class gfx g16: 198 of 198
-class gfx g17: 54 of 54
-class gfx g18: 178 of 178
+class gfx g16: 193 of 193
+class gfx g17: 52 of 52
+class gfx g18: 176 of 176
 emitter=794b61d671400780b8ba3952a24c18002a1393ec nps5-kyty nps5-one-kyty-v144 (v1.4.3 pin 93d944fff + vregion ad698867 + perfmode 7a769133; codegen fp-753d1d73; vregion token default off)
 # 2026-11-27 (v144max): with the v1.4.4 tool (nps5-one-kyty-v144 794b61d67, kyty_msl_dump sha256 6de35f77) all 440 rows (78 compute + 362 graphics) regenerate sha256-exact from the v1.2.3-era cache (cache-play-rc123rel), 0 translate failures, and 429 from the laptop player cache (kyty-stable-a1736e2a): the 11 others are rows whose program is not in that programs.bin (same 11 with the v1.4.3 tool, which also fails to translate the vregion rows).
 # 2026-11-27 (folfix2): + 107 alias rows (14 with a moved vertex key, 93 with only a moved fragment key. Evidence rekey-<old pair>,pendval: PENDING validation and timing under their new KosmicKrisp pair, not yet covered by the evidence line below). They regenerate sha256-exact with the v1.4.4 tool from the laptop player cache (kyty-stable-a1736e2a).
 evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16); VS-only rows: vssur bit-exact VS outputs on every vertex
 date=2026-11-27
-# 2026-11-27 (keyguard): + 9 mesh alias rows (g16 5, g17 2, g18 2; evidence rekey-<old pair>,pendval): the texts of their source rows (same sha256, reproduced there) under today's mesh pair (rowkey.py, patch 0044 canonical mesh key). PENDING validation: KosmicKrisp's new mesh text is not statement-equal to the old one, and regeneration under the new mesh key was not re-run.
-# 2026-11-27 (rekeymerge): 96 of the 107 alias rows validated (79 cloud M6, 17 laptop M4 Pro), pendval removed. 11 dropped (listed in metal-gfx-pairs.tsv). 9 mesh alias rows stay pendval. Evidence line above unchanged, correctness only (no timing) for rows whose key moved.
+# 2026-11-27 (rekeymerge): 96 of the 107 alias rows validated (79 cloud M6, 17 laptop M4 Pro), pendval removed. 11 dropped (listed in metal-gfx-pairs.tsv). The 9 mesh alias rows are not in this list (branch nps5-one-nps5-v144-fol). Evidence line above unchanged, correctness only (no timing) for rows whose key moved.
