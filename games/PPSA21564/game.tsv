@@ -46,14 +46,40 @@ run_secs	default=90	max=180
 blank_fail_s	90
 cache	kind=kyplst	limit_mb=896	app_ver=01.007.000
 
-# ---- Player setting `scenery` (nps5 run --scenery reduced|minimal; default full = no row used, no overlay) ----
+# ---- Player setting `scenery` (nps5 run --scenery reduced|minimal|balanced|performance|custom:...; default full = no row used, no overlay) ----
 # One row per level and preset. src= is the sha256 of the level file the row was made for (another game version: no overlay, one warning).
 # minimal = reduced since v1.4.4: the moss family it also removed carries collision bodies (Astro could fall through).
-# keep= (v1.4.4) = models never removed although a drop= key matches them (the grass_bump family, 12 objects, carries collision shapes): 1058 of 1070 stay removed.
+# keep= (v1.4.4) = models never removed although a drop= key matches them (one model family, 12 objects, carries collision shapes): 1058 of 1070 stay removed.
 # drop= keys are <length>:<first 16 hex of sha256(model-name prefix of that length)>: no asset names in the repository.
 # The generated copy is mounted over the game folder by the runtime (NPS5_OVERLAY_DIR); the game folder is never written. Why: games/PPSA21564/README.md, Settings.
 scenery	hero_ape_escape	reduced	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7	keep=20:e0e9ae7d18a3dd97
 scenery	hero_ape_escape	minimal	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7	keep=20:e0e9ae7d18a3dd97
+
+# Category rows (perf mode; `nps5 run --scenery balanced|performance|custom:<cat>[+<cat>]`, and the hotkeys with --scenery-keys on).
+# <level> <category> src=<sha256 of that file> class=bg drop=<len>:<hash16> [file=<len>:<hash16> of the sub-level file's path below the level folder]
+# [strip=suspend_group: an object that only a streaming group's Targets list mentions may go; its id leaves the list]. One row per level, file
+# and category. Keys are hashes of model-name prefixes of collision-free models only (a test pins the two families that carry collision bodies).
+# `reduced` / `minimal` of the Apes level keep their legacy rows above (same bytes as v1.4.x); every other setting reads these rows.
+scenery	hero_ape_escape	flowers	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=8:667db8bd0f97712a,11:352646403a1f453c
+scenery	hero_ape_escape	grass	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=17:77fa94763aba15a6,11:0f4cacc1322c857b
+scenery	hero_ape_escape	moss	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=8:b5549eda70c27383
+scenery	hero_ape_escape	other	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=8:aa20bda13a82603c,8:524b8ecec40aa7e4
+
+scenery	underwater_aerial_garden	flowers	src=6ef47d87f9abca7e482ab8cf2e8aa9e0c882e5934803f1a8220ca9942d674df8	class=bg	drop=8:667db8bd0f97712a	file=40:85e69cbdd48c4d05	strip=suspend_group
+scenery	underwater_aerial_garden	flowers	src=3819560bb4b3b6a554323cd461ab0b0d104efb7f4e43909a40b91a185e63dbf5	class=bg	drop=8:667db8bd0f97712a	file=40:041e2c3f38e5ca1a
+scenery	underwater_aerial_garden	grass	src=6ef47d87f9abca7e482ab8cf2e8aa9e0c882e5934803f1a8220ca9942d674df8	class=bg	drop=8:422bccc373b22a6d	file=40:85e69cbdd48c4d05	strip=suspend_group
+scenery	underwater_aerial_garden	grass	src=3819560bb4b3b6a554323cd461ab0b0d104efb7f4e43909a40b91a185e63dbf5	class=bg	drop=8:422bccc373b22a6d	file=40:041e2c3f38e5ca1a
+scenery	underwater_aerial_garden	moss	src=3819560bb4b3b6a554323cd461ab0b0d104efb7f4e43909a40b91a185e63dbf5	class=bg	drop=8:b5549eda70c27383	file=40:041e2c3f38e5ca1a
+scenery	underwater_aerial_garden	other	src=6ef47d87f9abca7e482ab8cf2e8aa9e0c882e5934803f1a8220ca9942d674df8	class=bg	drop=8:628f29431d10e86c,8:eb42c3596e81aa3e,19:5202d26d2e4d95c9,17:802132ec88153d81,17:82b999c3d0be54ed,17:f4cb1deb0e79a465	file=40:85e69cbdd48c4d05	strip=suspend_group
+scenery	underwater_aerial_garden	other	src=b2d5f51399aa8c0cf1e45bcdb649f03482b3e863b8bbf462a4084d7ab6cdcef5	class=bg	drop=8:eb42c3596e81aa3e,8:7e029af1c93c89e7	file=40:3af6275318223a8e
+scenery	underwater_aerial_garden	other	src=3819560bb4b3b6a554323cd461ab0b0d104efb7f4e43909a40b91a185e63dbf5	class=bg	drop=8:628f29431d10e86c,8:eb42c3596e81aa3e	file=40:041e2c3f38e5ca1a
+
+# Presets: <preset> <category>[=<keep percent of that category's removable objects>]. minimal == reduced (big moss and small rocks carry collision
+# bodies and are in no preset). balanced keeps half of the flowers and half of the grass (the same objects every run).
+sceneryset	reduced	flowers,grass
+sceneryset	minimal	flowers,grass
+sceneryset	balanced	flowers=50,grass=50
+sceneryset	performance	flowers,grass,moss,other
 
 # ---- Level fix (default ON; NPS5_LEVELFIX=0 turns it off): Apes on the Loose, 6th catch ----
 # The 6th catch fires the boss-start chain; the delay trigger that starts the statue sequence waits 0.6 s, so at our frame rates the sequence starts

@@ -251,7 +251,7 @@ class Profile(unittest.TestCase):
         fx = S.fixes_for(self.rows("PPSA21564")); self.assertEqual(len(fx), 1)
         self.assertEqual((fx[0]["level"], fx[0]["attr"], fx[0]["old"], fx[0]["new"]), ("hero_ape_escape", "EnterDelay", "0.6", "8.0"))
         sc = [S.parse_row(r) for r in [l.rstrip("\n").split("\t")[1:] for l in open(os.path.join(REPO, "games", "PPSA21564", "game.tsv")) if l.startswith("scenery\t")]]
-        self.assertTrue(all(r["src"] == fx[0]["src"] for r in sc))              # one level file version for both kinds of row
+        self.assertTrue(all(r["src"] == fx[0]["src"] for r in sc if r["level"] == fx[0]["level"]))     # one level file version for both kinds of row (Apes; Sky Garden has its own files)
 
     def test_no_object_name_in_the_rows(self):
         bad = re.compile(r"trigger_start|area_statue|statue_rail|joint88")

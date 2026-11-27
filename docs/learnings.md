@@ -165,3 +165,15 @@ Secondary leads from these results (not yet tried or still open):
    draw count.
 6. Memory limits are findings, not obstacles. The two biggest memory wins came from asking what the 3 GiB *was*.
 7. Write the negative result down. Half of this page is the reason the other half exists.
+
+## Level-data thinning, 2026-11-27 (perf mode)
+
+1. A key that matches a model by name prefix does not see collision: check the model's mesh file (a rigid-body shape) for every model a key can
+   match, not only for the objects you meant. The shipped `reduced` still removes 12 collision-bodied objects in the Apes level because of this.
+2. A streaming group's `Targets` list is a reference that does not mean "needed": taking the id out of the list and removing the object is safe
+   (USER-verified in Sky Garden); every other mention (Blockers, links, prefab roots) still keeps the object.
+3. The generator and the row maker are two programs: prove them against each other on the real file (same removed counts, same bytes as the
+   overlay the USER already played) before a row ships.
+4. A symlink swap (`os.replace` of a new link) is atomic for a reader that opens the path in a loop; a level load that opens a file twice can
+   still see two versions (one press during loading is a USER test item).
+

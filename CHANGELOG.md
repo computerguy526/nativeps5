@@ -13,6 +13,11 @@ pinned commits are in [components.lock](components.lock).
 - **ASTRO BOT scenery (`reduced` / `minimal`, "Apes on the Loose"): 12 more collision objects stay.** The grass-bump models have collision shapes and were removed with the grass tufts, which could take away ground Astro stands on. A new optional `keep=` word on a scenery row (hashes of model-name prefixes, no names) excludes them: 1,058 of the 1,070 objects are still removed, 12 stay (checked against the level file of this game version). Profile only; no retranslate, no shader-cache re-prepare. Unit-tested (parser, keep, real-file count, no preset drops a collision-family key).
 - **ASTRO BOT `scenery minimal` ("Apes on the Loose"): no longer removes the moss patches.** They carry collision bodies, so removing them could take away ground Astro stands on. `minimal` is now the same as `reduced` (flowers and grass tufts). Profile only (`games/PPSA21564/game.tsv`); no retranslate, no shader-cache re-prepare. Unit-tested (`test_scenery`).
 - **Fixes to v1.4.3 switches:** `NPS5_LEVELFIX=0` (flag, `--env` or profile) now reaches the game runtime (it was dropped from the launch plan, so only the shell environment worked); the scenery overlay merge follows symlinked sub-folders of your own overlay; README and switch-table wording corrected.
+- ASTRO BOT performance mode (opt-in, off by default): `nps5 run --scenery balanced|performance|custom:flowers+grass...` thins flowers, grass,
+  small moss and other decoration in "Apes on the Loose" and Sky Garden (several level files per level, streaming-group lists kept consistent,
+  `balanced` = half of the flowers and grass). `--scenery-keys on` adds the hotkeys F3 / F4 / F5 / F10 / F12 with an on-screen toast (Kyty only;
+  config-gated, the codegen fingerprint is unchanged). The shipped `reduced` / `minimal` output is byte-identical to v1.4.3. Effect not measured yet.
+  Unit-tested (`test_scenery`, `test_scenery_live`, Kyty `scene_skip_tests`).
 
 ## v1.4.3
 

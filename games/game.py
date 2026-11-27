@@ -220,6 +220,14 @@ def v_scenery(v, a):
         sp = importlib.util.spec_from_file_location("nps5_scenery", os.path.join(REPO, "scripts", "nps5lib", "scenery.py"))
         m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); m.parse_row(v)
     except ValueError as e: return str(e)
+def _sc_call(fn, v):
+    try:
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("nps5_scenery", os.path.join(REPO, "scripts", "nps5lib", "scenery.py"))
+        m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); getattr(m, fn)(v)
+    except ValueError as e: return str(e)
+def v_sceneryset(v, a): return _sc_call("parse_set", v)
+def v_drawskip(v, a): return _sc_call("parse_skip", v)
 def v_levelfix(v, a):
     try:
         import importlib.util
@@ -231,7 +239,7 @@ def v_stage(v, a): return None if len(v) == 1 and v[0] in STAGES else "S0..S8 ex
 VALIDATORS = {"text": v_text, "id": v_id, "int": v_int, "hex": v_hex, "wxh": v_wxh, "wxh_opt": v_wxh_opt, "enum": v_enum,
               "version": v_version, "words": v_words, "relpath": v_relpath, "build": v_build, "lineage": v_lineage,
               "kvwords": v_kvwords, "envrow": v_envrow, "forbidrow": v_forbid, "marker": v_marker, "runsecs": v_runsecs,
-              "cache": v_cache, "ue5row": v_ue5, "scenery": v_scenery, "levelfix": v_levelfix, "addrbuild": v_addrbuild, "stage": v_stage}
+              "cache": v_cache, "ue5row": v_ue5, "scenery": v_scenery, "sceneryset": v_sceneryset, "drawskip": v_drawskip, "levelfix": v_levelfix, "addrbuild": v_addrbuild, "stage": v_stage}
 
 
 def mem_limit_error(k, val, limit=MEM_LIMIT_MAX):

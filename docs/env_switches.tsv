@@ -1825,6 +1825,9 @@ KYTY_SAROS_SAMPLE_LOD0	kyty		src/graphics/shader/recompiler/sarosHandShaders.h
 KYTY_SAVE_LOAD_MAX_DEFER_S	kyty		src/common/nps5Frame.h
 KYTY_SAVE_LOAD_QUIET_S	kyty	periodic cache saves held during and N s after a level load (v1.1.2 profile default 20)	src/common/nps5Frame.h
 KYTY_SAVE_LOAD_VFS_MBS	kyty		src/common/nps5Frame.h
+KYTY_SCENE_KEYS	kyty	`1` = scenery hotkeys F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other decoration (default off: the keys reach the game); set by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
+KYTY_SCENE_SKIP_FILE	kyty	path of the table of presets and scene-gated draw-skip program pairs (default off); written by `nps5 run --scenery-keys on`	src/graphics/host_gpu/renderer/sceneSkip.cpp
+KYTY_SCENE_STATE_FILE	kyty	path Kyty writes (atomically) on every scenery key press for the launcher's watcher (seq, preset, keep percent per category)	src/graphics/host_gpu/renderer/sceneSkip.cpp
 KYTY_SERVICE_PRIORITY	kyty		src/common/threads.cpp
 KYTY_SET_REUSE_FRESH	kyty		src/graphics/host_gpu/renderer/pipeline/descriptors.cpp
 KYTY_SHADER_COUNT_LOG	kyty		src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
@@ -2316,7 +2319,9 @@ NPS5_RUN_TAG	nativeps5	name of the run's output folder under NPS5_SCRATCH/runs/<
 NPS5_SAVEDATA_DIR	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SAVEDATA_PREPARE_RW	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
 NPS5_SAVEDATA_TRACE	ps5recomp		pkg/runtime/modules/libSceSaveData/ps4_savedata.c
-NPS5_SCENERY	nativeps5	`full` (default) | `reduced` | `minimal`: the player's scenery setting, read by `nps5 run` (same as --scenery); thins level objects the profile has rows for through an overlay folder	scripts/nps5lib/run.py
+NPS5_SCENERY	nativeps5	`full` (default) | `reduced` | `minimal` | `balanced` | `performance` | `custom:<cat>[+<cat>...]`: the player's scenery setting, read by `nps5 run` (same as --scenery); thins level objects the profile has rows for through an overlay folder	scripts/nps5lib/run.py
+NPS5_SCENERY_EXTRA	nativeps5	local file of extra `scenery` / `sceneryset` / `drawskip` rows (same grammar as the profile; levels nobody has validated yet)	scripts/nps5lib/run.py
+NPS5_SCENERY_KEYS	nativeps5	`1` / `on` = the scenery hotkeys (same as --scenery-keys on; Kyty only; default off)	scripts/nps5lib/run.py
 NPS5_SCENE_OPEN_KEY	nativeps5		games/game.py
 NPS5_SCENE_OPEN_KEY	ps5recomp		pkg/runtime/kernel/vfs/ps4_vfs.c
 NPS5_SCENE_TAG_SKIP	nativeps5	scene name prefixes that never become the current scene (default ui_; profile key scene_tag_skip)	games/game.py

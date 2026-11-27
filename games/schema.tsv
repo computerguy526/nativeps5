@@ -25,7 +25,9 @@
 #   cache     kind=kyplst|journal|none [dir=player] [code=ue5] [limit_mb=<n>] [app_ver=<x.y.z>]   (journal = no list: a stable per-player dir the title fills while played)
 #   ue5row    decoder=<0x guest vaddr> fp=<16 hex FNV-1a 64 of the 64 bytes at it> abi=oodlelz14 (all three; needs cache code=ue5, which needs kind=kyplst dir=player)
 #   addrbuild guest address (hex) [build=<version or eboot prefix>]
-#   scenery   <level> <preset> src=<sha256> class=<class> drop=<len>:<hash16>[,...] [keep=<len>:<hash16>[,...]]; keep = models never removed (collision shapes); preset = reduced | minimal; names only as hashes of model-name prefixes (scripts/nps5lib/scenery.py)
+#   scenery   <level> <preset|category> src=<sha256> class=<class> drop=<len>:<hash16>[,...] [file=<len>:<hash16>] [strip=suspend_group] (category rows) or [keep=<len>:<hash16>[,...]] (legacy rows: models never removed, collision shapes); preset = reduced | minimal (legacy 5-word form), category = flowers | grass | moss | other; file= = hash of a sub-level file's path below the level folder (absent = level.lvx); names only as hashes (scripts/nps5lib/scenery.py)
+#   sceneryset <preset> <cat>[=<keep percent>][,<cat>...]; which categories a preset removes (reduced | minimal | balanced | performance); =N keeps N percent of that category's removable objects
+#   drawskip  <level> <cat>[+<cat>] vs=<hash16> ps=<hash16|->; Kyty instant draw skip pair (scene-gated; only with `nps5 run --scenery-keys on`)
 #   levelfix  <level> src=<sha256> class=<class> object=<len>:<hash16> attr=<Attribute> old=<v> new=<v>; one level-file value, applied to your own copy through the overlay (default on, NPS5_LEVELFIX=0 off; scripts/nps5lib/scenery.py)
 #   stage     S0..S8 (evidence per stage is checked: see game.py STAGE_EVIDENCE)
 # Free keys: fact.<anything> is never read by a tool (people and the README only). Any other unknown key is an error.
@@ -75,6 +77,8 @@ blank_fail_s	int	no	one	-	-	run	early-stop black threshold, seconds
 stall_fail_s	int	no	one	-	-	run	early-stop stall threshold, seconds
 cache	cache	no	one	-	-	cache	which prepare step the title has (code=ue5: the list's <runtime> shaders get their code from the game's own shader library at start)
 ue5	ue5row	no	one	-	-	cache, run	UE5 shader library decoder: guest vaddr, fingerprint, call convention (code=ue5 titles)
+sceneryset	sceneryset	no	many	-	-	run	preset table of the `scenery` setting: which categories (and what keep percent) reduced / minimal / balanced / performance remove
+drawskip	drawskip	no	many	-	-	run, kyty	instant draw skip: one guest vertex/pixel program pair that draws only objects of the named categories in that level (the table Kyty reads with the scenery keys)
 scenery	scenery	no	many	-	-	run	the player's `scenery` setting (nps5 run --scenery): rows that say which level objects a preset removes; no row = the setting does nothing for the title
 levelfix	levelfix	no	many	-	-	run	level-file attribute fixes (nps5 run, default on; NPS5_LEVELFIX=0 turns off): one object (by hashed name suffix), one attribute, expected old value, new value; a game version whose level file hashes differently gets no overlay and one warning
 uecvars	relpath	no	one	-	-	run	Unreal console-variable table

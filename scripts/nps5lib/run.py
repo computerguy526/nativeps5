@@ -3,15 +3,19 @@
 
   nps5 run <id> [--scene NAME] [--until SPEC[+N]] [--secs N] [--class func|perf] [--tag T]
                [--gpu kyty|anyps5] [--bin PATH] [--patch NAMES] [--arm LABEL:KEY=VAL,...]
-               [--env KEY=VAL]... [--workdir NAME] [--save NAME] [--scenery full|reduced|minimal] [--play] [--dry-run]
+               [--env KEY=VAL]... [--workdir NAME] [--save NAME] [--scenery full|reduced|minimal|balanced|performance|custom:<cat>[+<cat>]] [--scenery-keys on|off] [--play] [--dry-run]
 
 Environment, lowest to highest: safety base < profile (games/<id>/game.tsv: preset, rows, schema keys, scene rows)
 < titles/<id>.env ENV < scene pad < --arm < --env. The final set is then checked (env_forbidden, GPU profiling
 ban, memory limit never above the machine's, run length cap, one title at a time, no second GPU process).
 --scenery P  the player's scenery setting (also NPS5_SCENERY in the environment, `--env`, or titles/<id>.env). `full` (default, or
-unset) changes nothing. `reduced` / `minimal` thin the level objects the title's profile has `scenery` rows for: a copy of your own level
-file is generated under <scratch>/scenery/<id>/<preset>/ and mounted by the runtime (NPS5_OVERLAY_DIR); the game folder is never written.
-A source that is not the file the row was made for gets no overlay and one warning. Refused (exit 2) together with your own NPS5_OVERLAY_DIR.
+unset) changes nothing. `reduced` / `minimal` / `balanced` / `performance` / `custom:flowers+grass...` thin the level objects the title's profile
+has `scenery` rows for: a copy of your own level files is generated under <scratch>/scenery/<id>/<setting>/ and mounted by the runtime
+(NPS5_OVERLAY_DIR); the game folder is never written. A file that is not the one the row was made for is left alone with one warning.
+Combined with your own NPS5_OVERLAY_DIR (your file wins on the same path).
+--scenery-keys on  (NPS5_SCENERY_KEYS=1; default off; Kyty only) hotkeys F3 preset cycle, F4 flowers, F5 grass, F10 small moss, F12 other
+decoration: the overlay becomes a folder of links the launcher repoints when a key is pressed; the level-data part applies when the level
+is entered again, the instant draw skip (profile `drawskip` rows) on the next frame. NPS5_SCENERY_EXTRA=<file>: local-only extra rows.
 --play  a person playing at the keyboard, not a test: sound on, no --until target and no early stop by the watcher, up
 to 7200 s (the default) without NPS5_RUN_REASON. Every other safety rule stays. Not for scripts or agents: the 180 s cap
 is what bounds an unattended run.
@@ -153,6 +157,7 @@ class Plan:
     """Everything decided before a run. Plain data so tests can inspect it."""
     def __init__(self):
         self.env = {}; self.layers = {}; self.order = []; self.warnings = []
+        self.live = None                       # (scenery.Live, state file) when the scenery keys are on
     def put(self, k, v, layer):
         if k not in self.env:
             self.order.append(k)
@@ -380,50 +385,102 @@ def build_patched(sel, p, environ, runner=None):
         raise Refuse("nps5 patch failed (rc %d); nothing was run" % rc, 78)
 
 
-def scenery_overlay(plan, p, opts, environ, scratch, app0, dry):
-    """The `scenery` setting and the profile's `levelfix` rows (scripts/nps5lib/scenery.py): both end in ONE generated level file in
-    one overlay folder (NPS5_OVERLAY_DIR). `full` / unset scenery and no level-fix rows (or NPS5_LEVELFIX=0): nothing is added (the
+def _extra_rows(path):
+    """NPS5_SCENERY_EXTRA=<file>: local-only `scenery` / `sceneryset` / `drawskip` rows (same grammar as the profile), added to the title's.
+    The rows of levels nobody has validated live here until they are reviewed; the public profile never carries them."""
+    out = {"scenery": [], "sceneryset": [], "drawskip": []}
+    try:
+        with open(path) as f:
+            for n, ln in enumerate(f, 1):
+                ln = ln.rstrip("\n")
+                if not ln.strip() or ln.lstrip().startswith("#"):
+                    continue
+                c = ln.split("\t")
+                if c[0] not in out:
+                    raise Refuse("NPS5_SCENERY_EXTRA %s:%d: only scenery, sceneryset and drawskip rows (got %r)" % (path, n, c[0]), 78)
+                out[c[0]].append(c[1:])
+    except OSError as e:
+        raise Refuse("NPS5_SCENERY_EXTRA %s: %s" % (path, e.strerror or e), 78)
+    return out
+
+
+def scenery_overlay(plan, p, opts, environ, scratch, app0, dry, gpu="kyty"):
+    """The `scenery` setting and the profile's `levelfix` rows (scripts/nps5lib/scenery.py): both end in ONE generated level file per level
+    file in one overlay folder (NPS5_OVERLAY_DIR). `full` / unset scenery and no level-fix rows (or NPS5_LEVELFIX=0): nothing is added (the
     launch is byte-identical to a launch without the feature). Level fixes are ON whenever the profile has rows for the title; a game
     version the rows were not made for gets no overlay and one warning. A player's own NPS5_OVERLAY_DIR (or <userdata>/overlay) is
     combined with the generated folder (symlinks; the player's file wins on the same path). The setting words are removed from the
-    title's environment."""
+    title's environment.
+    Setting: full | reduced | minimal | balanced | performance | custom:<cat>[+<cat>...]. With `--scenery-keys on` (NPS5_SCENERY_KEYS=1; default
+    off; Kyty only) the overlay is a folder of symlinks (scenery.Live), Kyty gets KYTY_SCENE_KEYS / KYTY_SCENE_STATE_FILE /
+    KYTY_SCENE_SKIP_FILE, and execute() runs a watcher that repoints the links when a key is pressed."""
     sc = _scenery()
     setting = opts.get("scenery") or plan.env.get("NPS5_SCENERY") or environ.get("NPS5_SCENERY") or "full"
+    keyset = opts.get("scenery_keys") or plan.env.get("NPS5_SCENERY_KEYS") or environ.get("NPS5_SCENERY_KEYS") or "off"
     fixset = plan.env.get("NPS5_LEVELFIX", environ.get("NPS5_LEVELFIX", "1"))
+    extra = plan.env.get("NPS5_SCENERY_EXTRA") or environ.get("NPS5_SCENERY_EXTRA")
     # NPS5_SCENERY is read only here and is removed; NPS5_LEVELFIX stays when the plan carries it (--env, ENV=, profile word):
     # the runtime (recomp nps5_levelfix.h, every launch path) reads it too, so `--env NPS5_LEVELFIX=0` must reach it.
-    if "NPS5_SCENERY" in plan.env:
-        del plan.env["NPS5_SCENERY"]; plan.order.remove("NPS5_SCENERY"); plan.layers.pop("NPS5_SCENERY", None)
-    if setting not in sc.PRESETS:
-        raise Refuse("scenery %r: full, reduced or minimal" % setting, 2)
+    for k in ("NPS5_SCENERY", "NPS5_SCENERY_KEYS", "NPS5_SCENERY_EXTRA"):
+        if k in plan.env:
+            del plan.env[k]; plan.order.remove(k); plan.layers.pop(k, None)
+    if not sc.valid_setting(setting):
+        raise Refuse("scenery %r: full, reduced, minimal, balanced, performance or custom:<cat>[+<cat>...] (cat: %s)" % (setting, ", ".join(sc.CATS)), 2)
+    if keyset not in ("on", "off", "1", "0"):
+        raise Refuse("scenery keys %r: on or off" % keyset, 2)
+    keys = keyset in ("on", "1")
     if fixset not in ("0", "1"):
         raise Refuse("NPS5_LEVELFIX %r: 0 or 1" % fixset, 2)
-    rows, fixes = [], []
+    rows, fixes, allrows, sets, skips = [], [], [], [], []
     try:
-        if setting != "full":
-            prows = p.get("scenery")
-            if not prows:
-                plan.warnings.append("scenery: %s has no scenery rows; the setting %s does nothing" % (p.id, setting))
-            else:
-                rows = sc.rows_for(prows, setting)
-                if not rows:
-                    plan.warnings.append("scenery: %s has no rows for %s; the setting does nothing" % (p.id, setting))
+        if setting != "full" or keys:
+            prows, srows, drows = list(p.get("scenery") or []), list(p.get("sceneryset") or []), list(p.get("drawskip") or [])
+            if extra:
+                x = _extra_rows(extra); prows += x["scenery"]; srows += x["sceneryset"]; drows += x["drawskip"]
+            allrows = [sc.parse_row(c) for c in prows]; sets = [sc.parse_set(c) for c in srows]; skips = [sc.parse_skip(c) for c in drows]
+            if setting != "full":
+                if not prows:
+                    plan.warnings.append("scenery: %s has no scenery rows; the setting %s does nothing" % (p.id, setting))
+                else:
+                    rows = sc.effective_rows(allrows, sets, setting)
+                    if not rows:
+                        plan.warnings.append("scenery: %s has no rows for %s; the setting does nothing" % (p.id, setting))
         if fixset == "1":
             fixes = sc.fixes_for(p.get("levelfix") or [])
     except ValueError as e:
         raise Refuse("games/%s/game.tsv scenery/levelfix row: %s" % (p.id, e), 78)
-    if not rows and not fixes:
+    if keys:
+        catrows = [r for r in allrows if r["cat"]]
+        if gpu != "kyty":
+            plan.warnings.append("scenery: the keys need the Kyty GPU backend (gpu=%s); the setting works without them" % gpu); keys = False
+        elif not catrows:
+            plan.warnings.append("scenery: %s has no category rows; the keys do nothing" % p.id); keys = False
+    if not keys and not rows and not fixes:
         return
-    what = " + ".join(x for x in (setting + " scenery" if rows else "", "level fixes" if fixes else "") if x)
+    what = " + ".join(x for x in (setting + " scenery" if rows else "", "level fixes" if fixes else "", "keys" if keys else "") if x)
     user = plan.env.get("NPS5_OVERLAY_DIR")
     if not user and plan.env.get("NPS5_USERDATA_DIR") and os.path.isdir(os.path.join(plan.env["NPS5_USERDATA_DIR"], "overlay")):
         user = os.path.join(plan.env["NPS5_USERDATA_DIR"], "overlay")     # the runtime's implicit overlay: an explicit one replaces it
-    target = sc.overlay_dir(scratch, p.id, setting, bool(fixes))
+    name = setting if not setting.startswith("custom:") else "custom-" + setting[7:]
+    live = None
+    if keys:
+        live = sc.Live(app0, scratch, p.id, catrows, fixes)
+        target = live.dir
+    else:
+        target = sc.overlay_dir(scratch, p.id, name, bool(fixes))
     if dry:
         plan.put("NPS5_OVERLAY_DIR", target, "scenery")
+        if keys: _scenery_key_words(plan, sc, scratch, p.id)
         plan.warnings.append("scenery: %s (dry run: not generated%s)" % (what, "; combined with " + user if user else "")); return
     try:
-        target, lines = sc.generate(app0, scratch, p.id, setting if rows else "full", rows, fixes)
+        if keys:
+            mask = sc.preset_mask(sets, setting)
+            _, lines = live.repoint(mask)
+            lines = ["%s: live links for %d files, start mask %s" % (p.id, len(live.items), sc.mask_text(mask))] + live.warnings + lines
+            cycle = [(x["preset"], dict(x["cats"])) for x in sets if x["preset"] in ("balanced", "performance")]
+            sc.write_skip_table(_scene_paths(sc, scratch, p.id)[1], cycle, {c: mask.get(c, 100) for c in sc.CATS}, skips)
+        else:
+            target, lines = sc.generate(app0, scratch, p.id, name if rows else "full", rows, fixes)
         if user:
             merged = os.path.join(scratch, "scenery", p.id, "merged")
             target, left_out = sc.merge_overlay(target, user, merged)
@@ -433,7 +490,21 @@ def scenery_overlay(plan, p, opts, environ, scratch, app0, dry):
         plan.warnings.append("WARNING: %s not applied, the game starts unchanged: %s" % (what, e if isinstance(e, sc.Skip) else (e.strerror or e)))
         return
     plan.put("NPS5_OVERLAY_DIR", target, "scenery")
+    if keys:
+        _scenery_key_words(plan, sc, scratch, p.id)
+        plan.live = (live, _scene_paths(sc, scratch, p.id)[0])
     plan.warnings += ["scenery: %s: %s" % (what, l) for l in lines]
+
+
+def _scene_paths(sc, scratch, tid):
+    """-> (state file, skip table) of the live keys: beside the live folder, never inside it (everything inside is mounted)."""
+    d = os.path.join(scratch, "scenery", tid)
+    return os.path.join(d, "live.state"), os.path.join(d, "live.skip.tsv")
+
+
+def _scenery_key_words(plan, sc, scratch, tid):
+    st, tb = _scene_paths(sc, scratch, tid)
+    plan.put("KYTY_SCENE_KEYS", "1", "scenery"); plan.put("KYTY_SCENE_STATE_FILE", st, "scenery"); plan.put("KYTY_SCENE_SKIP_FILE", tb, "scenery")
 
 
 def compose(tid, opts, environ=None, g=None):
@@ -591,7 +662,7 @@ def compose(tid, opts, environ=None, g=None):
     if "NPS5_TITLE_RUN" in plan.env:
         plan.env["NPS5_TITLE_RUN"] = "1"
     # 5b. the player's scenery setting (off unless asked: nothing is added)
-    scenery_overlay(plan, p, opts, environ, scratch, titles.get("APP0") or "", bool(opts.get("dry")))
+    scenery_overlay(plan, p, opts, environ, scratch, titles.get("APP0") or "", bool(opts.get("dry")), gpu)
     # checks and binary
     check_final(g, p, plan, secs, environ, gpu)
     plan.tid, plan.tag, plan.cls, plan.gpu, plan.scene, plan.secs, plan.until = tid, tag, cls, gpu, scene, secs, until
@@ -1033,7 +1104,7 @@ def dry_run_text(plan, bininfo=None):
 def parse_args(argv):
     opts = dict(env=[]); pos = []; i = 0
     VAL = {"--scene": "scene", "--until": "until", "--secs": "secs", "--class": "class", "--tag": "tag", "--gpu": "gpu", "--bin": "bin",
-           "--patch": "patch", "--arm": "arm", "--workdir": "workdir", "--save": "save", "--scenery": "scenery"}
+           "--patch": "patch", "--arm": "arm", "--workdir": "workdir", "--save": "save", "--scenery": "scenery", "--scenery-keys": "scenery_keys"}
     while i < len(argv):
         a = argv[i]
         if a in VAL or a == "--env":
