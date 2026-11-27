@@ -477,7 +477,7 @@ class AstroComputeAliasRowTests(unittest.TestCase):
         self.assertEqual(len(old), 1)                                    # the old key row stays for every other class / build
         self.assertEqual((old[0][0], old[0][1], old[0][3]), (g17[0][0], g17[0][1], g17[0][3]))     # same program, spec and verified text
         keys = {r[2] for r in self.rows()}
-        self.assertNotIn("33a534f1bb01ad53", keys); self.assertNotIn("7f80c1e653ea1124", keys)      # not faster / FAIL: no row
+        self.assertNotIn("33a534f1bb01ad53", keys)      # not faster: no row (7f80c1e6, the fba4b753 alias, is a g16 row since bestrows)
 
     def test_two_compute_rows_carry_rule_ulp4(self):
         """m4checks 2026-11-27 (USER): 83d00d01 / f55326d9 (relaxed mul+add vs explicit fma, at most 1 ulp on sane inputs) are rule ulp:4, nothing else is."""
@@ -488,20 +488,66 @@ class AstroComputeAliasRowTests(unittest.TestCase):
     def test_alias_key_has_a_guest_sidecar_entry(self):
         d = os.path.join(game.REPO, "games", "PPSA21564")
         guests = {l.split("\t")[1]: l.split("\t")[2] for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if l.startswith("cs\t")}
+        self.assertEqual(guests["7f80c1e653ea1124"], guests["fba4b753afd16fb8"])
         self.assertEqual(guests["68d59c988691ec1a"], guests["ef0b262245d9f2dc"])
         self.assertEqual(guests["b98b48c2745e55a7"], guests["84b2db9850828961"])
 
     def test_g16_alias_row_only_for_the_kernel_that_is_faster_on_the_laptop(self):
-        """osgaps 2026-11-27, M4 Pro laptop macOS 27.2.1: 84b2db98 > b98b48c2 timed B/A 0.883 0.879 0.881; ef0b2622 (1.09) and e1216d46 (1.13) slower, fba4b753 FAIL."""
+        """osgaps 2026-11-27, M4 Pro laptop macOS 27.2.1: 84b2db98 > b98b48c2 timed B/A 0.883 0.879 0.881; ef0b2622 (1.09) and e1216d46 (1.13) slower. bestrows: fba4b753 > 7f80c1e6 pair PASS with the final tool, B/A 0.927 0.927 0.902."""
         al = [r for r in self.rows() if r[7] == "g16" and r[5].startswith("exact+rekey")]
-        self.assertEqual([(r[2], r[5], r[8], r[9]) for r in al], [("b98b48c2745e55a7", "exact+rekey84b2db98", "exact", "faster")])
+        self.assertEqual([(r[2], r[5], r[8], r[9]) for r in al], [("b98b48c2745e55a7", "exact+rekey84b2db98", "exact", "faster"),
+                                                                  ("7f80c1e653ea1124", "exact+rekeyfba4b753", "exact", "faster")])
         self.assertLess(float(al[0][10]), 1.0)
+        self.assertEqual(al[1][10], "0.927")                                  # worst of 0.927 0.927 0.902 (18 us kernel)
+        fb = [r for r in self.rows() if r[2] == "fba4b753afd16fb8"]
+        self.assertEqual(len(fb), 1)                                          # the old key row stays
+        self.assertEqual((fb[0][0], fb[0][1], fb[0][3], fb[0][4]), (al[1][0], al[1][1], al[1][3], al[1][4]))
         old = [r for r in self.rows() if r[2] == "84b2db9850828961"]
         self.assertEqual(len(old), 1)
         self.assertEqual((old[0][0], old[0][1], old[0][3]), (al[0][0], al[0][1], al[0][3]))
         keys = {r[2] for r in self.rows()}
-        for k in ("33a534f1bb01ad53", "7f80c1e653ea1124"): self.assertNotIn(k, keys)
+        self.assertNotIn("33a534f1bb01ad53", keys)
         self.assertEqual([r[7] for r in self.rows() if r[2] == "68d59c988691ec1a"], ["g17"])    # ef0b2622's alias stays g17 only (slower on g16)
+
+
+
+class AstroBestRowsTests(unittest.TestCase):
+    """bestrows 2026-11-27 (USER): 5 g16 rows from the BEST / foliage candidate set (emitter modes only) and 3 g18 rows of g16 rows that are FASTER on M6."""
+    def rows(self):
+        p = os.path.join(game.REPO, "games", "PPSA21564", "metal-gfx-pairs.tsv")
+        return [l.split("\t") for l in open(p).read().splitlines() if l.startswith("gfx\t")]
+
+    def test_g16_rows_exact_faster_and_in_the_guest_sidecar(self):
+        g = [r for r in self.rows() if r[14] == "autoval,bestrows-os27"]
+        self.assertEqual(sorted((r[5][:8], r[6][:8], r[15], r[16], r[17], r[18]) for r in g), sorted([
+            ("5fa94a60", "e692d52d", "fix6+vsperf", "g16", "exact", "faster"), ("af60b35a", "20a150f7", "fix6+vsperf", "g16", "exact", "faster"),
+            ("509e2bf1", "e1ced2aa", "fix6+vsperf", "g16", "exact", "faster"), ("671e90bf", "0a7adc2a", "fix6+vsperf", "g16", "exact", "faster"),
+            ("91f49fd3", "9b1fe280", "fix6+perfr+vsperf", "g16", "exact", "faster")]))
+        for r in g:
+            self.assertLess(float(r[19]), 0.95, r[5:7])
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        deny = {l.strip() for l in open(os.path.join(d, "fast-math-deny.txt")) if l.strip() and not l.startswith("#")}
+        guests = [l.split("\t") for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if l.startswith(("vs\t", "fs\t"))]
+        for r in g:
+            self.assertTrue([x for x in guests if x[0] == "vs" and x[1] == r[5]], r[5])
+            fsg = [x for x in guests if x[0] == "fs" and x[1] == r[6]]
+            self.assertTrue(fsg, r[6])
+            for x in fsg:
+                self.assertIn(x[2], deny)
+
+    def test_029f39ac_xf13_text_stays_out(self):
+        """029f39ac/7e08c3be fix6+xf=13 was a candidate (timed FASTER 3x) but its text is a shipgate FAIL (tests/data/valfix_dropped.tsv): no row."""
+        self.assertFalse([r for r in self.rows() if r[7].startswith("f17710c143b574e7")])
+
+    def test_g18_rows_copy_the_g16_text(self):
+        g18 = [r for r in self.rows() if r[14] == "autoval,m6flags-bestrows"]
+        self.assertEqual(sorted((r[5][:8], r[6][:8], r[19]) for r in g18), [("30694d82", "498960f2", "0.6802"), ("9b8c69da", "90c2ee57", "0.9005"), ("e6452675", "70ffd7b9", "0.8308")])
+        for r in g18:
+            self.assertEqual((r[16], r[17], r[18]), ("g18", "exact", "faster"))
+            self.assertLess(float(r[19]), 0.95)
+            twin = [x for x in self.rows() if x[16] == "g16" and x[5] == r[5] and x[6] == r[6]]
+            self.assertEqual(len(twin), 1, r[5:7])
+            self.assertEqual((twin[0][7], twin[0][8], twin[0][15]), (r[7], r[8], r[15]))      # same text, same mode as the g16 row
 
 
 REKEY_ROW_RE = re.compile(r"^rekey-([0-9a-f]{8})-([0-9a-f]{8})(?:,pendval)?$")   # an alias row's whole evidence (the checker allows 48 characters)
@@ -625,7 +671,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
         for r in al:
             by_cls[r[16]] = by_cls.get(r[16], 0) + 1
         self.assertEqual(by_cls, {"*": 5, "g16": 53, "g17": 5, "g18": 34})
-        self.assertEqual(len(rows) - len(al) - len(mesh), 361)               # the v1.4.4 rows are all still there (352 + the 9 mesh rows, plain rows)
+        self.assertEqual(len(rows) - len(al) - len(mesh), 369)               # the v1.4.4 rows are all still there (352 + the 9 mesh rows, plain rows) + 8 bestrows rows
         self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_rows
 
     def test_astro_mesh_rows(self):

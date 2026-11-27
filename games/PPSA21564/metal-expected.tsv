@@ -119,6 +119,9 @@ compute	7d3ffa1bb6858cc0	g18	ship	1
 compute	7f33d0701d77f881	g16	ship	1
 compute	7f33d0701d77f881	g17	ship	1
 compute	7f33d0701d77f881	g18	ship	1
+compute	7f80c1e653ea1124	g16	ship	0
+compute	7f80c1e653ea1124	g17	off:untested-g17	0
+compute	7f80c1e653ea1124	g18	off:untested-g18	0
 compute	8276797668acc694	g16	ship	1
 compute	8276797668acc694	g17	ship	1
 compute	8276797668acc694	g18	ship	1
@@ -442,7 +445,7 @@ gfx	30694d820384704c/2f2339e6280b1910	g17	off:untested-g17	0
 gfx	30694d820384704c/2f2339e6280b1910	g18	off:dropped-correctness:9d9b5ca	0
 gfx	30694d820384704c/498960f26cd2a150	g16	ship	0
 gfx	30694d820384704c/498960f26cd2a150	g17	ship	0
-gfx	30694d820384704c/498960f26cd2a150	g18	off:candidate-g18	0
+gfx	30694d820384704c/498960f26cd2a150	g18	ship	0
 gfx	30694d820384704c/ecadefc9709244a0	g16	off:untested-g16	0
 gfx	30694d820384704c/ecadefc9709244a0	g17	off:untested-g17	0
 gfx	30694d820384704c/ecadefc9709244a0	g18	ship	1
@@ -638,6 +641,9 @@ gfx	4f9d7ec4c065baff/122fbfeace4d1e56	g18	off:dropped-correctness:9d9b5ca	0
 gfx	509e2bf1138c18bc/7e08c3be126f0998	g16	ship	1
 gfx	509e2bf1138c18bc/7e08c3be126f0998	g17	off:untested-g17	0
 gfx	509e2bf1138c18bc/7e08c3be126f0998	g18	ship	1
+gfx	509e2bf1138c18bc/e1ced2aabf3c9e8f	g16	ship	0
+gfx	509e2bf1138c18bc/e1ced2aabf3c9e8f	g17	off:untested-g17	0
+gfx	509e2bf1138c18bc/e1ced2aabf3c9e8f	g18	off:untested-g18	0
 gfx	509e2bf1138c18bc/e22d47f727498dd9	g16	off:untested-g16	0
 gfx	509e2bf1138c18bc/e22d47f727498dd9	g17	off:untested-g17	0
 gfx	509e2bf1138c18bc/e22d47f727498dd9	g18	off:dropped-correctness:9d9b5ca	0
@@ -713,6 +719,9 @@ gfx	5f9cb866ffee5d00/2f2339e6280b1910	g18	off:untested-g18	0
 gfx	5f9cb866ffee5d00/dc9ed6b2db0dcf07	g16	ship	0
 gfx	5f9cb866ffee5d00/dc9ed6b2db0dcf07	g17	off:untested-g17	0
 gfx	5f9cb866ffee5d00/dc9ed6b2db0dcf07	g18	off:slower-g18	0
+gfx	5fa94a602968b374/e692d52d0985bf74	g16	ship	0
+gfx	5fa94a602968b374/e692d52d0985bf74	g17	off:untested-g17	0
+gfx	5fa94a602968b374/e692d52d0985bf74	g18	off:untested-g18	0
 gfx	6131971dd956c85b/44bbb016448a32de	g16	ship	0
 gfx	6131971dd956c85b/44bbb016448a32de	g17	off:untested-g17	0
 gfx	6131971dd956c85b/44bbb016448a32de	g18	ship	0
@@ -746,6 +755,9 @@ gfx	66b4fd65f283473e/e364ee4d1c684587	g18	ship	1
 gfx	66ef26768944bcea/1d32563db057a71b	g16	ship	1
 gfx	66ef26768944bcea/1d32563db057a71b	g17	ship	1
 gfx	66ef26768944bcea/1d32563db057a71b	g18	ship	1
+gfx	671e90bf0ded1c9e/0a7adc2ac6c4ce4e	g16	ship	0
+gfx	671e90bf0ded1c9e/0a7adc2ac6c4ce4e	g17	off:untested-g17	0
+gfx	671e90bf0ded1c9e/0a7adc2ac6c4ce4e	g18	off:untested-g18	0
 gfx	671e90bf0ded1c9e/17f8c067a000746f	g16	off:dropped-correctness:9d9b5ca	0
 gfx	671e90bf0ded1c9e/17f8c067a000746f	g17	off:untested-g17	0
 gfx	671e90bf0ded1c9e/17f8c067a000746f	g18	ship	1
@@ -923,6 +935,9 @@ gfx	91f49fd30947b458/9090a3a662bac1b9	g18	off:dropped-correctness:9d9b5ca	0
 gfx	91f49fd30947b458/9470dc2cc79f4635	g16	off:untested-g16	0
 gfx	91f49fd30947b458/9470dc2cc79f4635	g17	off:untested-g17	0
 gfx	91f49fd30947b458/9470dc2cc79f4635	g18	ship	1
+gfx	91f49fd30947b458/9b1fe280d2be6e18	g16	ship	0
+gfx	91f49fd30947b458/9b1fe280d2be6e18	g17	off:untested-g17	0
+gfx	91f49fd30947b458/9b1fe280d2be6e18	g18	off:untested-g18	0
 gfx	95be7a4afe0639e9/1d32563db057a71b	g16	ship	1
 gfx	95be7a4afe0639e9/1d32563db057a71b	g17	off:untested-g17	0
 gfx	95be7a4afe0639e9/1d32563db057a71b	g18	off:untested-g18	0
@@ -946,7 +961,7 @@ gfx	9b8c69da2d03b05e/7d7cbfab1e584b5c	g17	ship	1
 gfx	9b8c69da2d03b05e/7d7cbfab1e584b5c	g18	off:untested-g18	0
 gfx	9b8c69da2d03b05e/90c2ee57d486eb72	g16	ship	0
 gfx	9b8c69da2d03b05e/90c2ee57d486eb72	g17	ship	0
-gfx	9b8c69da2d03b05e/90c2ee57d486eb72	g18	off:candidate-g18	0
+gfx	9b8c69da2d03b05e/90c2ee57d486eb72	g18	ship	0
 gfx	9e7ca1d0543f2ea9/ff4af8d8efc435d0	g16	ship	1
 gfx	9e7ca1d0543f2ea9/ff4af8d8efc435d0	g17	off:untested-g17	0
 gfx	9e7ca1d0543f2ea9/ff4af8d8efc435d0	g18	off:untested-g18	0
@@ -977,6 +992,9 @@ gfx	a5ae661bb628317b/a855bd3c14a520b9	g18	ship	1
 gfx	abf97253b36aacd1/fd8b19e474c68d10	g16	off:untested-g16	0
 gfx	abf97253b36aacd1/fd8b19e474c68d10	g17	off:untested-g17	0
 gfx	abf97253b36aacd1/fd8b19e474c68d10	g18	ship	0
+gfx	af60b35a092ab7f6/20a150f73700b061	g16	ship	0
+gfx	af60b35a092ab7f6/20a150f73700b061	g17	off:untested-g17	0
+gfx	af60b35a092ab7f6/20a150f73700b061	g18	off:untested-g18	0
 gfx	afb0260edaa9599d/a042407bd5e9c281	g16	off:untested-g16	0
 gfx	afb0260edaa9599d/a042407bd5e9c281	g17	off:untested-g17	0
 gfx	afb0260edaa9599d/a042407bd5e9c281	g18	ship	1
@@ -1168,7 +1186,7 @@ gfx	e53777dc66f2181f/b68f6518a41af2dd	g17	off:untested-g17	0
 gfx	e53777dc66f2181f/b68f6518a41af2dd	g18	off:slower-g18	0
 gfx	e64526757d69d643/70ffd7b979604e77	g16	ship	0
 gfx	e64526757d69d643/70ffd7b979604e77	g17	off:untested-g17	0
-gfx	e64526757d69d643/70ffd7b979604e77	g18	off:candidate-g18	0
+gfx	e64526757d69d643/70ffd7b979604e77	g18	ship	0
 gfx	e76a93eedc66214c/381e225ef0fbb91b	g16	ship	1
 gfx	e76a93eedc66214c/381e225ef0fbb91b	g17	off:untested-g17	0
 gfx	e76a93eedc66214c/381e225ef0fbb91b	g18	off:untested-g18	0

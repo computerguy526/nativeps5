@@ -1,14 +1,14 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=65da2d0e49b60910b16dc3a478a66a6896d4672ea482f8ec4dafd46b883547d9
+sha256=5f7243ee1868153612b378060a42361413b683c30f4da44f0f8262392cdd4e5b
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
-reproduced=458 of 458
+reproduced=466 of 466
 class gfx *: 37 of 37
-class gfx g16: 194 of 194
+class gfx g16: 199 of 199
 class gfx g17: 51 of 51
-class gfx g18: 176 of 176
+class gfx g18: 179 of 179
 emitter=794b61d671400780b8ba3952a24c18002a1393ec nps5-kyty nps5-one-kyty-v144 (v1.4.3 pin 93d944fff + vregion ad698867 + perfmode 7a769133; codegen fp-753d1d73; vregion token default off)
 # 2026-11-27 (v144max): with the v1.4.4 tool (nps5-one-kyty-v144 794b61d67, kyty_msl_dump sha256 6de35f77) all 440 rows (78 compute + 362 graphics) regenerate sha256-exact from the v1.2.3-era cache (cache-play-rc123rel), 0 translate failures, and 429 from the laptop player cache (kyty-stable-a1736e2a): the 11 others are rows whose program is not in that programs.bin (same 11 with the v1.4.3 tool, which also fails to translate the vregion rows).
 # 2026-11-27 (folfix2): + 107 alias rows (14 with a moved vertex key, 93 with only a moved fragment key. Evidence rekey-<old pair>,pendval: PENDING validation and timing under their new KosmicKrisp pair, not yet covered by the evidence line below). They regenerate sha256-exact with the v1.4.4 tool from the laptop player cache (kyty-stable-a1736e2a).
@@ -18,3 +18,4 @@ date=2026-11-27
 # 2026-11-27 (rekeymerge): 96 of the 107 alias rows validated (79 cloud M6, 17 laptop M4 Pro), pendval removed. 11 dropped (listed in metal-gfx-pairs.tsv). The 9 mesh alias rows are not in this list (branch nps5-one-nps5-v144-fol). Evidence line above unchanged, correctness only (no timing) for rows whose key moved.
 # 2026-11-27 (383alias, USER): row 383bf9ae/001316dd g16 (re-keyed alias of the approved 383bf9ae/40a5c3f4 + /51a10cb6 rows) restored with rule outprec:1; laptop M4 Pro autoval OS27 PASS under outprec:1 (AB_p7 rt4 bad=0). 449 rows.
 # 2026-11-27 (meshback, USER): the 9 mesh-twin rows (g16 5, g17 2, g18 2) are back as plain rows under the pair KosmicKrisp gives their pipelines after the Kyty mesh precision fix (rowkey.py, patch 0044 canonical mesh key, fp-8c4b096b). Their texts were regenerated with the final tool (kyty_msl_dump sha256 13d3ec2b, nps5-one-kyty-v144 b8b1ff5a2) and the 9 rows reproduce sha256-exact from the fp-8c4b096b cache (meshgen.py = metal.gen_pair). Laptop M4 Pro autoval: AA/AB/mutant on rebased real inputs, 3 windows x 5 pipelines x non-spill and spill text, positions, indices, cull flags and render targets bit-exact against KosmicKrisp's own mesh text (the g17 / g18 rows carry the plain text, validated on the M4 Pro only, not on M5 / M6). Correctness only, no re-timing (ba kept). 458 rows.
+# 2026-11-27 (bestrows, USER): + 5 g16 rows (5fa94a60/e692d52d, af60b35a/20a150f7, 509e2bf1/e1ced2aa, 671e90bf/0a7adc2a, 91f49fd3/9b1fe280; emitter modes only, texts sha256-exact as timed) and 3 g18 rows (e6452675/70ffd7b9, 9b8c69da/90c2ee57, 30694d82/498960f2, M6 PASS and FASTER); compute: g16 alias row 7f80c1e6 of fba4b753. They regenerate sha256-exact with the final tool (kyty_msl_dump sha256 13d3ec2b) from the fp-8c4b096b cache (the old rows from the v1.2.3-era cache, the 9 mesh rows from the fp-8c4b096b cache). 466 gfx + 79 compute rows. Correctness: laptop M4 Pro macOS 27.2.1 autoval OS27 PASS exact against the final-stack KosmicKrisp text; no new timing (same texts as timed FASTER).
