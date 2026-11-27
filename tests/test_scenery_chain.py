@@ -185,5 +185,38 @@ class IngameCheck(unittest.TestCase):
         self.assertEqual(SC.check("", "")[0][0], "FAIL")
 
 
+class ReentryCheck(unittest.TestCase):
+    """scenerycheck.check_reentry on synthetic logs: boot level, press, leave planet, re-enter."""
+    HEAD = "[scenery] scene lv: 0 shader pairs active (F+ G+ M+ O+ (full))\n"
+    PRESS = "[scenery] seq 1: flowers OFF (instant: 0 shader pairs in lv), grass on, moss on, other on\n"
+    def S(self, name, f="F-"): return "[scenery] scene %s: 0 shader pairs active (%s G+ M+ O+ (custom))\n" % (name, f)
+
+    def test_pass(self):
+        r = SC.check_reentry(self.HEAD + self.PRESS + self.S("worldmap") + self.S("worldmap") + self.S("lv"), "lv")
+        self.assertEqual([x[0] for x in r], ["PASS", "PASS", "PASS", "INFO"])
+        self.assertIn("boot entry: F+", r[2][2]); self.assertIn("not logged", r[3][2])
+
+    def test_fail_never_left(self):
+        r = SC.check_reentry(self.HEAD + self.PRESS + self.S("lv"), "lv")
+        self.assertEqual([x[0] for x in r][:3], ["PASS", "FAIL", "FAIL"])
+
+    def test_fail_reentry_with_flowers_on_or_no_press(self):
+        r = SC.check_reentry(self.HEAD + self.PRESS + self.S("worldmap") + self.S("lv", "F+"), "lv")
+        self.assertEqual(r[2][0], "FAIL")
+        self.assertEqual(SC.check_reentry(self.HEAD + self.S("worldmap") + self.S("lv"), "lv")[0][0], "FAIL")
+
+    def test_overlay_open_line_reported(self):
+        r = SC.check_reentry(self.HEAD + self.PRESS + self.S("worldmap") + self.S("lv") + "[ps4-vfs] overlay open cats-flowers/level.lvx\n", "lv")
+        self.assertIn("1 overlay open", r[3][2])
+
+    def test_cli(self):
+        import tempfile, subprocess
+        with tempfile.NamedTemporaryFile("w", suffix=".err", delete=False) as f:
+            f.write(self.HEAD + self.PRESS + self.S("worldmap") + self.S("lv"))
+        p = subprocess.run([sys.executable, "-I", os.path.join(REPO, "scripts", "nps5lib", "scenerycheck.py"), "--reentry", f.name, "--scene", "lv"], capture_output=True, text=True)
+        os.unlink(f.name)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr); self.assertIn("PASS reentry", p.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
