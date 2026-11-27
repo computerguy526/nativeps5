@@ -430,8 +430,9 @@ def status(ctx):
         gs = metalmod.gfx_index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
         mline = ["  Metal shaders: %d generated kernels, %d graphics pairs" % (ms, gs)] if ms or gs else []
         moved = [k for k in KEY_FIELDS if k != "list" and prep.get(k) not in (None, ctx.identity()[k])]
+        osp = ["  OS stores pending: this dir came from an older OS build (%s); the Metal archive / library cache / driver cache are rebuilt by the launch replay at the next start" % prep.get("os_from", "?")] if prep.get("os_stores") == "pending" else []
         return "prepared", lines + ["  prepared %s (%s pipelines): %s (stable dir%s)" % (prep.get("date", "?"), prep.get("pipelines", "?"), ctx.dir,
-                                    "; built by another " + "/".join(moved) + ": the stores revalidate themselves at the next start" if moved else "")] + mline
+                                    "; built by another " + "/".join(moved) + ": the stores revalidate themselves at the next start" if moved else "")] + osp + mline
     if prep is not None and prep.get("key") == ctx.key and prep.get("rc") == "0":      # no rc line = a torn or foreign file, not a pass
         ms = metalmod.index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
         gs = metalmod.gfx_index_rows(os.path.join(ctx.dir, metalmod.OUT_NAME))[1]
@@ -1429,6 +1430,42 @@ def drop_os_compiled(d, tid):
     return gone
 
 
+def mark_os_pending(d, old_hw, new_hw):
+    """osadopt2: after a cross-OS adoption the clone's prepared.tsv still names the OLD hardware key, so status read "not prepared" until a full
+    prepare. The list state (journals, programs.bin, the prepared list) did carry over; the OS-compiled stores did not (drop_os_compiled). The record is
+    rewritten for the new hw and says so: os_stores=pending (+ os_from=<old hw>). status() reports it prepared with 'OS stores pending'; the launch
+    phase (KYTY_PIPELINE_REPLAY_ALL + helper prewarm, always on for a title with a list) rebuilds them at the start, and
+    clear_os_pending drops the marker once <id>.bin exists again. A dir without a good prepared.tsv (rc=0) is left alone: it was never prepared."""
+    pt = os.path.join(d, "prepared.tsv")
+    kv = read_kv(pt)
+    if not kv or kv.get("rc") != "0":
+        return False
+    kv["hw"] = new_hw
+    kv["os_stores"] = "pending"
+    kv["os_from"] = old_hw or "?"
+    write_kv(pt, kv, "# prepared.tsv adopted across an OS update by nps5 (osadopt2): list state kept, OS-compiled stores pending (rebuilt by the launch replay)")
+    return True
+
+
+def write_kv(path, kv, header):
+    with open(path + ".tmp", "w") as f:
+        f.write(header + "\n")
+        for k, v in kv.items():
+            f.write("%s=%s\n" % (k, v))
+    os.replace(path + ".tmp", path)
+
+
+def clear_os_pending(ctx):
+    """Drop the os_stores=pending marker once a start has rebuilt the driver cache (<id>.bin is back). -> True when cleared."""
+    pt = os.path.join(ctx.dir, "prepared.tsv")
+    kv = read_kv(pt)
+    if not kv or kv.get("os_stores") != "pending" or not os.path.isfile(os.path.join(ctx.dir, "%s.bin" % ctx.tid)):
+        return False
+    kv.pop("os_stores", None); kv.pop("os_from", None)
+    write_kv(pt, kv, "# written by nps5 cache prepare; read by nps5 cache status (a key mismatch means stale)")
+    return True
+
+
 def adopt_sibling(ctx, log=None):
     """The stable dir does not exist yet: APFS-clone (cp -c -R) the newest compatible stack-keyed sibling into it, verify the clone against the
     source (same tree, same sizes), then rename it into place. With no such sibling, the newest stable dir of the same GPU family on another OS
@@ -1462,6 +1499,8 @@ def adopt_sibling(ctx, log=None):
             return "failed", os.path.basename(src)
         say("cache: OS update: %s was built for %s, this Mac is %s; kept its journals and inputs, dropped %s (rebuilt at this start)"
             % (os.path.basename(src), recorded_hw(src), ctx.hw, ", ".join(gone) or "nothing"))
+    if cross_os:
+        mark_os_pending(tmp, recorded_hw(src), ctx.hw)
     os.rename(tmp, ctx.dir)
     say("cache: stable cache dir %s adopted a clone of %s (the old one is kept)" % (os.path.basename(ctx.dir), os.path.basename(src)))
     return "adopted", os.path.basename(src)
@@ -1524,6 +1563,8 @@ def prepare_stable_dir(ctx, log=None):
         elif state == "failed":
             notes.append("stable cache dir: could not clone %s: this start begins empty" % src)
         os.makedirs(ctx.dir, exist_ok=True)
+        if state != "adopted":
+            clear_os_pending(ctx)
         prev = write_stack(ctx, src if state == "adopted" else None)
         aside = metal_rows_aside(ctx, prev if state != "adopted" else (read_kv(os.path.join(ctx.dir, "prepared.tsv")) or {}).get("kyty"), src if state == "adopted" else None)
         regen = metal_autogen(ctx)

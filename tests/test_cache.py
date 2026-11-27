@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for scripts/nps5lib/cache.py: stack key / Metal id derivation, status on fresh / partial / prepared / stale dirs,
 list merge and verify-list through a fake pipeline-list tool, prepare / record / check as dry runs and with a fake runner. No title is run."""
-import time, io, os, shutil, sys, tempfile, unittest, warnings
+import contextlib, time, io, os, shutil, sys, tempfile, unittest, warnings
 warnings.simplefilter("ignore", ResourceWarning)
 from contextlib import redirect_stdout, redirect_stderr
 sys.dont_write_bytecode = True
@@ -306,6 +306,31 @@ class T(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(out + ".partial", "half.metal")))          # kept for diagnosis, not loaded
         self.assertFalse(os.path.exists(os.path.join(out, "half.metal")))
         self.assertIsNone(cache.metal_autogen(cx, step=ok)); self.assertEqual(len(calls), 1)    # stamped = finished: left alone
+
+    # ---- osadopt2 2026-11-27: prepared record after an OS adoption; failed-autogen marker
+    def test_osadopt2_cross_os_adoption_rewrites_prepared_record_honestly(self):
+        old = self.mk_os_dir("g16-24A10", age=100)
+        open(os.path.join(old, "prepared.tsv"), "w").write("key=aaaa\nrc=0\nhw=g16-24A10\nkyty=k1\npipelines=12\ndate=2026-11-20\n")
+        cx = self.sctx()
+        self.assertEqual(cache.adopt_sibling(cx)[0], "adopted")
+        kv = cache.read_kv(os.path.join(cx.dir, "prepared.tsv"))
+        self.assertEqual((kv["hw"], kv["os_stores"], kv["os_from"], kv["pipelines"]), (cx.hw, "pending", "g16-24A10", "12"))
+        self.assertNotIn("os_stores", cache.read_kv(os.path.join(old, "prepared.tsv")))          # source untouched
+        self.assertFalse(os.path.exists(os.path.join(cx.dir, "PPSA00001.bin")))                  # nothing claimed as built
+        lines = cache.status(cx)[1]
+        self.assertEqual(cache.status(cx)[0], "prepared"); self.assertTrue(any("OS stores pending" in l for l in lines))
+        self.assertFalse(cache.clear_os_pending(cx))                                              # driver cache not rebuilt yet: stays pending
+        open(os.path.join(cx.dir, "PPSA00001.bin"), "w").write("rebuilt")
+        self.assertTrue(cache.clear_os_pending(cx)); self.assertNotIn("os_stores", cache.read_kv(os.path.join(cx.dir, "prepared.tsv")))
+
+    def test_osadopt2_unprepared_or_same_os_adoption_leaves_prepared_record_alone(self):
+        self.mk_os_dir("g16-24A10", age=100)                                                      # STACK.txt only: never prepared
+        cx = self.sctx(); self.assertEqual(cache.adopt_sibling(cx)[0], "adopted")
+        self.assertFalse(os.path.exists(os.path.join(cx.dir, "prepared.tsv")))
+        shutil.rmtree(cx.dir)
+        sib = self.mkdir_old("kyty-12121212", hw="g16-25G83", age=500)
+        self.assertEqual(cache.adopt_sibling(self.sctx())[0], "adopted")
+        self.assertNotIn("os_stores", cache.read_kv(os.path.join(self.sctx().dir, "prepared.tsv")))
 
     def test_t6_adoption_takes_dirs_that_do_not_say_their_hw_and_skips_empty_ones(self):
         self.mkdir_old("kyty-aaaaaaaa")                                             # a player-filled dir: no prepared.tsv
