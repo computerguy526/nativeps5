@@ -364,6 +364,27 @@ class AstroPairRowTests(unittest.TestCase):
             if r[14] == "autoval,folship":
                 self.assertNotIn((r[5], r[6], r[16]), old | {(r[5], r[6], "*")})
 
+    def test_vregion_rows(self):
+        """vregion (2026-11-27): rows whose mode carries the vregion token need the pinned emitter that has it; exact, faster on their class,
+        no class row shadowed, and the guest sidecar knows the key (hashes only)."""
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        head = open(os.path.join(d, "metal-gfx-pairs.tsv")).read().splitlines()
+        emitter = next(l for l in head if l.startswith("emitter\t")).split("\t")
+        self.assertRegex(emitter[1], r"^[0-9a-f]{40}$")
+        rows = self.rows()
+        vr = [r for r in rows if "vregion" in r[15].split("+")]
+        self.assertEqual({(r[16], r[5], r[6]) for r in vr}, {("g17", "713f3ea8c4014632", "6200c07426976d4f")})
+        for r in vr:
+            self.assertEqual(r[18], "faster"); self.assertEqual(r[17], "exact"); self.assertLess(float(r[19]), 1.0)
+            self.assertEqual(r[15], "fix6+vsmodes+vregion")
+            self.assertRegex(r[7] + r[8], r"^[0-9a-f]{128}$")
+            self.assertEqual([x for x in rows if (x[5], x[6]) == (r[5], r[6]) and x[16] in (r[16], "*")], [r])
+        guests = [l.split("\t") for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if "\t" in l]
+        self.assertIn(["vs", "713f3ea8c4014632", "a94af9723b60975e"], guests)
+        deny = {l.strip() for l in open(os.path.join(d, "fast-math-deny.txt")) if l.strip() and not l.startswith("#")}
+        self.assertIn("9056f3f00ae72940", deny)
+        self.assertIn(["fs", "6200c07426976d4f", "9056f3f00ae72940"], guests)
+
     def test_valfix_dropped_rows_stay_out(self):
         """valfix: no row may carry the text of a row removed after the level-profile check (hashes in tests/data/valfix_dropped.tsv)."""
         p = os.path.join(HERE, "data", "valfix_dropped.tsv")
