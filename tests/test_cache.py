@@ -230,6 +230,70 @@ class T(unittest.TestCase):
         open(os.path.join(cx.dir, "mine"), "w").write("1")
         self.assertEqual(cache.adopt_sibling(cx), ("have", None)); self.assertTrue(os.path.isfile(os.path.join(cx.dir, "mine")))
 
+    # ---- osadopt 2026-11-27: OS update keeps the player's journals; Metal rows regenerate at start
+    def mk_os_dir(self, hw, age=0):
+        d = self.mkdir_old(cache.stable_name("kyty", hw), files=("PPSA00001.programs.bin", "PPSA00001.pipelines.journal",
+                                                                  "PPSA00001.shaders.journal", "PPSA00001.bin"), age=age)
+        for sub, n in (("msl", "t.msl"), ("lib", "t.metallib")):
+            os.makedirs(os.path.join(d, "kk-libcache", sub), exist_ok=True); open(os.path.join(d, "kk-libcache", sub, n), "w").write("m")
+        open(os.path.join(d, cache.STACK_FILE), "w").write("hw=%s\n" % hw)
+        t = time.time() - age; os.utime(d, (t, t))
+        return d
+
+    def test_osadopt_os_update_clones_inputs_and_drops_os_compiled_stores(self):
+        old = self.mk_os_dir("g16-24A10", age=100)
+        other_fam = self.mk_os_dir("g17-26A1", age=1)                               # newer, but another GPU family
+        snap, snap2 = cache.tree_manifest(old), cache.tree_manifest(other_fam)
+        cx = self.sctx()                                                           # this Mac: g16-25G83
+        self.assertEqual([d for _, d in cache.os_update_candidates(cx)], [old])
+        msgs = []
+        self.assertEqual(cache.adopt_sibling(cx, msgs.append), ("adopted", os.path.basename(old)))
+        have = cache.tree_manifest(cx.dir)
+        for f in ("PPSA00001.programs.bin", "PPSA00001.pipelines.journal", "PPSA00001.shaders.journal", "kk-libcache/msl/t.msl"):
+            self.assertIn(f, have)
+        for f in ("PPSA00001.bin", "kk-archive", "kk-libcache/lib/t.metallib"):
+            self.assertNotIn(f, have)
+        self.assertEqual(have.get("kk-libcache/lib"), "d")                         # empty lib/ kept: KK_LIBCACHE_DIR still passed
+        self.assertEqual((cache.tree_manifest(old), cache.tree_manifest(other_fam)), (snap, snap2))   # sources untouched
+        self.assertTrue(any("OS update" in m and "g16-24A10" in m for m in msgs))
+        self.assertFalse(os.path.lexists(cx.dir + ".adopting"))
+
+    def test_osadopt_same_hw_sibling_wins_and_other_family_or_unrecorded_never_adopted(self):
+        self.mk_os_dir("g16-24A10", age=1)
+        sib = self.mkdir_old("kyty-12121212", hw="g16-25G83", age=500)
+        self.assertEqual(cache.adopt_sibling(self.sctx()), ("adopted", "kyty-12121212"))
+        self.assertIn("kk-archive", cache.tree_manifest(self.sctx().dir))             # same OS build: nothing dropped
+        root = os.path.join(self.env["NPS5_SCRATCH"], "cache", "PPSA00001")
+        for n in os.listdir(root): shutil.rmtree(os.path.join(root, n))
+        self.mk_os_dir("g17-26A1")
+        u = self.mk_os_dir("g16-24A10"); os.remove(os.path.join(u, cache.STACK_FILE))  # says nothing about its hw: not an OS-update source
+        self.assertEqual(cache.os_update_candidates(self.sctx()), [])
+        self.assertEqual(cache.adopt_sibling(self.sctx()), ("empty", None))
+
+    def test_osadopt_metal_autogen_runs_only_when_rows_are_missing(self):
+        cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
+        open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\n")
+        calls = []
+        def ok(c, runner, rd, label=""):
+            calls.append(label); os.makedirs(os.path.join(c.dir, "metal-shaders")); open(os.path.join(c.dir, "metal-shaders", "k.metal"), "w").write("m")
+            return dict(written=3)
+        n = cache.metal_autogen(cx, step=ok)
+        self.assertIn("3 of our", n); self.assertEqual(calls, ["start: "])
+        self.assertTrue(os.path.isfile(os.path.join(cx.dir, "metal-shaders", cache.PROGRAMS_STAMP)))
+        self.assertIsNone(cache.metal_autogen(cx, step=ok)); self.assertEqual(len(calls), 1)       # rows present: nothing to do
+        shutil.rmtree(os.path.join(cx.dir, "metal-shaders"))
+        def bad(c, runner, rd, label=""):
+            os.makedirs(os.path.join(c.dir, "metal-shaders")); return dict(written=2, mismatch="emitter differs")
+        n = cache.metal_autogen(cx, step=bad)
+        self.assertIn("emitter differs", n); self.assertIn("regenerates", n)
+        self.assertFalse(os.path.exists(os.path.join(cx.dir, "metal-shaders")))   # a mismatched set is never left to load
+        def boom(*a, **k): raise RuntimeError("tool missing")
+        self.assertIn("tool missing", cache.metal_autogen(cx, step=boom))
+        for off in ("NPS5_METAL_AUTOGEN", "NPS5_METAL_SHADERS"):
+            self.assertIsNone(cache.metal_autogen(self.sctx(env=self.stable_env(**{off: "0"})), step=ok))
+        os.remove(os.path.join(cx.dir, "PPSA00001.programs.bin"))
+        self.assertIsNone(cache.metal_autogen(cx, step=ok))                       # no programs.bin: nothing to generate from
+
     def test_t6_adoption_takes_dirs_that_do_not_say_their_hw_and_skips_empty_ones(self):
         self.mkdir_old("kyty-aaaaaaaa")                                             # a player-filled dir: no prepared.tsv
         self.assertEqual(cache.adopt_sibling(self.sctx())[0], "adopted")

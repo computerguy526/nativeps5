@@ -103,6 +103,12 @@ Secondary leads from these results (not yet tried or still open):
 - A correct selective collector settle (retire only buffers whose last GPU use and pending readbacks have completed).
 - Near-field density: grass and hedge pipelines are the heaviest geometry; no global density knob was found, so this
   needs per-material work.
+- An OS update used to cost a player their shader history: the stable cache dir name hashes the full hardware key
+  (GPU family + OS build), so macOS 26 -> 27 opened an empty dir (2,712 recorded pipelines -> 611 on the first
+  laptop start). A start now adopts the previous OS build's stable dir of the same GPU family, keeps journals,
+  programs.bin and KosmicKrisp's MSL texts, and drops only the OS-compiled stores (Metal archive, metallibs, driver
+  cache). Our Metal rows, set aside when the Kyty build moves, are regenerated at start (~2 s CPU) instead of waiting
+  for a manual `nps5 cache metal`; before, they stayed off for days without anyone noticing.
 
 ## 3. What we learned about measuring
 

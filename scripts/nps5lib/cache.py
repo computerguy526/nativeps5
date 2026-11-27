@@ -1377,14 +1377,70 @@ def sibling_candidates(ctx):
     return sorted(out, key=lambda x: (-x[0], x[1]))
 
 
+def hw_family(hw):
+    """'g16-26B131' -> 'g16': the GPU family part of a hardware cache key (hw.cache_key = <gpu family>-<OS build>)."""
+    return (hw or "").split("-", 1)[0]
+
+
+# osadopt 2026-11-27: stores compiled by ONE OS build (KosmicKrisp's Metal binary archive, its metallib library cache, Kyty's driver pipeline
+# cache). An adoption across OS builds drops them from the clone (they would only reject themselves and be rebuilt); everything that is
+# OS-independent input stays: pipeline + shader journals (what this player has seen), programs.bin, KosmicKrisp's collected MSL texts.
+OS_COMPILED = ("kk-archive", os.path.join("kk-libcache", "lib"), "%s.bin")
+
+
+def os_update_candidates(ctx):
+    """-> [(mtime, path)] newest first: STABLE dirs of this title and GPU back end recorded for ANOTHER OS build of the SAME GPU family (the dir
+    the player used before an OS update). The stable dir name hashes the full hardware key, so an OS update would otherwise start empty and lose
+    the player's journals (macOS 26 -> 27 on 2026-11-27: 2,712 recorded pipelines -> 611). Never another GPU family, title or back end."""
+    out = []
+    fam = hw_family(ctx.hw)
+    if not fam or fam == "unknown":
+        return out
+    try:
+        names = os.listdir(ctx.root)
+    except OSError:
+        return out
+    mine = os.path.basename(ctx.dir)
+    for n in names:
+        d = os.path.join(ctx.root, n)
+        if n == mine or not STABLE_RE.match(n) or not n.startswith(ctx.gpu + "-stable-") or os.path.islink(d) or not os.path.isdir(d):
+            continue
+        hw = recorded_hw(d)
+        if hw is None or hw == ctx.hw or hw_family(hw) != fam:
+            continue
+        if not any(os.path.exists(os.path.join(d, f % ctx.tid)) for f in ("%s.programs.bin", "%s.pipelines.journal")):
+            continue
+        out.append((dir_age(d), d))
+    return sorted(out, key=lambda x: (-x[0], x[1]))
+
+
+def drop_os_compiled(d, tid):
+    """Remove the OS-build-compiled stores (OS_COMPILED) from a freshly cloned dir; an emptied kk-libcache keeps an empty lib/ so the launch
+    still passes KK_LIBCACHE_DIR (KosmicKrisp then records MSL texts again, which the graphics pairs need). -> names dropped."""
+    gone = []
+    for rel in OS_COMPILED:
+        p = os.path.join(d, rel % tid if "%s" in rel else rel)
+        if os.path.isdir(p) and not os.path.islink(p):
+            rmtree_inside(p, d); gone.append(os.path.basename(p))
+        elif os.path.lexists(p):
+            os.remove(p); gone.append(os.path.basename(p))
+    if os.path.isdir(os.path.join(d, "kk-libcache")):
+        os.makedirs(os.path.join(d, "kk-libcache", "lib"), exist_ok=True)
+    return gone
+
+
 def adopt_sibling(ctx, log=None):
     """The stable dir does not exist yet: APFS-clone (cp -c -R) the newest compatible stack-keyed sibling into it, verify the clone against the
-    source (same tree, same sizes), then rename it into place. The source is never moved or deleted. -> (state, source name or None) with state
-    'have' (dir existed), 'adopted', 'empty' (no candidate), 'failed' (clone or verify failed: nothing left behind, starts empty)."""
+    source (same tree, same sizes), then rename it into place. With no such sibling, the newest stable dir of the same GPU family on another OS
+    build (an OS update, os_update_candidates) is cloned the same way and its OS-compiled stores are dropped from the clone. The source is never
+    moved or deleted. -> (state, source name or None) with state 'have' (dir existed), 'adopted', 'empty' (no candidate), 'failed' (clone or
+    verify failed: nothing left behind, starts empty)."""
     say = log or (lambda m: None)
     if os.path.isdir(ctx.dir):
         return "have", None
-    cands = sibling_candidates(ctx)
+    cands, cross_os = sibling_candidates(ctx), False
+    if not cands:
+        cands = os_update_candidates(ctx); cross_os = bool(cands)
     if not cands:
         return "empty", None
     src = cands[0][1]
@@ -1397,6 +1453,15 @@ def adopt_sibling(ctx, log=None):
         rmtree_inside(tmp, ctx.root)
         say("cache: could not clone %s into the stable cache dir (%s): starting empty" % (os.path.basename(src), (r.stderr or b"").decode(errors="replace").strip()[:120] or "clone differs"))
         return "failed", os.path.basename(src)
+    if cross_os:
+        try:
+            gone = drop_os_compiled(tmp, ctx.tid)
+        except OSError as e:
+            rmtree_inside(tmp, ctx.root)
+            say("cache: could not prepare the clone of %s for this OS build (%s): starting empty" % (os.path.basename(src), e))
+            return "failed", os.path.basename(src)
+        say("cache: OS update: %s was built for %s, this Mac is %s; kept its journals and inputs, dropped %s (rebuilt at this start)"
+            % (os.path.basename(src), recorded_hw(src), ctx.hw, ", ".join(gone) or "nothing"))
     os.rename(tmp, ctx.dir)
     say("cache: stable cache dir %s adopted a clone of %s (the old one is kept)" % (os.path.basename(ctx.dir), os.path.basename(src)))
     return "adopted", os.path.basename(src)
@@ -1460,11 +1525,43 @@ def prepare_stable_dir(ctx, log=None):
             notes.append("stable cache dir: could not clone %s: this start begins empty" % src)
         os.makedirs(ctx.dir, exist_ok=True)
         prev = write_stack(ctx, src if state == "adopted" else None)
-        if metal_rows_aside(ctx, prev if state != "adopted" else (read_kv(os.path.join(ctx.dir, "prepared.tsv")) or {}).get("kyty"), src if state == "adopted" else None):
+        aside = metal_rows_aside(ctx, prev if state != "adopted" else (read_kv(os.path.join(ctx.dir, "prepared.tsv")) or {}).get("kyty"), src if state == "adopted" else None)
+        regen = metal_autogen(ctx)
+        if regen:
+            notes.append(regen)
+        elif aside:
             notes.append("Metal shaders of this cache were made by another Kyty build and are set aside (metal-shaders.aside): `nps5 cache metal %s` regenerates them" % ctx.tid)
     except (OSError, CacheError) as e:
         notes.append("stable cache dir not prepared: %s" % e)
     return notes
+
+
+def metal_autogen(ctx, step=None):
+    """osadopt 2026-11-27: a normal start regenerates our Metal rows when the cache has a programs.bin but no metal-shaders/ (set aside because
+    the Kyty build moved, or never generated in this dir: an adopted / OS-updated dir). Before, the rows stayed aside until someone ran
+    `nps5 cache metal` by hand, so players (and the laptop since 2026-11-25) ran KosmicKrisp's shaders only. CPU only, ~2 s. A failed or
+    mismatched generation leaves no metal-shaders/ (KosmicKrisp's own shaders, as before). NPS5_METAL_AUTOGEN=0 or NPS5_METAL_SHADERS=0: off.
+    -> a note, or None when nothing was to do."""
+    e = ctx.environ
+    if e.get("NPS5_METAL_AUTOGEN", "1") == "0" or e.get("NPS5_METAL_SHADERS", "1") == "0":
+        return None
+    out = os.path.join(ctx.dir, metalmod.OUT_NAME)
+    if os.path.isdir(out) or not os.path.isfile(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)) or not (metal_list(ctx) or metal_gfx_list(ctx)):
+        return None
+    import contextlib, io
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            st = (step or metal_step)(ctx, None, None, label="start: ")
+    except Exception as ex:                       # an optimisation: never fails a start
+        st = dict(error=str(ex) or type(ex).__name__)
+    if st and not st.get("error") and not st.get("mismatch") and st.get("written") and os.path.isdir(out):
+        stamp_programs(ctx)
+        return "Metal shaders generated at start for this Kyty build: %d of our kernels / pairs" % st["written"]
+    if os.path.isdir(out):
+        rmtree_inside(out, ctx.dir)
+    why = (st or {}).get("mismatch") or (st or {}).get("error") or "nothing generated"
+    return "Metal shaders not generated at start (%s): KosmicKrisp's own shaders are used; `nps5 cache metal %s` regenerates them" % (str(why)[:120], ctx.tid)
 
 
 # What validates each store of a cache dir (checked 2026-11-25 against the RC Kyty / KK sources; tests/test_cache.py T6 pins the list):
