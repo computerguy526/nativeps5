@@ -48,10 +48,11 @@ cache	kind=kyplst	limit_mb=896	app_ver=01.007.000
 
 # ---- Player setting `scenery` (nps5 run --scenery reduced|minimal; default full = no row used, no overlay) ----
 # One row per level and preset. src= is the sha256 of the level file the row was made for (another game version: no overlay, one warning).
+# minimal = reduced since v1.4.4: the moss family it also removed carries collision bodies (Astro could fall through).
 # drop= keys are <length>:<first 16 hex of sha256(model-name prefix of that length)>: no asset names in the repository.
 # The generated copy is mounted over the game folder by the runtime (NPS5_OVERLAY_DIR); the game folder is never written. Why: games/PPSA21564/README.md, Settings.
 scenery	hero_ape_escape	reduced	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7
-scenery	hero_ape_escape	minimal	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7,19:9645c26dad834bc3
+scenery	hero_ape_escape	minimal	src=717419584dc68f6231c860c93deb152cdce3f00185c3b06b7b294998061c7b3c	class=bg	drop=10:32af1e6353c498d5,9:d8308fb8dc3abe2c,15:e0b593596b4952f7
 
 # ---- Level fix (default ON; NPS5_LEVELFIX=0 turns it off): Apes on the Loose, 6th catch ----
 # The 6th catch fires the boss-start chain; the delay trigger that starts the statue sequence waits 0.6 s, so at our frame rates the sequence starts

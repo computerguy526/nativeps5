@@ -3,6 +3,12 @@
 Changes across the four repositories (this one, `nativeps5-recomp`, `nativeps5-kyty`, `nativeps5-anyps5`); the
 pinned commits are in [components.lock](components.lock).
 
+## Unreleased (v1.4.4)
+
+- ASTRO BOT `scenery minimal` ("Apes on the Loose"): no longer removes the moss patches. They carry collision bodies, so
+  removing them could take away ground Astro stands on. `minimal` is now the same as `reduced` (flowers and grass tufts).
+  Profile only (`games/PPSA21564/game.tsv`); no retranslate, no shader-cache re-prepare. Unit-tested (`test_scenery`).
+
 ## v1.4.3
 
 **Update:** `nativeps5-recomp`, `nativeps5-kyty` and this repository move to `v1.4.3`; `nativeps5-anyps5` stays at `v1.4.0` (see [components.lock](components.lock)). Pull, check out the tags, rebuild (`scripts/build.sh recomp`, Kyty) and translate again (`nps5 build`). ASTRO BOT's translation changes (5 host shims, 3 world-map entry points): rebuild it with `nps5 build`. The SAROS translation is unchanged.

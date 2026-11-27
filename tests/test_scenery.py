@@ -262,12 +262,14 @@ class Profile(unittest.TestCase):
             if t == "PPSA21564": found = rows
         self.assertEqual(sorted(S.parse_row(r)["preset"] for r in found), ["minimal", "reduced"])
 
-    def test_minimal_is_reduced_plus_one_key(self):
+    def test_minimal_keeps_collision_objects(self):
+        # v1.4.4: the moss family (19-char prefix key below) has collision bodies; no preset may drop it. minimal == reduced for now.
         f = open(os.path.join(REPO, "games", "PPSA21564", "game.tsv")).read().splitlines()
         rows = {r["preset"]: r for r in (S.parse_row(l.split("\t")[1:]) for l in f if l.startswith("scenery\t"))}
-        self.assertEqual(rows["minimal"]["drops"][:len(rows["reduced"]["drops"])], rows["reduced"]["drops"])
-        self.assertEqual(len(rows["minimal"]["drops"]), len(rows["reduced"]["drops"]) + 1)
+        self.assertEqual(rows["minimal"]["drops"], rows["reduced"]["drops"])
         self.assertEqual(rows["minimal"]["src"], rows["reduced"]["src"])
+        for r in rows.values():
+            self.assertNotIn((19, "9645c26dad834bc3"), r["drops"])
 
     def test_no_model_name_in_shipped_files(self):
         # the names stay out of the repository: scan the rows' files for readable name fragments of the kind the keys stand for
