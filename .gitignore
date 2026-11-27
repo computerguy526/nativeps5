@@ -30,6 +30,8 @@ __pycache__/
 !/games/*/metal-gfx-pairs.tsv.verified
 !/games/*/metal-guests.tsv
 !/games/*/metal-digests.tsv
+!/games/*/keyguard-account.tsv
+!/games/*/keyguard.record
 !/games/*/promotions.tsv
 !/games/*/override-guard.baseline
 !/games/*/metal-shaders.tsv.verified

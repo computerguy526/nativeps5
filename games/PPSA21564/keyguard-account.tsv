@@ -1,0 +1,83 @@
+# nativeps5 key guard accounting for ASTRO BOT 01.007 (scripts/nps5lib/keyguard.py). Hashes and words only, no shader code.
+# A row listed here is NOT reachable by today's key (or not checkable) and says why. Every other unreachable row fails the release gate.
+# nopipe (77 mipstats rows, 2026-11-27): the shipped pipeline list has the row's shaders only with the plain fragment twin, or with
+# another vertex layout or blend state. These rows cannot match a list pipeline. Open: twin rows (re-emit and validate) or removal.
+# moved (compute): keys the v1.4 Kyty SPIR-V moved where no alias row is wanted or timed yet (see the notes in metal-shaders.tsv).
+format	nps5-keyguard-account	1
+cs	e1216d462bd060a5	*	moved	v1.4 SPIR-V moves the key to 33a534f1. g16 timed slower under it (B/A 1.13), no alias row there. g17 and g18 not timed yet
+cs	ef0b262245d9f2dc	*	moved	v1.4 SPIR-V moves the key to 68d59c98. Alias row on g17 only. g16 timed slower (B/A 1.09), g18 not timed yet
+gfx	482b55ad9fc75bca/da21e7bb8ba09737	*	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	52118121e0953070/52285e3cc30fd4b2	*	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	705290fd687d3ed4/2c3285a01c873e0b	*	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	705290fd687d3ed4/b495919b5bafb725	*	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	8d47e44f940f0721/656281cc191d3111	*	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	705290fd687d3ed4/b495919b5bafb725	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	91f49fd30947b458/9470dc2cc79f4635	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	b16c7f7df880ecd4/95750ccadb30989a	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	170b21d93e803a30/5699d04b836406a2	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	18fc8519b7cb5757/4642e7e81f1ac5bd	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	18fc8519b7cb5757/8f609416c7698be1	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	30694d820384704c/ecadefc9709244a0	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	4b317f1e51c22284/f40b4a8ed6f3ccb3	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	572210467077757f/02db1d938f8728b2	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	66b4fd65f283473e/14b7435e4afeaf6d	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	671e90bf0ded1c9e/17f8c067a000746f	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	671e90bf0ded1c9e/d7edfe5c5222308d	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	671e90bf0ded1c9e/f017b0730d47cf36	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	6a1c893a7e636dc6/10be334fa1d76a4a	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	6b84023b62d7e3e7/211c73532bfbeae4	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	6b84023b62d7e3e7/c9d177f337fe0935	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	70e345eb9d6cb92c/2c115bfb0857ad5b	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	70e345eb9d6cb92c/dfedb3efffc757ed	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	86f0bf118088c31f/62b6a2f858ebaeb4	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	b08d7e35639b2850/a9d2f11a67727d69	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	b16c7f7df880ecd4/95750ccadb30989a	g17	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	c52e4bd00f25a562/42d7fceb218305ad	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	cee54d594ea031f4/081ee09df15a4cf8	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	cee54d594ea031f4/b371c124cc11a48e	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	d879d1dc4c0e4cd0/17f8c067a000746f	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	d879d1dc4c0e4cd0/f017b0730d47cf36	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	e2d6371ec80ae0a3/ecadefc9709244a0	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	e85ea5f10c69e66e/8c6ebf46bdf7bc46	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	e9eb4ea8e836d317/746bddb3b63cd77d	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	ecdac1cab00aa8dc/3f5ee4799431a0ce	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	f157fc04bd2de1b8/e30d23821725aac2	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	faab5db4c62846e8/081ee09df15a4cf8	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	faab5db4c62846e8/b371c124cc11a48e	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	170b21d93e803a30/5699d04b836406a2	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/863d751a94a51595	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/ce773383a4f80dfd	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	509e2bf1138c18bc/7e08c3be126f0998	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	671e90bf0ded1c9e/f017b0730d47cf36	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	6b84023b62d7e3e7/211c73532bfbeae4	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	6b84023b62d7e3e7/c9d177f337fe0935	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	70e345eb9d6cb92c/2c115bfb0857ad5b	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	c096fd17ccf1622a/b371c124cc11a48e	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	c14de7bab0900cfa/e4941562143bd0f3	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	c52e4bd00f25a562/42d7fceb218305ad	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	c52e4bd00f25a562/ff0a32973dbd6617	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	cee54d594ea031f4/05356c84fc9e2526	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	cee54d594ea031f4/b371c124cc11a48e	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	d879d1dc4c0e4cd0/17f8c067a000746f	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	d879d1dc4c0e4cd0/d7edfe5c5222308d	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	e2d6371ec80ae0a3/ecadefc9709244a0	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	faab5db4c62846e8/081ee09df15a4cf8	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	faab5db4c62846e8/b371c124cc11a48e	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	30694d820384704c/02db1d938f8728b2	g17	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/260486145aae44b0	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/2db9b2c6fdcd0aad	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	509e2bf1138c18bc/7e08c3be126f0998	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	572210467077757f/02db1d938f8728b2	g17	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/25ec7210487a193f	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/863d751a94a51595	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/ce773383a4f80dfd	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	52118121e0953070/52285e3cc30fd4b2	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/b656666d88e11d49	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	383bf9ae9d27e23b/59901de970c0e5f1	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	855e7b58bdaeeb7d/59901de970c0e5f1	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	ef69cbf6571b4d5e/59901de970c0e5f1	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	3135f7e5a83364f8/ce93dec35d497aa4	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	383bf9ae9d27e23b/51a10cb604145615	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	170b21d93e803a30/86f6bbe65e307ab6	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	30694d820384704c/02db1d938f8728b2	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
+gfx	39478dacd8a02253/d74ca4c1accb712c	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
