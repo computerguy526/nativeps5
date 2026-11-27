@@ -109,6 +109,11 @@ Secondary leads from these results (not yet tried or still open):
   programs.bin and KosmicKrisp's MSL texts, and drops only the OS-compiled stores (Metal archive, metallibs, driver
   cache). Our Metal rows, set aside when the Kyty build moves, are regenerated at start (~2 s CPU) instead of waiting
   for a manual `nps5 cache metal`; before, they stayed off for days without anyone noticing.
+  After a cross-OS adoption prepared.tsv is rewritten for the new hardware key with `os_stores=pending` (the list state
+  carried over, the dropped OS stores are rebuilt by the launch replay; nothing is marked built) so status stops saying
+  "not prepared"; a failed Metal autogen leaves `metal-shaders.autogen-failed` (fingerprint of programs.bin, the MSL
+  tool, the row lists) and is not retried until an input changes or NPS5_METAL_AUTOGEN=force, with a start line saying
+  the custom shaders are OFF.
 
 ## 3. What we learned about measuring
 

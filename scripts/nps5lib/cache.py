@@ -1577,6 +1577,31 @@ def prepare_stable_dir(ctx, log=None):
     return notes
 
 
+AUTOGEN_FAILED = "metal-shaders.autogen-failed"
+
+
+def autogen_fingerprint(ctx):
+    """osadopt2: what a failed autogen depended on: programs.bin (size + mtime), the MSL tool (path + mtime) and the row lists (sha of their text).
+    Any change retries; the same inputs would fail the same way."""
+    def st(p):
+        try:
+            x = os.stat(p); return "%d:%d" % (x.st_size, int(x.st_mtime))
+        except OSError:
+            return "none"
+    tool = metalmod.tool_path(ctx.environ) if hasattr(metalmod, "tool_path") else ""
+    try:
+        tool = tool if isinstance(tool, str) else ""
+    except Exception:
+        tool = ""
+    h = hashlib.sha256()
+    for lst in (metal_list(ctx), metal_gfx_list(ctx)):
+        try:
+            h.update(open(lst, "rb").read() if lst else b"-")
+        except OSError:
+            h.update(b"?")
+    return "programs=%s tool=%s@%s lists=%s" % (st(os.path.join(ctx.dir, "%s.programs.bin" % ctx.tid)), tool, st(tool), h.hexdigest()[:16])
+
+
 def metal_autogen(ctx, step=None):
     """osadopt 2026-11-27: a normal start regenerates our Metal rows when the cache has a programs.bin but no metal-shaders/ (set aside because
     the Kyty build moved, or never generated in this dir: an adopted / OS-updated dir). Before, the rows stayed aside until someone ran
@@ -1599,6 +1624,14 @@ def metal_autogen(ctx, step=None):
             rmtree_inside(part, ctx.dir)
         os.rename(out, part)
     import contextlib, io
+    fp, mark = autogen_fingerprint(ctx), os.path.join(ctx.dir, AUTOGEN_FAILED)
+    if e.get("NPS5_METAL_AUTOGEN") != "force" and os.path.isfile(mark):
+        kv = read_kv(mark) or {}
+        if kv.get("fingerprint") == fp:
+            msg = ("Metal shaders: our custom shaders are OFF (KosmicKrisp's own are used): the generation failed (%s) and no input changed since; "
+                   "NPS5_METAL_AUTOGEN=force or `nps5 cache metal %s` retries" % (kv.get("why", "?")[:120], ctx.tid))
+            print("cache: " + msg, flush=True)
+            return msg
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
@@ -1607,10 +1640,18 @@ def metal_autogen(ctx, step=None):
         st = dict(error=str(ex) or type(ex).__name__)
     if st and not st.get("error") and not st.get("mismatch") and st.get("written") and os.path.isdir(out):
         stamp_programs(ctx)
+        if os.path.lexists(mark):
+            os.remove(mark)
         return "Metal shaders generated at start for this Kyty build: %d of our kernels / pairs" % st["written"]
     if os.path.isdir(out):
         rmtree_inside(out, ctx.dir)
     why = (st or {}).get("mismatch") or (st or {}).get("error") or "nothing generated"
+    try:
+        write_kv(mark, dict(fingerprint=fp, why=str(why).replace("\n", " ")[:200], date=time.strftime("%Y-%m-%d", time.gmtime())),
+                 "# nps5: Metal shader autogen failed for these inputs; not retried until one changes (NPS5_METAL_AUTOGEN=force retries)")
+    except OSError:
+        pass
+    print("cache: Metal shaders: our custom shaders are OFF this start: generation failed (%s); KosmicKrisp's own are used" % str(why)[:120], flush=True)
     return "Metal shaders not generated at start (%s): KosmicKrisp's own shaders are used; `nps5 cache metal %s` regenerates them" % (str(why)[:120], ctx.tid)
 
 

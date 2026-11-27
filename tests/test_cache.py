@@ -288,7 +288,8 @@ class T(unittest.TestCase):
         self.assertIn("emitter differs", n); self.assertIn("regenerates", n)
         self.assertFalse(os.path.exists(os.path.join(cx.dir, "metal-shaders")))   # a mismatched set is never left to load
         def boom(*a, **k): raise RuntimeError("tool missing")
-        self.assertIn("tool missing", cache.metal_autogen(cx, step=boom))
+        self.assertIn("emitter differs", cache.metal_autogen(cx, step=boom))      # marker: not retried
+        self.assertIn("tool missing", cache.metal_autogen(self.sctx(env=self.stable_env(NPS5_METAL_AUTOGEN="force")), step=boom))
         for off in ("NPS5_METAL_AUTOGEN", "NPS5_METAL_SHADERS"):
             self.assertIsNone(cache.metal_autogen(self.sctx(env=self.stable_env(**{off: "0"})), step=ok))
         os.remove(os.path.join(cx.dir, "PPSA00001.programs.bin"))
@@ -331,6 +332,39 @@ class T(unittest.TestCase):
         sib = self.mkdir_old("kyty-12121212", hw="g16-25G83", age=500)
         self.assertEqual(cache.adopt_sibling(self.sctx())[0], "adopted")
         self.assertNotIn("os_stores", cache.read_kv(os.path.join(self.sctx().dir, "prepared.tsv")))
+
+    def autogen_cx(self):
+        cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
+        open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\n")
+        return cx
+
+    def test_osadopt2_failed_autogen_is_not_retried_until_an_input_changes(self):
+        cx = self.autogen_cx(); calls = []
+        def bad(c, runner, rd, label=""):
+            calls.append(1); return dict(written=0, error="msl tool crashed")
+        self.assertIn("msl tool crashed", cache.metal_autogen(cx, step=bad)); self.assertEqual(len(calls), 1)
+        mark = os.path.join(cx.dir, cache.AUTOGEN_FAILED); self.assertTrue(os.path.isfile(mark))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            n = cache.metal_autogen(cx, step=bad)
+        self.assertEqual(len(calls), 1); self.assertIn("OFF", n); self.assertIn("OFF", out.getvalue())   # no retry, still says so
+        open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("grown programs")             # input changed: retried
+        cache.metal_autogen(cx, step=bad); self.assertEqual(len(calls), 2)
+        open(os.path.join(cx.p.dir, cache.metalmod.LIST_NAME), "w").write("# keys\nmore\n")           # list changed: retried
+        cache.metal_autogen(cx, step=bad); self.assertEqual(len(calls), 3)
+        cache.metal_autogen(cx, step=bad); self.assertEqual(len(calls), 3)
+        cache.metal_autogen(self.sctx(env=self.stable_env(NPS5_METAL_AUTOGEN="force")), step=bad); self.assertEqual(len(calls), 4)
+        def ok(c, runner, rd, label=""):
+            calls.append(1); os.makedirs(os.path.join(c.dir, "metal-shaders")); open(os.path.join(c.dir, "metal-shaders", "k.metal"), "w").write("m")
+            return dict(written=1)
+        cache.metal_autogen(self.sctx(env=self.stable_env(NPS5_METAL_AUTOGEN="force")), step=ok)
+        self.assertFalse(os.path.exists(mark))                                                          # success clears the marker
+
+    def test_osadopt2_titles_without_metal_lists_never_touch_autogen(self):
+        cx = self.sctx(); os.makedirs(cx.dir); open(os.path.join(cx.dir, "PPSA00001.programs.bin"), "w").write("p")
+        def boom(*a, **k): raise AssertionError("must not run")
+        self.assertIsNone(cache.metal_autogen(cx, step=boom))
+        self.assertEqual(os.listdir(cx.dir), ["PPSA00001.programs.bin"])
 
     def test_t6_adoption_takes_dirs_that_do_not_say_their_hw_and_skips_empty_ones(self):
         self.mkdir_old("kyty-aaaaaaaa")                                             # a player-filled dir: no prepared.tsv
