@@ -485,6 +485,111 @@ class AstroComputeAliasRowTests(unittest.TestCase):
         self.assertEqual([r[7] for r in self.rows() if r[2] == "68d59c988691ec1a"], ["g17"])    # ef0b2622's alias stays g17 only (slower on g16)
 
 
+REKEY_ROW_RE = re.compile(r"^rekey-([0-9a-f]{8})-([0-9a-f]{8}),pendval$")   # an alias row's whole evidence (the checker allows 48 characters)
+
+
+def pair_alias_problems(rows, guests):
+    """folfix2: why the alias rows (evidence rekey-<old vs 8>-<old fs 8>,pendval) of a pair list are not sound. rows: split gfx rows,
+    guests: {(stage, kk key): {guest hash}}. An alias row must repeat ONE listed row of its class (same program digests, specialization,
+    texts, state columns, mode, rule, verdict, B/A) under another pair, and its keys must belong to the guest shaders of that row's keys."""
+    out = []
+    alias = lambda r: REKEY_ROW_RE.match(r[14])
+    plain = [r for r in rows if not alias(r)]
+    for r in rows:
+        m = alias(r)
+        if not m:
+            if "pendval" in r[14] or "rekey-" in r[14]:
+                out.append("%s_%s: an alias row's evidence is exactly rekey-<vs 8>-<fs 8>,pendval" % (r[5], r[6]))
+            continue
+        ov, of = m.groups()
+        src = [o for o in plain if o[5].startswith(ov) and o[6].startswith(of) and o[16] == r[16]]
+        if len({(o[5], o[6]) for o in src}) != 1:
+            out.append("%s_%s: no single listed pair %s/%s for class %s" % (r[5], r[6], ov, of, r[16]))
+            continue
+        o = src[0]
+        if (o[5], o[6]) == (r[5], r[6]):
+            out.append("%s_%s: an alias row must carry another pair than its source" % (r[5], r[6]))
+        same = lambda a, b: a[1:5] == b[1:5] and a[7:14] == b[7:14] and a[15:] == b[15:]
+        if not any(same(x, r) for x in src):
+            out.append("%s_%s: differs from its source row in more than the pair" % (r[5], r[6]))
+        for st, new, old in (("vs", r[5], o[5]), ("fs", r[6], o[6])):
+            g_new, g_old = guests.get((st, new), set()), guests.get((st, old), set())
+            if not g_new or not g_new <= g_old:
+                out.append("%s_%s: %s key %s is not recorded for the guest shader of %s" % (r[5], r[6], st, new, old))
+    return out
+
+
+class AstroPairAliasRowTests(unittest.TestCase):
+    """folfix2 2026-11-27: alias rows for pairs whose KosmicKrisp canonical key moved with the v1.4 Kyty base (pending validation)."""
+    V, F, T = "1" * 32, "2" * 32, "a" * 64
+
+    def row(self, kv, kf, ev="autoval", cls="g16", text=None, ba="0.9"):
+        return ["gfx", self.V, "3" * 16 + ":0", self.F, "4" * 16 + ":0", kv, kf, text or self.T, "b" * 64, "twin", "0:0", "0:0:92", "1", "0:0:0:0:0:0:0:15:f:4",
+                ev, "fix6", cls, "exact", "faster", ba]
+
+    def test_rule_on_synthetic_rows(self):
+        old, new = ("a1" * 8, "b1" * 8), ("c1" * 8, "d1" * 8)
+        g = {("vs", old[0]): {"e" * 16}, ("fs", old[1]): {"f" * 16}, ("vs", new[0]): {"e" * 16}, ("fs", new[1]): {"f" * 16}}
+        tok = "rekey-%s-%s,pendval" % (old[0][:8], old[1][:8])
+        good = [self.row(*old), self.row(*new, ev=tok)]
+        self.assertEqual(pair_alias_problems(good, g), [])
+        self.assertEqual(pair_alias_problems([self.row(*old)], g), [])                                    # no alias rows: nothing to say
+        bad = lambda rows, gg=g: pair_alias_problems(rows, gg)
+        self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev="autoval,pendval")])[0])    # pendval without its source row
+        self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev="autoval," + tok)])[0])
+        self.assertIn("exactly rekey", bad([self.row(*old), self.row(*new, ev=tok[:-8])])[0])             # a re-keyed row not marked pending
+        self.assertIn("no single listed pair", bad([self.row(*new, ev=tok)])[0])                           # the source row is gone
+        self.assertIn("no single listed pair", bad([self.row(*old, cls="g18"), self.row(*new, ev=tok)])[0])   # source only in another class
+        self.assertIn("another pair", bad([self.row(*old), self.row(*old, ev=tok)])[0])
+        self.assertIn("more than the pair", bad([self.row(*old), self.row(*new, ev=tok, text="c" * 64)])[0])   # another text
+        self.assertIn("more than the pair", bad([self.row(*old), self.row(*new, ev=tok, ba="0.5")])[0])        # another timing claim
+        wrong = {**g, ("fs", new[1]): {"9" * 16}}                                                          # the new fragment key is another guest shader
+        self.assertIn("not recorded for the guest", bad(good, wrong)[0])
+        self.assertIn("not recorded for the guest", bad(good, {k: v for k, v in g.items() if k[1] != new[0]})[0])   # no sidecar row
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("nps5_check", os.path.join(game.REPO, "scripts", "nps5_check.py"))
+        chk = importlib.util.module_from_spec(spec); spec.loader.exec_module(chk)
+        line = "\t".join(self.row(*new, ev=tok)).encode()                                                 # the checker takes the evidence form
+        self.assertTrue(chk.METAL_GFX_ROW3_RE.match(line))
+
+    def real(self):
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        rows = [l.split("\t") for l in open(os.path.join(d, "metal-gfx-pairs.tsv")).read().splitlines() if l.startswith("gfx\t")]
+        guests = {}
+        for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines():
+            f = l.split("\t")
+            if len(f) == 3 and f[0] in ("vs", "fs"):
+                guests.setdefault((f[0], f[1]), set()).add(f[2])
+        return rows, guests
+
+    def test_astro_alias_rows_are_sound(self):
+        rows, guests = self.real()
+        self.assertEqual(pair_alias_problems(rows, guests), [])
+
+    def test_astro_atomic_vertex_aliases(self):
+        """Set 1: the 9 vertex shaders with a float atomic max (7 Sky Garden foliage + 2 others), exact new vertex key per old key (rowkey,
+        work/research/folfix2-2026-11-27.md), all 8 g16 foliage rows covered, every row still pending validation."""
+        rows, _ = self.real()
+        want = {"4e832ad6e06dadb4": "c896f56d96959591", "52ed886c3e2db1a5": "3cbdead3087a3b9b", "664068b256513b13": "e64526757d69d643",
+                "9e7ca1d0543f2ea9": "71064d62644e15bc", "afb0260edaa9599d": "6450e8d7401febb2", "d1c15bc8138ca5fb": "7cd7295616b14c41",
+                "f347191aba839bf5": "07c231aaec915562", "39478dacd8a02253": "75f24040fe7a4fc5", "b1c17b27db220a80": "abf97253b36aacd1"}
+        old8 = {k[:8]: k for k in want}
+        al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
+        self.assertEqual(len(al), len([r for r in rows if "pendval" in r[14]]))
+        moved = [r for r in al if REKEY_ROW_RE.match(r[14]).group(1) in old8 and not r[5].startswith(REKEY_ROW_RE.match(r[14]).group(1))]
+        self.assertEqual(len(moved), 14)
+        for r in moved:
+            self.assertEqual(r[5], want[old8[REKEY_ROW_RE.match(r[14]).group(1)]])
+        self.assertEqual({r[5] for r in moved}, set(want.values()))
+        g16 = sorted((r[14][6:23], r[5][:8], r[6][:8]) for r in moved if r[16] == "g16")
+        self.assertEqual(g16, [("4e832ad6-c9aa9169", "c896f56d", "50e4d770"), ("52ed886c-266ce5e7", "3cbdead3", "6aa6cde8"),
+                               ("52ed886c-ccf8c6db", "3cbdead3", "f9ac37e2"), ("664068b2-46a52ea0", "e6452675", "70ffd7b9"),
+                               ("9e7ca1d0-ff4af8d8", "71064d62", "629f8da4"), ("afb0260e-ff4af8d8", "6450e8d7", "629f8da4"),
+                               ("d1c15bc8-46a52ea0", "7cd72956", "70ffd7b9"), ("f347191a-c9aa9169", "07c231aa", "50e4d770")])
+        for k in want:                                                       # the old rows stay (older Kyty builds, older caches)
+            self.assertTrue([r for r in rows if r[5] == k and "pendval" not in r[14]], k)
+
+
 class Ue5RowTests(Base):
     """UE5 extraction profile rows (cache code=ue5 + ue5 decoder row): every form the schema accepts or refuses, synthetic values only."""
     UE5C, UE5, UE5ENV = CheckTests.UE5C, CheckTests.UE5, CheckTests.UE5ENV
