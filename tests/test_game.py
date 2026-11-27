@@ -372,7 +372,7 @@ class AstroPairRowTests(unittest.TestCase):
         emitter = next(l for l in head if l.startswith("emitter\t")).split("\t")
         self.assertRegex(emitter[1], r"^[0-9a-f]{40}$")
         rows = self.rows()
-        vr = [r for r in rows if "vregion" in r[15].split("+")]
+        vr = [r for r in rows if "vregion" in r[15].split("+") and "pendval" not in r[14]]   # folfix2 alias rows: AstroPairAliasRowTests
         self.assertEqual({c: sum(1 for r in vr if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 12, "g17": 1, "g18": 17})  # 30 rows (g18 incl. 2301c3b7/efe411f8 after 6 timings); the vsmodes (deb14f6d) rows have no vregion token
         self.assertIn(("g17", "713f3ea8c4014632", "6200c07426976d4f"), {(r[16], r[5], r[6]) for r in vr})
         for r in vr:
@@ -588,6 +588,23 @@ class AstroPairAliasRowTests(unittest.TestCase):
                                ("d1c15bc8-46a52ea0", "7cd72956", "70ffd7b9"), ("f347191a-c9aa9169", "07c231aa", "50e4d770")])
         for k in want:                                                       # the old rows stay (older Kyty builds, older caches)
             self.assertTrue([r for r in rows if r[5] == k and "pendval" not in r[14]], k)
+
+    def test_astro_fragment_only_aliases(self):
+        """Set 2: 93 rows whose vertex key is the old one and whose fragment key moved; with set 1 that is every alias row. No alias row
+        claims more than its source (same class, verdict and B/A: the claim is re-measured before pendval goes)."""
+        rows, _ = self.real()
+        al = [r for r in rows if REKEY_ROW_RE.match(r[14])]
+        tok = lambda r: REKEY_ROW_RE.match(r[14]).groups()
+        fs_only = [r for r in al if r[5].startswith(tok(r)[0])]
+        self.assertEqual((len(al), len(fs_only)), (107, 93))
+        for r in fs_only:
+            self.assertFalse(r[6].startswith(tok(r)[1]), r[6])
+        by_cls = {}
+        for r in al:
+            by_cls[r[16]] = by_cls.get(r[16], 0) + 1
+        self.assertEqual(by_cls, {"*": 5, "g16": 55, "g17": 6, "g18": 41})
+        self.assertEqual(len(rows) - len(al), 362)                           # the v1.4.4 rows are all still there
+        self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines are not re-keyed here
 
 
 class Ue5RowTests(Base):

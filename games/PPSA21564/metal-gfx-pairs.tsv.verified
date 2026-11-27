@@ -1,16 +1,16 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=a726c2b9f60c065fe7ee12691db5de6c8029a062af957ab4c5043fdc5993b166
+sha256=a56b07498cb3663744e91899b75378615f7e7f932e81652e545f8ab4da34d833
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
-reproduced=376 of 376
-class gfx *: 32 of 32
-class gfx g16: 149 of 149
-class gfx g17: 47 of 47
-class gfx g18: 148 of 148
+reproduced=469 of 469
+class gfx *: 37 of 37
+class gfx g16: 196 of 196
+class gfx g17: 53 of 53
+class gfx g18: 183 of 183
 emitter=794b61d671400780b8ba3952a24c18002a1393ec nps5-kyty nps5-one-kyty-v144 (v1.4.3 pin 93d944fff + vregion ad698867 + perfmode 7a769133; codegen fp-753d1d73; vregion token default off)
 # 2026-11-27 (v144max): with the v1.4.4 tool (nps5-one-kyty-v144 794b61d67, kyty_msl_dump sha256 6de35f77) all 440 rows (78 compute + 362 graphics) regenerate sha256-exact from the v1.2.3-era cache (cache-play-rc123rel), 0 translate failures, and 429 from the laptop player cache (kyty-stable-a1736e2a): the 11 others are rows whose program is not in that programs.bin (same 11 with the v1.4.3 tool, which also fails to translate the vregion rows).
-# 2026-11-27 (folfix2): + 14 alias rows (evidence rekey-<old pair>,pendval: PENDING validation and timing under their new KosmicKrisp pair, not yet covered by the evidence line below). They regenerate sha256-exact with the v1.4.4 tool from the laptop player cache (kyty-stable-a1736e2a), whose KosmicKrisp vertex texts of the new keys give the same texts as the old keys' rows.
+# 2026-11-27 (folfix2): + 107 alias rows (14 with a moved vertex key, 93 with only a moved fragment key. Evidence rekey-<old pair>,pendval: PENDING validation and timing under their new KosmicKrisp pair, not yet covered by the evidence line below). They regenerate sha256-exact with the v1.4.4 tool from the laptop player cache (kyty-stable-a1736e2a).
 evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16); VS-only rows: vssur bit-exact VS outputs on every vertex
 date=2026-11-27
