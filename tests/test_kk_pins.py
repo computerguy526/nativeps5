@@ -29,6 +29,16 @@ class KkPins(unittest.TestCase):
         names = os.listdir(os.path.join(KK, "patches"))
         self.assertTrue(any(n.startswith("0043-") for n in names), "patch 0043 (MetalFX plain compiler, archfix) missing")
 
+    def test_canon_mesh_patch_present_and_default_off(self):
+        names = [n for n in os.listdir(os.path.join(KK, "patches")) if n.startswith("0044-")]
+        self.assertEqual(len(names), 1, "patch 0044 (KK_MSL_CANON_MESH, folfix) missing")
+        body = open(os.path.join(KK, "patches", names[0])).read()
+        # default off: the variable is read once, empty / unset / "0" leave `plain` exactly as before
+        self.assertIn('getenv("KK_MSL_CANON_MESH")', body)
+        self.assertIn('canon_mesh = e && e[0] && strcmp(e, "0") != 0;', body)
+        self.assertIn("(canon_mesh && st == MESA_SHADER_MESH)", body)
+        self.assertIn("st == MESA_SHADER_COMPUTE ||", body)       # the three plain stages are still accepted without the variable
+
 
 if __name__ == "__main__":
     unittest.main()

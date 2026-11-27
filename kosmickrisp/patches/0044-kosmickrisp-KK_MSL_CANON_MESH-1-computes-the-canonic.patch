@@ -1,0 +1,47 @@
+From af3642ac31c79c9489af689f41e910de872e1c77 Mon Sep 17 00:00:00 2001
+From: computerguy526 <355510486+computerguy526@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 20:00:00 +0000
+Subject: [PATCH] kosmickrisp: KK_MSL_CANON_MESH=1 computes the canonical key
+ for mesh pipelines too (nps5 folfix)
+
+kk_compile_shaders computed the macOS 26 canonical key (the key the shipped override rows carry) only for plain pipelines (VS, FS, CS);
+mesh shaders were excluded, so on macOS 27 a mesh pipeline was looked up only by this Mac's own key, which is not the key the mesh rows
+carry. With KK_MSL_CANON_MESH=1 (default off, read once) a pipeline whose stages are mesh (+ fragment) goes through the same second
+translation and canonical lookup. Without the variable the code path is unchanged: `plain` is computed exactly as before.
+---
+ src/kosmickrisp/vulkan/kk_shader.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index e1b571e..ef7a5d5 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -2627,13 +2627,22 @@ kk_compile_shaders(struct vk_device *device, uint32_t shader_count,
+ {
+    struct kk_device *dev = container_of(device, struct kk_device, vk);
+    struct kk_physical_device *pdev = kk_device_physical(dev);
+-   /* Plain pipelines only: stages that become compute passes (tess, GS) and
+-    * mesh shaders are never overridden, so they get no second translation. */
++   /* Plain pipelines only: stages that become compute passes (tess, GS) are
++    * never overridden, so they get no second translation. nps5 folfix:
++    * mesh pipelines too with KK_MSL_CANON_MESH=1 (the mesh override rows are
++    * keyed by the macOS 26 text; on macOS 27 only the canonical key finds
++    * them). */
++   static int canon_mesh = -1;
++   if (canon_mesh < 0) {
++      const char *e = getenv("KK_MSL_CANON_MESH");
++      canon_mesh = e && e[0] && strcmp(e, "0") != 0;
++   }
+    bool plain = shader_count <= 2;
+    for (uint32_t i = 0; plain && i < shader_count; i++) {
+       const mesa_shader_stage st = infos[i].nir->info.stage;
+       plain = (st == MESA_SHADER_VERTEX || st == MESA_SHADER_FRAGMENT ||
+-               st == MESA_SHADER_COMPUTE) &&
++               st == MESA_SHADER_COMPUTE ||
++               (canon_mesh && st == MESA_SHADER_MESH)) &&
+               !(infos[i].next_stage_mask &
+                 (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                  VK_SHADER_STAGE_GEOMETRY_BIT));
+-- 
+2.56.0
+
