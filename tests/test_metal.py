@@ -809,6 +809,69 @@ class Mesh(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class DigestAliases(unittest.TestCase):
+    """folfix (2026-11-27): the 5 mesh-twin rows named a program digest (Kyty v1.2.3 record) that no v1.4 cache holds ("not in programs.bin").
+    games/<id>/metal-digests.tsv reads the old digest as the new one; the sha256 of our text still decides."""
+    setUp, tearDown = GfxClasses.setUp, GfxClasses.tearDown
+    lst, texts = GfxClasses.lst, GfxClasses.texts
+    OLD = "9" * 32                                           # a digest no cache holds; DG[1].hex() is the one the "v1.4" cache has
+
+    def alias_file(self, *rows):
+        open(os.path.join(self.tmp, metal.DIGESTS_NAME), "w").write("format\tnps5-metal-digests\t1\n" + "".join(rows))
+
+    def old_row(self, texts=None):
+        r = gfx3_row(1, 2, self.kk_vs, "f" * 16, texts or self.texts(1, 2), cls="g16").split("\t")
+        r[1] = self.OLD                                      # the vertex program's digest as an older Kyty recorded it
+        return "\t".join(r)
+
+    def gen(self, rows):
+        return metal.generate_gfx(self.lst(rows), self.prog, self.kkdir, self.out, self.env, out=io.StringIO())
+
+    def test_reader_keeps_hash_rows_only(self):
+        p = os.path.join(self.tmp, "d.tsv")
+        open(p, "w").write("# c\nformat\tnps5-metal-digests\t1\nalias\t%s\t%s\tc739f9614016bed4\nalias\t%s\t%s\nalias\tzz\t%s\nalias\t%s\t%s\nother\t%s\t%s\n"
+                           % (self.OLD, "a" * 32, self.OLD, "b" * 32, "a" * 32, "c" * 32, "c" * 32, "d" * 32, "e" * 32))
+        self.assertEqual(metal.read_digest_aliases(p), {self.OLD: ["a" * 32, "b" * 32]})
+        self.assertEqual(metal.read_digest_aliases(os.path.join(self.tmp, "none.tsv")), {})
+
+    def test_read_perms_alias_finds_the_new_digests_records(self):
+        new = DG[1].hex()
+        plain = metal.read_perms(self.prog, cursors=True)
+        al = metal.read_perms(self.prog, cursors=True, aliases={self.OLD: [new]})
+        self.assertNotIn((self.OLD, metal.spec_key(SP[1])), plain)
+        self.assertEqual(al[(self.OLD, metal.spec_key(SP[1]))], plain[(new, metal.spec_key(SP[1]))])
+        self.assertEqual(al[(self.OLD, metal.spec_key(SP[1]), 0)], plain[(new, metal.spec_key(SP[1]), 0)])
+        self.assertEqual({k: v for k, v in al.items() if k[0] != self.OLD}, plain)       # nothing else changes
+        real = DG[2].hex()                                   # an old digest that IS in the cache keeps its own records
+        al2 = metal.read_perms(self.prog, aliases={real: [new]})
+        self.assertEqual(al2[(real, metal.spec_key(SP[2]))], plain[(real, metal.spec_key(SP[2]))] if (real, metal.spec_key(SP[2])) in plain else 2)
+
+    def test_a_row_with_an_old_digest_is_skipped_without_the_table_and_generated_with_it(self):
+        st = self.gen([self.old_row()])
+        self.assertEqual((st["written"], st["skipped"], st["reasons"]), (0, 1, {"not in programs.bin": 1}), st)
+        self.alias_file("alias\t%s\t%s\n" % (self.OLD, DG[1].hex()))
+        st = self.gen([self.old_row()])
+        self.assertEqual((st["written"], st["skipped"]), (1, 0), st)
+        pair = "%s_%s" % (self.kk_vs, "f" * 16)
+        self.assertEqual(open(os.path.join(self.out, pair + ".vs.metal"), "rb").read(), self.texts(1, 2)[0])
+
+    def test_a_wrong_alias_can_only_skip_the_row(self):
+        programs(self.prog, [(DG[i], SP[i]) for i in range(6)] + [(DG[5], SP[1])])       # another program with the row's specialization
+        self.alias_file("alias\t%s\t%s\n" % (self.OLD, DG[5].hex()))                  # its text is not the verified one
+        st = self.gen([self.old_row()])
+        self.assertEqual((st["written"], st["skipped"]), (0, 1), st)
+        self.assertNotIn("not in programs.bin", st["reasons"])
+        self.assertEqual(st["reasons"], {"text differs from the verified pair": 1})
+
+    def test_the_shipped_astro_table_is_well_formed_and_names_the_mesh_digest(self):
+        d = os.path.join(HERE, "..", "games", "PPSA21564")
+        al = metal.read_digest_aliases(os.path.join(d, metal.DIGESTS_NAME))
+        self.assertEqual(al, {"82c15f895e38ceb888324697b19930d2": ["12404e7aa5e9a8fe19976b870664d8aa"]})
+        _, rows = metal.parse_gfx_list(open(os.path.join(d, metal.GFX_LIST_NAME)).read())
+        mesh = [r for r in rows if metal.is_mesh(r)]
+        self.assertEqual(len(mesh), 9)                                                  # g16 5, g17 2, g18 2
+        self.assertEqual({r["vs"] for r in mesh}, set(al))                              # every mesh row's program is the aliased one
+
 
 # ---- reprofix: spec keys of v1.3 / v1.4 program caches (synthetic blobs; field values are arbitrary numbers, no game data)
 def spec_blob(images, size=34, group=b"\xff\xff\xff\xff", extra=b"\0" * 7, buffers=1):

@@ -48,6 +48,7 @@ KEYS_FORMATS = ("1", "2")  # 2 (v1.2.1) adds mode, class, rule, verdict and B/A 
 LIST_NAME = "metal-shaders.tsv"
 OUT_NAME = "metal-shaders"
 GFX_LIST_NAME = "metal-gfx-pairs.tsv"
+DIGESTS_NAME = "metal-digests.tsv"
 GFX_INDEX = "index-gfx.tsv"
 GFX_FORMAT = ("nps5-metal-gfx-pairs", "2")
 GFX_FORMATS = ("1", "2", "3")   # 2 (v1.1.1) adds the blend column before the evidence: KosmicKrisp blends in the fragment shader;
@@ -82,6 +83,7 @@ GFX_ROW3_RE = re.compile(_GFX_HEAD2.replace(r"\t([0-9a-f]{64})\t([0-9a-f]{64})",
                          + r"\t((?:%s(?:;%s){0,7})?)\t([a-z0-9_+,.-]*)" % (_BLEND_RT, _BLEND_RT) + _CLASS_TAIL)       # format 3: ... evidence mode class rule verdict ba
 HEADER = "// kk-mslinject v1 local_size "
 KPRC = 0x4352504B
+HEX32_RE = re.compile(r"^[0-9a-f]{32}$")
 SEEN_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16})")
 OVERRIDE_RE = re.compile(r"\[kk-mslinject\] override ([0-9a-f]{16}) (local_size|FAILED)")
 
@@ -277,7 +279,27 @@ def legacy_spec(spec):
     return b"".join(out)
 
 
-def read_perms(path, cursors=False):
+def read_digest_aliases(path):
+    """folfix: games/<id>/metal-digests.tsv -> {old program digest (32 hex): [new digest, ...]}. A program's cache digest is a hash of its
+    source RECORD, and a Kyty build that changes the record (the mesh shaders gained 8 code words between the v1.2.3 caches the rows were
+    made on and v1.4) gives the same guest program a new digest: every row naming the old one was "not in programs.bin". The file maps
+    old -> new (hashes only, `alias<TAB>old<TAB>new[<TAB>guest]`); the generator's sha256 check of our text still decides, so a wrong
+    alias can only skip a row. A missing / unreadable file is no aliases."""
+    out = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                p = line.rstrip("\n").split("\t")
+                if len(p) >= 3 and p[0] == "alias" and HEX32_RE.match(p[1]) and HEX32_RE.match(p[2]) and p[1] != p[2]:
+                    out.setdefault(p[1], [])
+                    if p[2] not in out[p[1]]:
+                        out[p[1]].append(p[2])
+    except OSError:
+        pass
+    return out
+
+
+def read_perms(path, cursors=False, aliases=None):
     """Kyty's program cache (<id>.programs.bin): -> {(program digest hex, spec key): permutation index}. The index counts every
     record that is not a source record (kind 1), as kyty_msl_dump --perm does. The first record of a key wins.
     cursors=True also keys (digest, spec key, push-data cursor): records of one program and specialization can differ only in the cursor (u32
@@ -313,6 +335,16 @@ def read_perms(path, cursors=False):
                             out.setdefault(k + (struct.unpack_from("<I", d, p + 16)[0],), idx)
             idx += 1
         off = p + size
+    if aliases:                                         # folfix: a row's old digest finds the permutations of the program's new digest
+        by_digest = {}
+        for k, i in out.items():
+            by_digest.setdefault(k[0], []).append((k, i))
+        for old, news in aliases.items():
+            if any(k[0] == old for k in out):           # the old digest is really in this cache: it keeps its own records
+                continue
+            for new in news:
+                for k, i in by_digest.get(new, ()):
+                    out.setdefault((old,) + k[1:], i)
     return out
 
 
@@ -434,7 +466,7 @@ def generate(list_path, programs, out_dir, environ, jobs=4, seen=None, dump=run_
     if dev is False:
         dev = device_class(environ) if classes else None
     keys = choose(rows, dev, lambda r: r["kk"])
-    perms = read_perms(programs)
+    perms = read_perms(programs, aliases=read_digest_aliases(os.path.join(os.path.dirname(os.path.abspath(list_path)), DIGESTS_NAME)))
     env = clean_env(environ)
     parent = os.path.dirname(out_dir)
     os.makedirs(parent, exist_ok=True)
@@ -952,7 +984,7 @@ def generate_gfx(list_path, programs, kk_msl_dir, out_dir, environ, jobs=4, dump
         raise MetalError("no kyty_msl_dump (build it with scripts/build.sh, or set NPS5_MSL_TOOL)")
     if not os.path.isfile(programs):
         raise MetalError("no %s (prepare the cache first)" % programs)
-    perms = read_perms(programs, cursors=True)
+    perms = read_perms(programs, cursors=True, aliases=read_digest_aliases(os.path.join(os.path.dirname(os.path.abspath(list_path)), DIGESTS_NAME)))
     env = clean_env(environ)
     classes = has_classes(rows)
     if dev is False:

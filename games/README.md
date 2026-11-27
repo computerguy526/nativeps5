@@ -77,6 +77,7 @@ The folder holds:
   (`scripts/check.sh`). `nps5 run` passes it as `KYTY_FAST_MATH_DENY` on the Kyty back end: these shaders keep exact math
   at every `KYTY_GPU_ACCURACY`, which keeps KosmicKrisp's keys (and the verified texts) of the shaders the Metal lists replace.
 - **`promotions.tsv`** (optional, profdrift; [../docs/promotion.md](../docs/promotion.md)): the register of validated or rejected words, `title<TAB>word=value<TAB>verdict<TAB>evidence<TAB>decided<TAB>status<TAB>owner[<TAB>note]`; `python3 -I scripts/nps5lib/profdrift.py check <id>` compares it with the composed profile. Names, values and tags only.
+- **`metal-digests.tsv`** (optional, metal): `format<TAB>nps5-metal-digests<TAB>1`, then `alias<TAB><old program digest, 32 hex><TAB><new digest><TAB>[guest hash]` rows, hashes only. A program's digest in the cache is a hash of its source record; when a Kyty build re-records a program (the mesh shaders gained code words in v1.4) the rows that name the old digest read it as the new one (`nps5 cache metal`; the sha256 of our text still decides).
 - **`metal-guests.tsv`** (optional, ovguard): `format<TAB>nps5-metal-guests<TAB>1`, then `cs|fs|vs<TAB><KosmicKrisp key><TAB><guest shader hash>` rows, hashes only.
   The invariant `scripts/nps5lib/ovguard.py check` enforces (CI, `.nps5-check-tests`): while the profile gives shaders fast math (`KYTY_GPU_ACCURACY` normal or low,
   `KYTY_FAST_MATH>=1`; the vertex stage only with `KYTY_FAST_MATH_VS=1` or `KYTY_FAST_MATH>=3`), every override row's guest hash is in `fast-math-deny.txt`, because fast

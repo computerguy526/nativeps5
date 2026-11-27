@@ -1,0 +1,7 @@
+# nativeps5: program digest aliases for the Metal rows (hashes only, no shader code). scripts/nps5lib/metal.py read_digest_aliases.
+# A program's digest in <id>.programs.bin is a hash of its source RECORD. The mesh shader of the 5 g16 / 2 g17 / 2 g18 mesh-twin rows
+# (guest hash below) was recorded by Kyty v1.2.3 with 15,005 code words (digest 82c15f89...) and by v1.4 with 15,013 (digest 12404e7a...,
+# identical in every v1.4 / v1.4.3 cache), so the rows named a digest no current cache holds ("not in programs.bin" in skipped-gfx.tsv).
+# The generator reads the old digest as the new one, our text is still accepted only when it equals the row's verified sha256.
+format	nps5-metal-digests	1
+alias	82c15f895e38ceb888324697b19930d2	12404e7aa5e9a8fe19976b870664d8aa	c739f9614016bed4

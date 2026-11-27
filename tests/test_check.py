@@ -355,6 +355,17 @@ class TestGuestSidecar(unittest.TestCase):
             self.assertTrue(C.check_guests_list(self.H + bad), bad)
 
 
+class TestDigestSidecar(unittest.TestCase):
+    H = b"format\tnps5-metal-digests\t1\n"
+
+    def test_digest_sidecar(self):
+        ok = b"alias\t" + b"1" * 32 + b"\t" + b"2" * 32 + b"\t" + b"a" * 16 + b"\n"
+        self.assertEqual(C.check_digests_list(b"# hashes only\n" + self.H + ok + ok.replace(b"\t" + b"a" * 16, b"")), [])
+        for bad in (b"alias\t" + b"1" * 31 + b"\t" + b"2" * 32 + b"\n", b"alias\t" + b"1" * 32 + b"\tmain() { return; }\n",
+                    b"copy\t" + b"1" * 32 + b"\t" + b"2" * 32 + b"\n", b"a\0b", b"# int main() { x; }\n"):
+            self.assertTrue(C.check_digests_list(self.H + bad), bad)
+
+
 class TestOverrideBaseline(unittest.TestCase):
     def test_baseline(self):
         ok = b"# accepted\ncs:" + b"1" * 16 + b" no local program; needs a cold run\nword:KYTY_NATIVE_FMINMAX pending the bisect\n"
