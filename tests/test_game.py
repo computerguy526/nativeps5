@@ -373,10 +373,12 @@ class AstroPairRowTests(unittest.TestCase):
         self.assertRegex(emitter[1], r"^[0-9a-f]{40}$")
         rows = self.rows()
         vr = [r for r in rows if "vregion" in r[15].split("+")]
-        self.assertEqual({(r[16], r[5], r[6]) for r in vr}, {("g17", "713f3ea8c4014632", "6200c07426976d4f")})
+        self.assertEqual({c: sum(1 for r in vr if r[16] == c) for c in ("g16", "g17", "g18")}, {"g16": 12, "g17": 1, "g18": 16})  # 29 rows; the vsmodes (deb14f6d) rows have no vregion token
+        self.assertIn(("g17", "713f3ea8c4014632", "6200c07426976d4f"), {(r[16], r[5], r[6]) for r in vr})
         for r in vr:
-            self.assertEqual(r[18], "faster"); self.assertEqual(r[17], "exact"); self.assertLess(float(r[19]), 1.0)
+            self.assertEqual(r[18], "faster"); self.assertLess(float(r[19]), 1.0)
             self.assertEqual(r[15], "fix6+vsmodes+vregion")
+            self.assertIn(r[17], ("exact", "outprec:1"))
             self.assertRegex(r[7] + r[8], r"^[0-9a-f]{128}$")
             self.assertEqual([x for x in rows if (x[5], x[6]) == (r[5], r[6]) and x[16] in (r[16], "*")], [r])
         guests = [l.split("\t") for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if "\t" in l]
@@ -384,6 +386,12 @@ class AstroPairRowTests(unittest.TestCase):
         deny = {l.strip() for l in open(os.path.join(d, "fast-math-deny.txt")) if l.strip() and not l.startswith("#")}
         self.assertIn("9056f3f00ae72940", deny)
         self.assertIn(["fs", "6200c07426976d4f", "9056f3f00ae72940"], guests)
+        for r in vr:  # every row's vertex and pixel key has a guest, and every pixel guest is on the deny list
+            self.assertTrue([g for g in guests if g[0] == "vs" and g[1] == r[5]], r[5])
+            fsg = [g for g in guests if g[0] == "fs" and g[1] == r[6]]
+            self.assertTrue(fsg, r[6])
+            for g in fsg:
+                self.assertIn(g[2], deny)
 
     def test_valfix_dropped_rows_stay_out(self):
         """valfix: no row may carry the text of a row removed after the level-profile check (hashes in tests/data/valfix_dropped.tsv)."""

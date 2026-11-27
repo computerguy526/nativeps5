@@ -1,15 +1,15 @@
 # Record of the no-game-code proof and the reproduction of metal-gfx-pairs.tsv (scripts/nps5_check.py needs it for a per-class list).
 # Hashes, layout numbers and per-class verdicts only; the public generator (kyty_msl_dump --mode of the emitter below) regenerated
 # every row's text sha256-exact from a program cache (nps5 cache metal <id> --reproduce), so no text has to be shipped.
-sha256=9ced4404066ad63e2235f3670e49ef9d841e324f2f0695f18af5c46373d48e4b
+sha256=3785f80a7428100bef895837052d6e92cbb15b3769b8404e5d2b32a05ba3191f
 result=verify: hashes and layout numbers only, no shader text
 title=PPSA21564 01.007.000
-reproduced=333 of 333
+reproduced=361 of 361
 class gfx *: 32 of 32
-class gfx g16: 129 of 129
+class gfx g16: 141 of 141
 class gfx g17: 47 of 47
-class gfx g18: 125 of 125
+class gfx g18: 141 of 141
 emitter=ad69886757ba6cf1b0ae0d468f768b4ac1859dc1 nps5-kyty nps5-one-kyty-vregion (v1.4.3 pin 93d944fff + vs_load_region 191f3e88 + a5af172c, mode token vregion, default off)
-# 2026-11-27 (vregion): with the new tool, 325 of the 334 rows regenerated sha256-exact from the laptop player cache (kyty-stable-a1736e2a) and from the v1.2.3-era cache (cache-play-rc123rel), incl. the new g17 row; 9 older rows have no program / no KosmicKrisp vertex text in either cache and keep their 2026-11-25 reproduction (333 of 333, tool c08648a2); the v1.4.3 tool (93d944fff) reproduces the same 324 of those 333 old rows.
+# 2026-11-27 (vregion): with the new tool, 353 of the 362 rows regenerated sha256-exact from the laptop player cache (kyty-stable-a1736e2a) and from the v1.2.3-era cache (cache-play-rc123rel), incl. the new g17 row; 9 older rows have no program / no KosmicKrisp vertex text in either cache and keep their 2026-11-25 reproduction (333 of 333, tool c08648a2); the v1.4.3 tool (93d944fff) reproduces the same 324 of those 333 old rows.
 evidence=class rows: autoval VERIFIED on every pipeline of the key AND timed FASTER on that GPU class (M6 cloud -> g18, M4 Pro laptop -> g16); VS-only rows: vssur bit-exact VS outputs on every vertex
 date=2026-11-27
