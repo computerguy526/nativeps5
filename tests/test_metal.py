@@ -904,8 +904,8 @@ class DigestAliases(unittest.TestCase):
         self.assertEqual(al, {"82c15f895e38ceb888324697b19930d2": ["12404e7aa5e9a8fe19976b870664d8aa"]})
         _, rows = metal.parse_gfx_list(open(os.path.join(d, metal.GFX_LIST_NAME)).read())
         mesh = [r for r in rows if metal.is_mesh(r)]
-        self.assertEqual(len(mesh), 9)                                                  # g16 5, g17 2, g18 2
-        self.assertEqual({r["vs"] for r in mesh}, set(al))                              # every mesh row's program is the aliased one
+        self.assertEqual(len(mesh), 0)                                                  # v1.4.4: no mesh rows ship (precision fix)
+        self.assertEqual({r["vs"] for r in mesh}, set())
 
 
 # ---- reprofix: spec keys of v1.3 / v1.4 program caches (synthetic blobs; field values are arbitrary numbers, no game data)
