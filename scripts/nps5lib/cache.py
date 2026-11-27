@@ -907,6 +907,9 @@ def cmd_prepare(ctx, o, runner):
         words.append(("KK_MSL_OVERRIDE_LOG", "1"))     # pass 1: KK names every compute kernel it builds (how many listed keys it sees)
         if metalmod.canon_enabled(ctx.environ):
             words.append(("KK_MSL_CANON_KEY", "1"))    # ... and the canonical (macOS 26 / GPU family 9) key of each: the lists' keys
+            gl = metal_gfx_list(ctx)
+            if gl and metalmod.list_has_mesh(gl):
+                words.append(metalmod.CANON_MESH_WORD)  # ... mesh pipelines included (folfix): their rows are keyed canonically too
     # A prepare exits by itself when the list is built; --secs is only its ceiling. 180 s (the old default) cut a first prepare of
     # ~1,600 pipelines on a busy Mac (no until target: the watcher ends a run at its secs), so the default is 30 min.
     cmd = run_cmd(ctx.tid, "cache-prepare", None, o["secs"] or PREPARE_SECS, words)

@@ -348,7 +348,7 @@ def read_perms(path, cursors=False, aliases=None):
     return out
 
 
-CANON_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16}) len=\d+ (compute|vertex|fragment) canon=([0-9a-f]{16})")
+CANON_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16}) len=\d+ (compute|vertex|mesh|fragment) canon=([0-9a-f]{16})")
 
 
 def seen_keys(text):
@@ -770,7 +770,7 @@ def parse_gfx_list(text):
     return meta, rows
 
 
-SEEN_LEN_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16}) len=(\d+) vertex")
+SEEN_LEN_RE = re.compile(r"\[kk-mslinject\] seen ([0-9a-f]{16}) len=(\d+) (?:vertex|mesh)")
 
 
 def seen_vertex_lens(text):
@@ -805,7 +805,8 @@ def find_kk_vertex(kk_msl_dir, wanted, lens=None, alias=None):
         try:
             with open(path, "rb") as f:
                 if size not in sizes:                  # a file of a logged length is always a candidate; else only vertex texts
-                    if not unsized or b"struct VertexOut" not in f.read(4096):
+                    head = f.read(4096) if unsized else b""
+                    if not unsized or (b"struct VertexOut" not in head and b"struct MeshVertexOut" not in head):   # folfix: a mesh text too
                         continue
                     f.seek(0)
                 data = f.read()
@@ -1273,12 +1274,27 @@ def index_rows(out_dir):
     return sha, n
 
 
+CANON_MESH_WORD = ("KK_MSL_CANON_MESH", "1")
+
+
 def mesh_words(d):
-    """meshpath: KK_MSL_OVERRIDE_MESH=1 (patch 0029) when the generated set holds mesh pairs (<ms>_<fs>.ms.metal), else nothing."""
+    """meshpath: KK_MSL_OVERRIDE_MESH=1 (patch 0029) when the generated set holds mesh pairs (<ms>_<fs>.ms.metal), else nothing.
+    folfix: and KK_MSL_CANON_MESH=1 (the mesh pipeline gets the canonical key too: on macOS 27 KosmicKrisp's own mesh text is not the
+    macOS 26 one the mesh rows are keyed with; a KosmicKrisp without the word ignores it)."""
     try:
-        return [("KK_MSL_OVERRIDE_MESH", "1")] if any(f.endswith(".ms.metal") for f in os.listdir(d)) else []
+        return [("KK_MSL_OVERRIDE_MESH", "1"), CANON_MESH_WORD] if any(f.endswith(".ms.metal") for f in os.listdir(d)) else []
     except OSError:
         return []
+
+
+def list_has_mesh(path):
+    """folfix: True when the graphics list at `path` holds a mesh row (prepare pass 1 logs the mesh pipelines' canonical keys only then)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            _, rows = parse_gfx_list(f.read())
+    except (OSError, MetalError):
+        return False
+    return any(is_mesh(r) for r in rows)
 
 
 def launch_words(cache_dir, list_path, environ):
