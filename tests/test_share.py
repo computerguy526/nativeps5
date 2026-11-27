@@ -33,6 +33,10 @@ elif a[0] == "export":
         for l in read(opt(k)):
             if l.startswith(("title ", "version ")): head = (head or []) + [l]
             else: entries.add(l)
+    if opt("--base"): entries |= {l for l in read(opt("--base")) if l[:2] in ("S:", "M:", "P:")}
+    import os
+    if os.environ.get("FAKE_TOOL_STAGES") == "1":   # a pipeline needs its permutation in the journals or the base list, as the real tool resolves stages
+        entries = {l for l in entries if not l.startswith("P:") or ("M:" + l[2:]) in entries}
     open(opt("--out"), "w").write("\n".join(sorted(set(head)) + ["producer " + (opt("--producer") or "?")] + sorted(entries)) + "\n")
 elif a[0] == "merge":
     ins = [x for x in a[1:] if not x.startswith("--") and x != opt("--out") and x != opt("--producer")]
@@ -192,6 +196,60 @@ class T(unittest.TestCase):
         self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
         ex = [c for c in self.calls if len(c) > 1 and c[1] == "export"][0]
         self.assertNotIn("--runtime-code", ex)
+
+    # ---- the base list (skipped 2026-11-27): a session played with a list journals only what the list did not hold
+    def test_share_exports_against_the_shipped_list(self):
+        d = self.journals("a", "S:vertex:3\nM:3\nP:3")
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]
+        self.assertEqual(ex[ex.index("--base") + 1], self.shipped); self.assertNotIn("--identity-aliases", ex)
+
+    def test_share_keeps_a_pipeline_whose_permutation_only_the_list_holds(self):
+        # the journal holds a NEW pipeline (P:1x) over the list's permutation M:1x and no shader journal entry for it
+        self.write_shipped(lst("01.001.000", "S:vertex:1", "S:pixel:2", "M:1x", "M:2", "P:2"))
+        self.env["FAKE_TOOL_STAGES"] = "1"
+        d = self.journals("a", "P:1x")
+        rc, out = self.run_main(["share", "PPSA00001", "--from", d])
+        self.assertEqual(rc, 0, out); self.assertIn("NEW:          shaders 0 (vertex 0, pixel 0, compute 0), permutations 0, pipelines 1", out)
+        self.assertEqual(len(self.contribs()), 2)
+        # the old export (no base list) drops it and reports nothing to share: the bug this guards
+        for f in self.contribs(): os.remove(os.path.join(self.gd, "contrib", f))
+        self.env["NPS5_CACHE_EXPORT_BASE"] = "0"; self.calls.clear()
+        rc, out = self.run_main(["share", "PPSA00001", "--from", d])
+        self.assertEqual(rc, 0, out); self.assertIn("Thanks", out); self.assertNotIn("--base", self.export_calls()[0]); self.assertEqual(self.contribs(), [])
+
+    def test_share_base_list_switches(self):
+        d = self.journals("a", "S:vertex:3\nM:3\nP:3")
+        self.env["NPS5_CACHE_IDENTITY_ALIASES"] = "1"
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]; self.assertIn("--identity-aliases", ex); self.assertIn("--base", ex)
+        self.env["NPS5_CACHE_IDENTITY_ALIASES"] = "0"; self.calls.clear()
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        self.assertNotIn("--identity-aliases", self.export_calls()[0])
+
+    def test_ue5_title_takes_the_base_list_only_when_asked(self):
+        self.ue5rows()
+        d = self.journals("a", "S:vertex:1\nS:vertex:3\nM:1\nM:3\nP:3")
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        self.assertNotIn("--base", self.export_calls()[0])
+        self.env["NPS5_CACHE_EXPORT_BASE"] = "1"; self.calls.clear()
+        self.assertEqual(self.run_main(["share", "PPSA00001", "--from", d])[0], 0)
+        ex = self.export_calls()[0]; self.assertEqual(ex[ex.index("--base") + 1], self.shipped); self.assertIn("--runtime-code", ex)
+
+    def test_merge_exports_against_the_committed_list_but_not_for_a_rebuild(self):
+        d = self.journals("a", "S:vertex:3\nM:3\nP:3")
+        rc, out = self.run_main(["merge", "PPSA00001", "--from", d]); self.assertEqual(rc, 0, out)
+        ex = self.export_calls()[0]; self.assertEqual(ex[ex.index("--base") + 1], self.shipped)
+        self.calls.clear()
+        rc, out = self.run_main(["merge", "PPSA00001", "--from", d, "--rebuild"]); self.assertEqual(rc, 0, out)
+        self.assertNotIn("--base", self.export_calls()[0])
+
+    def test_export_base_words_without_a_shipped_list(self):
+        os.remove(self.shipped)
+        ctx = cache.context("PPSA00001", dict(self.env), commits=tc.COMMITS)
+        self.assertEqual(cache.export_base_words(ctx), [])
+        ctx.environ["NPS5_CACHE_IDENTITY_ALIASES"] = "1"
+        self.assertEqual(cache.export_base_words(ctx), ["--identity-aliases"])
 
     def test_nothing_new_says_thanks_and_writes_nothing(self):
         self.journals("a", "S:vertex:1\nM:2\nP:1")

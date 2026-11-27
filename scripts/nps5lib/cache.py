@@ -31,6 +31,10 @@ $NPS5_KK_LIBCACHE_BUILD (default scripts/kk-libcache-build.sh) <dir> <jobs> buil
 cache and a fresh Metal cache id with the metallibs in place. (KK's Metal archive keys a pipeline on its library: a pipeline built from
 a source-compiled library never hits when the same shader is later loaded from a metallib, so only pass 2's archive is kept.)
 After a successful `prepare`, cachezip.py compresses the finished cache dir with APFS LZFSE (about 2.5x smaller) when NPS5_CACHE_COMPRESS=1.
+`merge` and `share` export the journals against the shipped list (`--base`): a session played with a list journals only the shaders the
+list did not hold, so without it every recorded pipeline with a list shader is dropped (NPS5_CACHE_EXPORT_BASE=0: the old export;
+code=ue5 titles: only with =1). NPS5_CACHE_IDENTITY_ALIASES=1 adds `--identity-aliases` (journal records of older builds; needs a tool
+that knows the option).
 Tool: $NPS5_KYPLST_TOOL, else <kyty>/build-arm64/kyty_pipeline_list. Exit codes: 0 ok, 1 failed / stale, 2 usage."""
 import hashlib, importlib.util, os, re, shlex, shutil, subprocess, sys, threading, time
 
@@ -546,6 +550,22 @@ def cmd_record(ctx, o, runner):
     return rc_all
 
 
+def export_base_words(ctx, rebuild=False):
+    """Extra words for `kyty_pipeline_list export` of a player's or a recording's journals.
+    `--base <shipped list>`: the emulator journals only the shaders it compiled itself; a permutation it took from the installed list is in
+    no journal, and a recorded pipeline with such a stage is dropped without the list (a player with a complete list exported nothing:
+    2,804 records -> 0, 2026-11-27). Default on when the shipped list exists; not for --rebuild (the committed list must stay out), not for
+    code=ue5 titles unless NPS5_CACHE_EXPORT_BASE=1 (their base lists hold runtime shaders: untested here); =0 switches it off.
+    `--identity-aliases` (NPS5_CACHE_IDENTITY_ALIASES=1, default off): stage identities of older specialization layouts resolve too."""
+    e = ctx.environ.get("NPS5_CACHE_EXPORT_BASE", "")
+    w = []
+    if e != "0" and not rebuild and os.path.isfile(ctx.list_path) and (e == "1" or not ue5_row(ctx.p)):
+        w += ["--base", ctx.list_path]
+    if ctx.environ.get("NPS5_CACHE_IDENTITY_ALIASES", "") == "1":
+        w += ["--identity-aliases"]
+    return w
+
+
 def recordings(ctx, extra):
     out = []
     for base in [os.path.join(ctx.root, "rec")] if not extra else []:
@@ -569,7 +589,8 @@ def cmd_merge(ctx, o, runner):
         n = os.path.basename(d.rstrip("/"))
         out = os.path.join(out_dir, n + ".kyplst")
         r = runner([tool, "export", "--out", out, "--game", app0, "--shaders", os.path.join(d, ctx.tid + ".shaders.journal"),
-                    "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", "nps5-cache-" + n], env=ctx.environ, capture=True)
+                    "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", "nps5-cache-" + n] + export_base_words(ctx, o["rebuild"]),
+                   env=ctx.environ, capture=True)
         if r[0] != 0:
             print("export %s FAILED:\n%s" % (n, r[1])); failed.append(n); continue
         lists.append(out); print("export %s: ok" % n)
@@ -664,7 +685,8 @@ def cmd_share(ctx, o, runner):
             store = next((q for q in (os.path.join(d, ctx.tid + ".codestore"), os.path.join(ctx.dir, ctx.tid + ".codestore")) if os.path.isfile(q)), "")
             xw = ["--runtime-code"] + (["--code-store", store] if store else [])
         rc, text = runner([tool, "export", "--out", out, "--game", app0, "--shaders", os.path.join(d, ctx.tid + ".shaders.journal"),
-                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer] + xw, env=ctx.environ, capture=True)
+                           "--pipelines", os.path.join(d, ctx.tid + ".pipelines.journal"), "--producer", producer] + xw + export_base_words(ctx),
+                          env=ctx.environ, capture=True)
         if rc != 0:
             print("share: could not export journal set %d: %s" % (i + 1, scrub(text.strip().splitlines()[-1] if text.strip() else "?", ctx.environ))); continue
         exp.append(out)
