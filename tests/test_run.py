@@ -745,6 +745,34 @@ class Exec(unittest.TestCase):
         self.assertTrue(os.path.isfile(ln))
         self.assertEqual(os.path.realpath(ln), os.path.realpath(os.path.join(bd, "guest_image.bin")))
 
+    def test_override_index_is_saved_into_the_run_dir_before_the_run(self):
+        ov = os.path.join(self.d, "metal-shaders"); os.makedirs(ov)
+        for n, c in (("index.tsv", "class\tg16@os27\n"), ("index-gfx.tsv", "class\tg16@os27\n"), ("skipped.tsv", ""), ("skipped-gfx.tsv", "a\tb\tnot in programs.bin\n"),
+                     ("abc.metal", "TEXT")):
+            open(os.path.join(ov, n), "w").write(c)
+        orig = run.compose
+        def compose(*a, **k):
+            p = orig(*a, **k); p.env["KK_MSL_OVERRIDE_DIR"] = ov; return p
+        run.compose = compose
+        try:
+            self.assertEqual(self.go([], FakeProc(124)), 0)
+        finally:
+            run.compose = orig
+        rd = self.plan_.run_dir
+        for n in run.OVERRIDE_INDEX_FILES:
+            self.assertTrue(os.path.isfile(os.path.join(rd, n)), n)
+        self.assertEqual(open(os.path.join(rd, "index.tsv")).read(), "class\tg16@os27\n")
+        self.assertFalse(os.path.exists(os.path.join(rd, "abc.metal")))              # game-derived texts are never copied
+        open(os.path.join(ov, "index.tsv"), "w").write("class\tg17@os27\n")           # a later prepare rewrites the dir: the run keeps its copy
+        self.assertEqual(open(os.path.join(rd, "index.tsv")).read(), "class\tg16@os27\n")
+
+    def test_override_index_missing_dir_or_files_is_not_an_error(self):
+        rd = os.path.join(self.d, "rd"); os.makedirs(rd)
+        self.assertEqual(run.save_override_index({}, rd), [])
+        self.assertEqual(run.save_override_index({"KK_MSL_OVERRIDE_DIR": os.path.join(self.d, "nope")}, rd), [])
+        ov = os.path.join(self.d, "ov"); os.makedirs(ov); open(os.path.join(ov, "index.tsv"), "w").write("x")
+        self.assertEqual(run.save_override_index({"KK_MSL_OVERRIDE_DIR": ov}, rd), ["index.tsv"])
+
     def test_fixed_run_and_schema(self):
         self.assertEqual(self.go([], FakeProc(124)), 0)
         rj = self.rj(); self.assertEqual(rj["verdict"], "DONE_FIXED"); self.assertEqual(run.validate_run_json(rj), [])

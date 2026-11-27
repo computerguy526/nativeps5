@@ -1172,6 +1172,24 @@ def end_child(pr, grace=10):
         except Exception: pass
 
 
+OVERRIDE_INDEX_FILES = ("index.tsv", "index-gfx.tsv", "skipped.tsv", "skipped-gfx.tsv")
+
+
+def save_override_index(env, run_dir):
+    """Copy the override dir's index files (KK_MSL_OVERRIDE_DIR: index*.tsv, skipped*.tsv; never the game-derived .metal texts) into the run dir BEFORE the
+    run: the log names override hits by key only, and `nps5 cache prepare` / refresh_metal_after_run rewrites the index afterwards, so a later
+    reading (osgate.py classes / families) needs the index that was current at run time. Returns the names copied (never raises)."""
+    d = (env or {}).get("KK_MSL_OVERRIDE_DIR") or ""
+    got = []
+    for n in OVERRIDE_INDEX_FILES:
+        try:
+            if os.path.isfile(os.path.join(d, n)):
+                shutil.copy2(os.path.join(d, n), os.path.join(run_dir, n)); got.append(n)
+        except OSError:
+            pass
+    return got
+
+
 def set_aside(run_dir):
     """A run folder that already holds a run.json belongs to an earlier run of this tag: rename it <tag>.prev-<time> so its
     frames, logs and run.json are neither lost nor read as this run's. Returns the new name or None."""
@@ -1245,6 +1263,7 @@ def execute(plan, opts, environ, queue_factory=Queue, popen=subprocess.Popen, ha
         if aside:
             print("nps5 run: note: tag %s was used before; the earlier run is now %s" % (plan.tag, os.path.basename(aside)), file=sys.stderr)
         os.makedirs(os.path.join(plan.run_dir, "frames"), exist_ok=True); os.makedirs(os.path.join(plan.workdir, "home"), exist_ok=True)
+        save_override_index(plan.env, plan.run_dir)          # the Metal-row index current at run time (osgate.py families / classes read it from the run dir)
         gfound, gsrc, gnote = guest_image_plan(plan.sel)
         if not gfound:
             if gsrc:
