@@ -209,6 +209,60 @@ class ReentryCheck(unittest.TestCase):
         r = SC.check_reentry(self.HEAD + self.PRESS + self.S("worldmap") + self.S("lv") + "[ps4-vfs] overlay open cats-flowers/level.lvx\n", "lv")
         self.assertIn("1 overlay open", r[3][2])
 
+    # --- deterministic version: overlay open lines + Kyty draw summaries ---
+    LOG = HEAD + PRESS + "[scenery] scene worldmap: 0 shader pairs active (F- G+ M+ O+ (custom))\n"
+    def OP(self, rel, tgt): return "[ps4-vfs] overlay open %s -> %s\n" % (rel, tgt)
+    def err(self, tgt):
+        return self.LOG + self.S("lv") + self.OP("Content/Levels/lv/a.lvx", tgt)
+    GOOD = "/s/scenery/PPSA21564/cats-flowers/Content/Levels/lv/a.lvx"
+
+    def test_variant_pass_and_fail(self):
+        r = SC.check_reentry(self.err(self.GOOD), "lv", strict=True)
+        self.assertEqual((r[3][0], r[3][1]), ("PASS", "variant")); self.assertIn("cats-flowers", r[3][2])
+        self.assertEqual(SC.check_reentry(self.err("/s/scenery/x/cats-flowers+grass/p/a"), "lv", strict=True)[3][0], "PASS")
+        self.assertEqual(SC.check_reentry(self.err("/g/PPSA21564/app0/Content/Levels/lv/a.lvx"), "lv", strict=True)[3][0], "FAIL")   # the player's own file
+        self.assertEqual(SC.check_reentry(self.err("/s/cats-flowers~50/p/a"), "lv", strict=True)[3][0], "FAIL")                    # thinned, not off
+        self.assertEqual(SC.check_reentry(self.err("/s/cats-grass/p/a"), "lv", strict=True)[3][0], "FAIL")
+        self.assertEqual(SC.check_reentry(self.LOG + self.S("lv"), "lv", strict=True)[3][0], "FAIL")                               # no open logged
+        # an open BEFORE the re-entry does not count
+        early = self.HEAD + self.OP("Content/Levels/lv/a.lvx", self.GOOD) + self.PRESS + "[scenery] scene worldmap: 0 shader pairs active (F- G+ M+ O+ (custom))\n" + self.S("lv")
+        self.assertEqual(SC.check_reentry(early, "lv", strict=True)[3][0], "FAIL")
+
+    @staticmethod
+    def SUM(label, flips, pairs):
+        d = sum(c for _, _, c in pairs)
+        return ("# kyty draw summary v1\n# dump 1 why x flip 9 window_flips %d window_ms 6000 draws %d pairs %d label %s\n" % (flips, d, len(pairs), label)
+                + "".join("D %016x %016x %d\n" % (v, p, c) for v, p, c in pairs))
+
+    def sums(self, before, after):
+        return [SC.parse_draws(self.SUM("scene:lv#1", 100, before)), SC.parse_draws(self.SUM("scene:lv#2", 200, after))]
+
+    def test_draws_pass_fail(self):
+        common = [(1, 2, 5000), (3, 4, 900)]
+        flowers = [(10, 20, 1500), (11, 20, 600)]                       # 21 per flip before
+        ok = SC.check_draws(self.sums(common + flowers, [(1, 2, 10100), (3, 4, 1800)]), "lv")
+        self.assertEqual(ok[0], "PASS"); self.assertIn("21.0", ok[1]); self.assertIn("-> 0.0", ok[1])
+        st = SC.check_draws(self.sums(common + flowers, common + flowers), "lv")[0]           # nothing vanished
+        self.assertEqual(st, "FAIL")
+        self.assertEqual(SC.check_draws(self.sums(common + flowers, common + [(10, 20, 400)]), "lv", flower_pairs={("%016x" % 10, "%016x" % 20), ("%016x" % 11, "%016x" % 20)})[0], "FAIL")  # 2/flip left of 21 = 9.5 %
+        self.assertEqual(SC.check_draws(self.sums(common, common), "lv")[0], "FAIL")           # no flowers before at all
+        self.assertEqual(SC.check_draws(self.sums(common + flowers, common)[:1], "lv")[0], "FAIL")   # one entry only
+
+    def test_draws_given_pairs_and_cli(self):
+        import tempfile, subprocess
+        d = tempfile.mkdtemp()
+        for i, (lab, fl, pr) in enumerate([("scene:lv#1", 100, [(1, 2, 5000), (10, 20, 2100)]), ("scene:lv#2", 200, [(1, 2, 10000)])]):
+            open(os.path.join(d, "t.%d.sc%d_lv.draws.txt" % (i, i + 1)), "w").write(self.SUM(lab, fl, pr))
+        open(os.path.join(d, "junk.draws.txt"), "w").write("not a summary\n")
+        e = os.path.join(d, "run.err"); open(e, "w").write(self.err(self.GOOD))
+        fp = os.path.join(d, "pairs.txt"); open(fp, "w").write("# flowers\n000000000000000a 0000000000000014\n")
+        for extra in ([], ["--flower-pairs", fp]):
+            p = subprocess.run([sys.executable, "-I", os.path.join(REPO, "scripts", "nps5lib", "scenerycheck.py"), "--reentry", e, "--scene", "lv"] + extra + ["--draws", d], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertIn("PASS variant", p.stdout); self.assertIn("PASS draws", p.stdout); self.assertIn("21.0 ", p.stdout)
+        bad = SC.check_reentry(self.err("/g/app0/a"), "lv", draws=SC.load_draws([d]))
+        self.assertEqual([x[0] for x in bad[3:]], ["FAIL", "PASS"])
+
     def test_cli(self):
         import tempfile, subprocess
         with tempfile.NamedTemporaryFile("w", suffix=".err", delete=False) as f:
