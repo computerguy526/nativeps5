@@ -249,7 +249,6 @@ class ReentryCheck(unittest.TestCase):
         self.assertEqual(SC.check_draws(self.sums(common + flowers, common)[:1], "lv")[0], "FAIL")   # one entry only
 
     def test_draws_given_pairs_and_cli(self):
-        import tempfile, subprocess
         d = tempfile.mkdtemp()
         for i, (lab, fl, pr) in enumerate([("scene:lv#1", 100, [(1, 2, 5000), (10, 20, 2100)]), ("scene:lv#2", 200, [(1, 2, 10000)])]):
             open(os.path.join(d, "t.%d.sc%d_lv.draws.txt" % (i, i + 1)), "w").write(self.SUM(lab, fl, pr))
@@ -264,7 +263,6 @@ class ReentryCheck(unittest.TestCase):
         self.assertEqual([x[0] for x in bad[3:]], ["FAIL", "PASS"])
 
     def test_cli(self):
-        import tempfile, subprocess
         with tempfile.NamedTemporaryFile("w", suffix=".err", delete=False) as f:
             f.write(self.HEAD + self.PRESS + self.S("worldmap") + self.S("lv"))
         p = subprocess.run([sys.executable, "-I", os.path.join(REPO, "scripts", "nps5lib", "scenerycheck.py"), "--reentry", f.name, "--scene", "lv"], capture_output=True, text=True)
