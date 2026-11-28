@@ -40,8 +40,8 @@ class Eligibility(unittest.TestCase):
 
 class Logic(unittest.TestCase):
     """compress_dir with an injected compressor: no APFS needed."""
-    def setUp(self): self.d = tempfile.mkdtemp()
-    def tearDown(self): shutil.rmtree(self.d, ignore_errors=True)
+    def setUp(self): self.d = tempfile.mkdtemp(); self.fs = cz.free_space; cz.free_space = lambda r: 1 << 50
+    def tearDown(self): cz.free_space = self.fs; shutil.rmtree(self.d, ignore_errors=True)
 
     def test_dry_run_changes_nothing(self):
         p = put(self.d, "a.bin"); before = open(p, "rb").read(); calls = []
@@ -83,8 +83,8 @@ class Logic(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "darwin" and cz._tool(), "needs macOS APFS and afsctool or ditto")
 class Real(unittest.TestCase):
-    def setUp(self): self.d = tempfile.mkdtemp(dir=os.environ.get("NPS5_TEST_TMP"))
-    def tearDown(self): shutil.rmtree(self.d, ignore_errors=True)
+    def setUp(self): self.d = tempfile.mkdtemp(dir=os.environ.get("NPS5_TEST_TMP")); self.fs = cz.free_space; cz.free_space = lambda r: 1 << 50
+    def tearDown(self): cz.free_space = self.fs; shutil.rmtree(self.d, ignore_errors=True)
 
     def test_compress_identical_idempotent(self):
         p = put(self.d, "libcache/a.metal"); q = put(self.d, "x.programs.bin", os.urandom(1000) + TEXT * 3); j = put(self.d, "x.shaders.journal")
@@ -104,6 +104,106 @@ class Real(unittest.TestCase):
         with open(p, "rb"):
             res = cz.compress_dir(self.d, log=lambda *_: None)
         self.assertFalse(cz.is_compressed(p)); self.assertEqual(res["skipped"].get("in use"), 1)
+
+
+def _clone(src, dst):
+    return subprocess.run(["cp", "-c", src, dst], capture_output=True).returncode == 0
+
+
+class Clones(unittest.TestCase):
+    """2026-11-28 laptop disk hit 0: compressing APFS clones (cp -c) in place ends the block sharing and GROWS disk use."""
+    def setUp(self): self.d = tempfile.mkdtemp(dir=os.environ.get("NPS5_TEST_TMP")); self.fs = cz.free_space; cz.free_space = lambda r: 1 << 50
+    def tearDown(self): cz.free_space = self.fs; shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_injected_shared_files_skipped(self):
+        put(self.d, "clone.bin"); put(self.d, "own.bin"); put(self.d, "unknown.bin"); calls = []
+        sh = {"clone.bin": 4096, "own.bin": 0, "unknown.bin": None}
+        res = cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(os.path.basename(f)) or True,
+                              shared=lambda p: sh[os.path.basename(p)], log=lambda *_: None)
+        self.assertEqual(calls, ["own.bin"])
+        self.assertEqual(res["skipped"].get(cz.CLONE_REASON), 1); self.assertEqual(res["skipped"].get("clone check failed"), 1)
+        self.assertIn("MORE disk", cz.report(res, False))
+
+    def test_plain_file_not_shared(self):
+        p = put(self.d, "a.bin", os.urandom(300000))
+        self.assertEqual(cz.shared_bytes(p), 0)
+
+    @unittest.skipUnless(sys.platform == "darwin", "APFS clones need macOS")
+    def test_real_cp_c_clone_detected_and_skipped(self):
+        a = put(self.d, "master/x.programs.bin", os.urandom(400000) + TEXT); b = os.path.join(self.d, "copy.programs.bin")
+        if not _clone(a, b):
+            self.skipTest("cp -c (APFS clonefile) not supported here")
+        t = time.time() - 3600; os.utime(b, (t, t))
+        if cz.shared_bytes(a) == 0:
+            self.skipTest("volume does not report APFS private size")
+        self.assertGreater(cz.shared_bytes(a), 0); self.assertGreater(cz.shared_bytes(b), 0)
+        r = {os.path.basename(p): w for p, w in cz.candidates(self.d, open_set=set())}
+        self.assertEqual(r["x.programs.bin"], cz.CLONE_REASON); self.assertEqual(r["copy.programs.bin"], cz.CLONE_REASON)
+        calls = []
+        cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(f) or True, log=lambda *_: None)
+        self.assertEqual(calls, [])
+        os.unlink(a)                                           # sharing over: the survivor owns all its blocks again
+        self.assertEqual(cz.shared_bytes(b), 0)
+        self.assertIsNone(dict(cz.candidates(self.d, open_set=set()))[b])
+
+    @unittest.skipUnless(sys.platform == "darwin" and cz._tool(), "needs macOS APFS and afsctool or ditto")
+    def test_real_compress_leaves_clones_shared(self):
+        a = put(self.d, "a.metal", TEXT * 4); b = os.path.join(self.d, "b.metal")
+        if not _clone(a, b) or cz.shared_bytes(a) == 0:
+            self.skipTest("no APFS clones here")
+        t = time.time() - 3600; os.utime(b, (t, t)); own = put(self.d, "own.metal", TEXT * 2)
+        cz.compress_dir(self.d, open_set=set(), log=lambda *_: None)
+        self.assertFalse(cz.is_compressed(a)); self.assertFalse(cz.is_compressed(b)); self.assertGreater(cz.shared_bytes(b), 0)
+        if not cz.is_compressed(own):
+            self.skipTest("this filesystem does not support APFS compression")
+
+
+class FreeFloor(unittest.TestCase):
+    def setUp(self): self.d = tempfile.mkdtemp()
+    def tearDown(self): shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_floor_value(self):
+        self.assertEqual(cz.space_floor(0), 5 * 1024 ** 3); self.assertEqual(cz.space_floor(1024 ** 3), 5 * 1024 ** 3)
+        self.assertEqual(cz.space_floor(4 * 1024 ** 3), 8 * 1024 ** 3)
+
+    def test_low_space_refuses(self):
+        put(self.d, "a.bin"); calls = []
+        res = cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(f) or True, free=lambda r: 4 * 1024 ** 3,
+                              shared=lambda p: 0, log=lambda *_: None)
+        self.assertEqual(calls, []); self.assertIsNotNone(res["low_space"]); self.assertIn("STOPPED", cz.report(res, False))
+
+    def test_enough_space_compresses(self):
+        put(self.d, "a.bin"); calls = []
+        res = cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(f) or True, free=lambda r: 6 * 1024 ** 3,
+                              shared=lambda p: 0, log=lambda *_: None)
+        self.assertEqual(len(calls), 1); self.assertIsNone(res["low_space"])
+
+    def test_floor_scales_with_largest_file(self):
+        old = cz.FREE_FLOOR; cz.FREE_FLOOR = 1000
+        try:
+            put(self.d, "a.bin"); calls = []                   # largest = len(TEXT): floor 2x that
+            cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(f) or True, free=lambda r: len(TEXT) * 2 - 1,
+                            shared=lambda p: 0, log=lambda *_: None)
+            self.assertEqual(calls, [])
+            cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(f) or True, free=lambda r: len(TEXT) * 2,
+                            shared=lambda p: 0, log=lambda *_: None)
+            self.assertEqual(len(calls), 1)
+        finally: cz.FREE_FLOOR = old
+
+    def test_stops_mid_run_when_space_drops(self):
+        for n in "abcd": put(self.d, n + ".bin")
+        left = [10 * 1024 ** 3, 10 * 1024 ** 3, 1, 1]; calls = []
+        res = cz.compress_dir(self.d, open_set=set(), compress=lambda f: calls.append(f) or True, free=lambda r: left.pop(0),
+                              shared=lambda p: 0, log=lambda *_: None)
+        self.assertEqual(len(calls), 2); self.assertIsNotNone(res["low_space"])
+
+    def test_dry_run_ignores_floor(self):
+        put(self.d, "a.bin")
+        res = cz.compress_dir(self.d, dry_run=True, open_set=set(), free=lambda r: 0, shared=lambda p: 0, log=lambda *_: None)
+        self.assertEqual(res["files"], 1)
+
+    def test_real_free_space_positive(self):
+        self.assertGreater(cz.free_space(self.d), 0)
 
 
 class Decision(unittest.TestCase):

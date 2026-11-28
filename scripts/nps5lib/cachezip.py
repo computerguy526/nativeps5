@@ -15,12 +15,17 @@ Safe by construction:
     compression again (harmless, pointless). Everything else that is rewritten (program cache, driver cache) is only
     recompressed on the next prepare.
   - already-compressed files are skipped (idempotent). Files under --min-size (default 64 KiB) are skipped.
+  - files that share blocks with another file (APFS clones, e.g. `cp -c` copies of a cache) are skipped: compressing one
+    rewrites its blocks and ends the sharing, so disk use GROWS (laptop disk hit 0 on 2026-11-28). Detected with getattrlist
+    ATTR_CMNEXT_PRIVATESIZE (bytes only this file owns) < allocated size; if that cannot be read on macOS the file is skipped.
+  - free-space floor: nothing is compressed while free space on the volume is below max(2 x largest eligible file, 5 GiB)
+    (checked before the run and before every file; the run stops there and says so).
   - after compressing, the sha256 of the bytes read back is compared with the sha256 taken before; on a mismatch the
     file is restored decompressed and the run exits non-zero. --no-verify skips this (afsctool still verifies itself).
   - tools: /opt/homebrew/bin/afsctool or `afsctool` on PATH (-c -T LZFSE -s 10); otherwise `ditto --hfsCompression`
     (files over 512 MiB are skipped by ditto and stay as they are). Not macOS / no tool: does nothing, exit 0.
 Env (library entry point only): NPS5_CACHE_COMPRESS=1 enables / 0 disables after prepare; unset = ask on a TTY (default yes), else DEFAULT_ON (True), no prompt. Exit codes: 0 ok, 1 verify failure, 2 usage."""
-import hashlib, os, re, shutil, stat, subprocess, sys, tempfile
+import ctypes, ctypes.util, hashlib, os, re, shutil, stat, struct, subprocess, sys, tempfile
 
 # Default for `nps5 cache prepare`: ON since the 2026-11-28 warm-start A/B-A on box 3 (ASTRO + SAROS, plain vs compressed cache,
 # work/research/cachecomp-2026-11-27.md "exec: default"). NPS5_CACHE_COMPRESS=0 forces it off, =1 forces it on. Fallbacks: any
@@ -31,6 +36,57 @@ MAX_SIZE = 2 * 1024 ** 3 - 1
 DITTO_MAX = 512 * 1024 ** 2          # ditto --hfsCompression skips bigger files; afsctool handles up to MAX_SIZE
 GAME_RE = re.compile(r"(^|/)(ue2)?boot/native_|/ue2boot/native_out\d+|(^|/)native(_[A-Za-z0-9_.-]+)?$|(^|/)kyty")
 SKIP_SUFFIX = (".journal", ".known", ".last_scene", ".lock", ".tmp", ".pid")
+FREE_FLOOR = 5 * 1024 ** 3           # never compress with less free space than this (or 2x the largest eligible file)
+CLONE_REASON = "shares blocks (APFS clone)"
+
+
+class _AttrList(ctypes.Structure):
+    _fields_ = [("bitmapcount", ctypes.c_ushort), ("reserved", ctypes.c_uint16), ("commonattr", ctypes.c_uint32),
+                ("volattr", ctypes.c_uint32), ("dirattr", ctypes.c_uint32), ("fileattr", ctypes.c_uint32), ("forkattr", ctypes.c_uint32)]
+
+
+_ATTR_CMN_RETURNED_ATTRS, _ATTR_CMNEXT_PRIVATESIZE = 0x80000000, 0x00000008
+_FSOPT_NOFOLLOW, _FSOPT_ATTR_CMN_EXTENDED = 0x1, 0x20
+_libc = []
+
+
+def private_size(path):
+    """Bytes of path's allocation that no other file shares (APFS ATTR_CMNEXT_PRIVATESIZE). Returns the allocated size when the
+    volume does not report it (no clones possible there), None when getattrlist fails. Not macOS: allocated size."""
+    try:
+        alloc = os.lstat(path).st_blocks * 512
+    except OSError:
+        return None
+    if sys.platform != "darwin":
+        return alloc
+    try:
+        if not _libc:
+            _libc.append(ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True))
+        al = _AttrList(5, 0, _ATTR_CMN_RETURNED_ATTRS, 0, 0, 0, _ATTR_CMNEXT_PRIVATESIZE)
+        buf = ctypes.create_string_buffer(64)
+        if _libc[0].getattrlist(os.fsencode(path), ctypes.byref(al), buf, len(buf), _FSOPT_NOFOLLOW | _FSOPT_ATTR_CMN_EXTENDED) != 0:
+            return None
+        forkattr = struct.unpack_from("<I", buf.raw, 20)[0]   # u_int32 length + attribute_set_t {common, vol, dir, file, fork}
+        if not forkattr & _ATTR_CMNEXT_PRIVATESIZE:
+            return alloc
+        return struct.unpack_from("<q", buf.raw, 24)[0]
+    except (OSError, AttributeError, ValueError, struct.error):
+        return None
+
+
+def shared_bytes(path):
+    """Allocated bytes of path that are shared with another file (APFS clone); None when it cannot be told."""
+    priv = private_size(path)
+    if priv is None:
+        return None
+    return max(0, on_disk(path) - priv)
+
+
+def free_space(path):
+    try:
+        return shutil.disk_usage(path).free
+    except OSError:
+        return 0
 
 
 def is_compressed(path):
@@ -68,10 +124,12 @@ def open_files(root):
     return {os.path.realpath(l[1:]) for l in p.stdout.splitlines() if l.startswith("n/")}
 
 
-def candidates(root, min_age=120, min_size=64 * 1024, now=None, open_set=frozenset()):
-    """(path, reason) for every regular file under root; reason None = compress it, else why it is skipped."""
+def candidates(root, min_age=120, min_size=64 * 1024, now=None, open_set=frozenset(), shared=None):
+    """(path, reason) for every regular file under root; reason None = compress it, else why it is skipped.
+    `shared(path) -> bytes or None` is an injection point for tests (default shared_bytes)."""
     import time
     now = time.time() if now is None else now
+    shared = shared_bytes if shared is None else shared
     out = []
     for dp, dn, fn in os.walk(root):
         dn[:] = [d for d in dn if d != ".git"]
@@ -98,7 +156,8 @@ def candidates(root, min_age=120, min_size=64 * 1024, now=None, open_set=frozens
             elif os.path.realpath(p) in open_set:
                 r = "in use"
             else:
-                r = None
+                sb = shared(p)
+                r = "clone check failed" if sb is None else CLONE_REASON if sb > 0 else None
             out.append((p, r))
     return out
 
@@ -147,10 +206,17 @@ def _over(res, path):
     res["over_limit_bytes"] += _size(path)
 
 
-def compress_dir(root, dry_run=False, min_age=120, min_size=64 * 1024, verify=True, log=print, compress=None, open_set=None):
-    """Compress the eligible files under root. Returns dict(files, saved, before, after, skipped{reason: n}, failed[list]).
-    `compress(path) -> bool` and `open_set` are injection points for tests."""
-    res = dict(files=0, before=0, after=0, saved=0, skipped={}, failed=[], over_limit_files=0, over_limit_bytes=0)
+def space_floor(largest):
+    return max(2 * largest, FREE_FLOOR)
+
+
+def compress_dir(root, dry_run=False, min_age=120, min_size=64 * 1024, verify=True, log=print, compress=None, open_set=None,
+                 free=None, shared=None):
+    """Compress the eligible files under root. Returns dict(files, saved, before, after, skipped{reason: n}, failed[list],
+    low_space: None or a message when the free-space floor stopped the run). `compress(path) -> bool`, `open_set`,
+    `free(root) -> bytes` and `shared(path) -> bytes` are injection points for tests."""
+    res = dict(files=0, before=0, after=0, saved=0, skipped={}, failed=[], over_limit_files=0, over_limit_bytes=0, low_space=None)
+    free = free_space if free is None else free
     if not os.path.isdir(root):
         return res
     if open_set is None:
@@ -165,7 +231,9 @@ def compress_dir(root, dry_run=False, min_age=120, min_size=64 * 1024, verify=Tr
         tool_kind = tool[0]
         compress = lambda p: _compress_one(tool, p)
     ditto_only = tool_kind == "ditto"
-    for p, why in candidates(root, min_age, min_size, open_set=open_set):
+    cands = candidates(root, min_age, min_size, open_set=open_set, shared=shared)
+    floor = space_floor(max([_size(p) for p, why in cands if why is None] or [0]))
+    for p, why in cands:
         if why:
             res["skipped"][why] = res["skipped"].get(why, 0) + 1
             if why.startswith("over 2 GiB"):
@@ -179,6 +247,10 @@ def compress_dir(root, dry_run=False, min_age=120, min_size=64 * 1024, verify=Tr
         if dry_run:
             res["files"] += 1; res["before"] += b
             continue
+        f = free(root)
+        if f < floor:
+            res["low_space"] = "free space %.2f GB is below the floor %.2f GB (max of 2x largest file, 5 GiB)" % (f / 1e9, floor / 1e9)
+            log("cachezip: stopping, " + res["low_space"]); break
         h0 = sha(p) if verify else None
         st0 = os.lstat(p)
         if not compress(p):
@@ -203,6 +275,10 @@ def report(res, dry_run):
     sk = ", ".join("%s %d" % kv for kv in sorted(res["skipped"].items())) or "none"
     if res.get("over_limit_files"):
         sk += "; %d file(s), %s, left uncompressed because they are over the size limit" % (res["over_limit_files"], gb(res["over_limit_bytes"]))
+    if res["skipped"].get(CLONE_REASON):
+        sk += "; clones left as they are (compressing them would use MORE disk)"
+    if res.get("low_space"):
+        sk += "; STOPPED: " + res["low_space"]
     if dry_run:
         return "cachezip dry-run: %d files (%s on disk) would be considered; skipped: %s" % (res["files"], gb(res["before"]), sk)
     return "cachezip: %d files compressed, %s -> %s (saved %s); skipped: %s%s" % (
