@@ -371,6 +371,15 @@ class T(unittest.TestCase):
         self.assertEqual(self.plan(["--until", "first-present", "--env", "KYTY_DUMP_FRAMES=7"]).env["KYTY_DUMP_FRAMES"], "7")
         self.assertNotIn("KYTY_DUMP_FRAMES", self.plan([]).env)
 
+    def test_kyty_dump_spacing_covers_the_run_window(self):
+        # a fixed 150 x every 15th present ran dry at ~75 s (30 fps) and the watcher's 45 s stall rule fired at ~120 s: EARLY_STALL on a live game
+        self.titles("APP0=/dump\nBIN=/b/native\nGPU=kyty\n")
+        for secs, every in ((1, 15), (60, 24), (175, 70), (600, 240), (1800, 720)):
+            self.assertEqual(run.dump_every(secs), every)
+            self.assertGreaterEqual(150 * every, secs * 60)             # even a 60 fps title is still dumping at the end of the window
+        self.assertEqual(self.plan(["--until", "first-present", "--secs", "60"]).env["KYTY_DUMP_FRAMES_EVERY"], "24")
+        self.assertEqual(self.plan(["--until", "first-present", "--secs", "60", "--env", "KYTY_DUMP_FRAMES_EVERY=9"]).env["KYTY_DUMP_FRAMES_EVERY"], "9")
+
     def test_bad_until_refused(self):
         self.titles("APP0=/dump\nBIN=/b/native\n")
         self.assertIn("--until", self.refused(["--until", "marker:nope"], 2))

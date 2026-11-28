@@ -1277,14 +1277,17 @@ def index_rows(out_dir):
 CANON_MESH_WORD = ("KK_MSL_CANON_MESH", "1")
 
 
-def mesh_words(d):
-    """meshpath: KK_MSL_OVERRIDE_MESH=1 (patch 0029) when the generated set holds mesh pairs (<ms>_<fs>.ms.metal), else nothing.
+def mesh_words(d, gfx_list=None):
+    """meshpath: KK_MSL_OVERRIDE_MESH=1 (patch 0029) when the generated set holds mesh pairs (<ms>_<fs>.ms.metal) or the graphics list
+    `gfx_list` (when given) has mesh rows, else nothing; the caller sets OVERRIDE_DIR first, so a cache without generated texts never gets it.
     folfix: and KK_MSL_CANON_MESH=1 (the mesh pipeline gets the canonical key too: on macOS 27 KosmicKrisp's own mesh text is not the
     macOS 26 one the mesh rows are keyed with; a KosmicKrisp without the word ignores it)."""
     try:
-        return [("KK_MSL_OVERRIDE_MESH", "1"), CANON_MESH_WORD] if any(f.endswith(".ms.metal") for f in os.listdir(d)) else []
+        if any(f.endswith(".ms.metal") for f in os.listdir(d)):
+            return [("KK_MSL_OVERRIDE_MESH", "1"), CANON_MESH_WORD]
     except OSError:
-        return []
+        pass
+    return prepare_mesh_words(gfx_list) if gfx_list else []
 
 
 def list_has_mesh(path):
@@ -1295,6 +1298,13 @@ def list_has_mesh(path):
     except (OSError, MetalError):
         return False
     return any(is_mesh(r) for r in rows)
+
+
+def prepare_mesh_words(list_path):
+    """A prepare logs `[kk-mslinject] seen <key> len=N mesh canon=<key>` only with KK_MSL_OVERRIDE_MESH=1 (patch 0029), and `nps5 cache metal`
+    reads those lines to make the mesh rows' texts. -> the words for prepare pass 1 when the graphics list at `list_path` has mesh rows
+    (no OVERRIDE_DIR is set there: the word only keys mesh pipelines and logs them, nothing is replaced), else []."""
+    return [("KK_MSL_OVERRIDE_MESH", "1"), CANON_MESH_WORD] if list_has_mesh(list_path) else []
 
 
 def launch_words(cache_dir, list_path, environ):
@@ -1324,7 +1334,7 @@ def launch_words(cache_dir, list_path, environ):
         if made != {here}:
             return [], ("the Metal shaders of this cache were chosen for GPU class %s, this Mac is %s (another Mac or a macOS update): "
                         "not used; `nps5 cache metal <id>` regenerates them" % ("/".join(sorted(made)), here))
-    return [("KK_MSL_OVERRIDE_DIR", d)] + ([("KK_MSL_CANON_KEY", "1")] if canon_enabled(environ) else []) + mesh_words(d), None
+    return [("KK_MSL_OVERRIDE_DIR", d)] + ([("KK_MSL_CANON_KEY", "1")] if canon_enabled(environ) else []) + mesh_words(d, os.path.join(os.path.dirname(list_path), GFX_LIST_NAME)), None
 
 
 def index_class(out_dir, name):

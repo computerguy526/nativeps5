@@ -36,6 +36,16 @@ RESERVED = ("bin", "patch", "gpu", "libs", "lib", "kk", "kyty", "workdir", "cach
 CLASSES = ("func", "perf")
 RUN_CAP_S, RUN_NO_REASON_S, GPU_PROFILE_MAX_S = 180, 90, 40
 DENY_LIST_NAME = "fast-math-deny.txt"       # games/<id>/: guest shader hashes kept at exact math (KYTY_FAST_MATH_DENY)
+DUMP_FRAMES = 150                                 # Kyty frame dumps (the watcher's only present signal on Kyty): at most this many
+DUMP_FPS_EST = 60                                 # presents per second the dump spacing must outlast (a 60 fps title is the worst case)
+
+
+def dump_every(secs):
+    """Present spacing of the Kyty frame dumps so DUMP_FRAMES dumps cover the whole --secs window (never denser than every 15th).
+    A fixed 15 ran dry at ~75 s at 30 fps and the watcher called a healthy long run a stall."""
+    return max(15, -(-int(secs) * DUMP_FPS_EST // DUMP_FRAMES))
+
+
 CACHE_RUN_CAP_S = 1800                            # `nps5 cache prepare` passes (is_prepare_run): the list ends them, secs is only their ceiling
 PLAY_CAP_S = 7200                                 # --play: an interactive session
 NAME_RE = r"[A-Za-z0-9_][A-Za-z0-9_.+:-]*"       # a tag, a save name, a relative work dir: one path component, never .. or a path
@@ -607,7 +617,7 @@ def compose(tid, opts, environ=None, g=None):
         if until:
             # The Kyty back end prints no [pstat] line: the watcher sees its presents and pictures through frame dumps in
             # <run>/frames (one small BMP every 15th present, at most 150). Any later layer may override these words.
-            plan.put("KYTY_DUMP_FRAMES", "150", "watch"); plan.put("KYTY_DUMP_FRAMES_EVERY", "15", "watch")
+            plan.put("KYTY_DUMP_FRAMES", str(DUMP_FRAMES), "watch"); plan.put("KYTY_DUMP_FRAMES_EVERY", str(dump_every(secs)), "watch")
             plan.put("KYTY_DUMP_DIR", os.path.join(run_dir, "frames"), "watch")
     # 2. profile (preset, rows, schema keys, forbidden words)
     try:

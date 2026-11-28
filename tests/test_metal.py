@@ -476,6 +476,19 @@ class GfxPrepare(Prepare):
         kv = cache.read_kv(os.path.join(c.dir, "prepared.tsv"))
         self.assertEqual(kv["metal_gfx"], "1/1", out)
 
+    def test_prepare_pass1_logs_mesh_pipelines_only_when_the_list_has_mesh_rows(self):
+        """meshfix: pass 1 needs KK_MSL_OVERRIDE_MESH=1 (no OVERRIDE_DIR yet) or KosmicKrisp never logs `seen ... mesh` and the mesh rows stay dead."""
+        rc, c, runs, out = self.prepare()
+        self.assertEqual(rc, 0, out)
+        for r in runs:
+            self.assertNotIn("KK_MSL_OVERRIDE_MESH", r); self.assertNotIn("KK_MSL_CANON_MESH", r)
+        gp = os.path.join(self.tmp, "games", "PPSA00001", "metal-gfx-pairs.tsv")
+        open(gp, "w").write("format\tnps5-metal-gfx-pairs\t3\ntitle\tPPSA00001\t01.001.000\nemitter\tabc\n" + Mesh.ROW + "\n")
+        shutil.rmtree(c.dir)
+        rc, c, runs, out = self.prepare()
+        self.assertEqual((runs[0].get("KK_MSL_OVERRIDE_MESH"), runs[0].get("KK_MSL_CANON_MESH")), ("1", "1"), out)
+        self.assertNotIn("KK_MSL_OVERRIDE_DIR", runs[0])
+
     test_prepare_generates_between_passes = None
     test_prepare_opt_out_is_v10 = None
     test_prepare_without_tool_still_prepares = None
@@ -795,6 +808,21 @@ class Mesh(unittest.TestCase):
         self.assertTrue(metal.is_mesh(rows[0]))
         self.assertEqual(metal.first_ext(rows[0]), ".ms.metal")
         self.assertEqual(rows[0]["mode"], "fix6+meshspill")
+
+    def test_mesh_words_follow_generated_files_or_mesh_rows_in_the_list(self):
+        d = os.path.join(tempfile.mkdtemp(), "metal-shaders"); os.makedirs(d)
+        plain = os.path.join(os.path.dirname(d), "plain.tsv"); mesh = os.path.join(os.path.dirname(d), "mesh.tsv")
+        open(mesh, "w").write("format\tnps5-metal-gfx-pairs\t3\n" + self.ROW + "\n")
+        open(plain, "w").write("format\tnps5-metal-gfx-pairs\t3\n")
+        want = [("KK_MSL_OVERRIDE_MESH", "1"), metal.CANON_MESH_WORD]
+        self.assertEqual(metal.mesh_words(d), [])                       # no list given, no mesh text: nothing (as before)
+        self.assertEqual(metal.mesh_words(d, plain), [])
+        self.assertEqual(metal.mesh_words(d, mesh), want)               # the list has mesh rows: log and key them
+        self.assertEqual(metal.prepare_mesh_words(mesh), want); self.assertEqual(metal.prepare_mesh_words(plain), [])
+        self.assertEqual(metal.prepare_mesh_words(os.path.join(d, "missing.tsv")), [])
+        open(os.path.join(d, "a_b.ms.metal"), "w").write("x")
+        self.assertEqual(metal.mesh_words(d), want)                     # generated mesh pair: as before
+        shutil.rmtree(os.path.dirname(d))
 
     def test_seen_lines_of_a_mesh_pipeline_give_length_and_canonical_alias(self):
         """folfix: KosmicKrisp logs `seen <key> len=N mesh canon=<key>` for a mesh pipeline; prepare needs both to find its text on macOS 27."""
