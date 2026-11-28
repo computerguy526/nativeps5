@@ -153,6 +153,29 @@ class Decision(unittest.TestCase):
         cz.DEFAULT_ON = True; self.assertTrue(cz.want_compress(self.env, True, eof, log=lambda *_: None))
         cz.DEFAULT_ON = False; self.assertFalse(cz.want_compress(self.env, True, eof, log=lambda *_: None))
 
+    def test_shipped_default_is_on(self):
+        """2026-11-28: the A/B-A passed, so an unset env on a non-TTY compresses; NPS5_CACHE_COMPRESS=0 is the opt-out."""
+        self.assertIs(cz.DEFAULT_ON, True)
+        self.assertTrue(cz.want_compress({"NPS5_DATA_STATE_DIR": self.d}, False))
+        self.assertFalse(cz.want_compress({"NPS5_DATA_STATE_DIR": self.d, "NPS5_CACHE_COMPRESS": "0"}, False))
+        q = []
+        self.assertTrue(cz.want_compress(self.env, True, self.asker("", q), log=lambda *_: None)); self.assertIn("[Y/n]", q[0])
+
+    def test_default_on_fallbacks_never_raise_and_leave_files(self):
+        """With the default on, a missing lsof / game running / failing tool leaves the cache as it was and does not raise."""
+        p = put(self.d, "cache/a.bin"); before = open(p, "rb").read(); msgs = []
+        old = cz.open_files; cz.open_files = lambda r: None
+        try:
+            r = cz.maybe_compress(os.path.join(self.d, "cache"), dict(self.env), log=msgs.append, interactive=False, running=lambda: [])
+        finally: cz.open_files = old
+        self.assertEqual(r["files"], 0); self.assertEqual(open(p, "rb").read(), before)
+        self.assertIsNone(cz.maybe_compress(self.d, dict(self.env), log=msgs.append, interactive=False, running=lambda: ["1 kyty"]))
+        def boom(*a, **k): raise RuntimeError("tool exploded")
+        old = cz.compress_dir; cz.compress_dir = boom
+        try: self.assertIsNone(cz.maybe_compress(self.d, dict(self.env), log=msgs.append, interactive=False, running=lambda: []))
+        finally: cz.compress_dir = old
+        self.assertEqual(open(p, "rb").read(), before)
+
     def test_game_running_refuses(self):
         put(self.d, "cache/a.bin"); msgs = []
         r = cz.maybe_compress(os.path.join(self.d, "cache"), dict(self.env, NPS5_CACHE_COMPRESS="1"), log=msgs.append,

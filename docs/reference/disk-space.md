@@ -59,17 +59,14 @@ before the first translate, then keep working on the packed dump.
 ## Compressed shader caches
 
 `nps5 cache prepare <id>` builds the compiled caches (driver cache, program cache, KosmicKrisp archive, MSL texts and
-libraries) and, when you set `NPS5_CACHE_COMPRESS=1`, compresses the finished cache folder with APFS LZFSE
-(`scripts/nps5lib/cachezip.py`). It is off by default until the warm-start load time of a compressed cache has been
-measured against a plain one on a quiet machine (the proxy measurement says the cost is small; see the cachezip note in
-`docs/learnings.md` once the A/B is in). It is safe: it skips files that any process has open, files changed in the last two minutes (when run by hand), files the
+libraries) and, unless you set `NPS5_CACHE_COMPRESS=0`, compresses the finished cache folder with APFS LZFSE
+(`scripts/nps5lib/cachezip.py`). It is on by default (2026-11-28: a warm-start A/B-A of a plain against a compressed cache showed no frame-time or live-compile change on ASTRO BOT and SAROS, and +0.4 to 0.9 s on launch). It is safe: it skips files that any process has open, files changed in the last two minutes (when run by hand), files the
 game rewrites every run (`*.journal`, `*.known`, `*.last_scene`), files under 64 KiB, and anything already compressed; it
 compares a sha256 of every file before and after and restores the file if they differ.
 
-- Turn it on for a prepare: `NPS5_CACHE_COMPRESS=1 nps5 cache prepare <id>`; `=0` forces it off.
-- Unset: on a terminal `nps5 cache prepare` asks "Compress the shader cache too? [y/N]" after the cache is built. The default
-  of that question is yes when you already compressed the game files (`nps5 data compress --apply` finished, or
-  `NPS5_GAME_COMPRESS=1`). Without a terminal (CI, scripts) there is no question and the built-in default applies (off).
+- Turn it off for a prepare: `NPS5_CACHE_COMPRESS=0 nps5 cache prepare <id>`; `=1` forces it on.
+- Unset: on a terminal `nps5 cache prepare` asks "Compress the shader cache too? [Y/n]" after the cache is built. The default
+  of that question is yes. Without a terminal (CI, scripts) there is no question and the built-in default applies (on).
   It never compresses while a game is running.
 - Files over the APFS limit (2 GiB, or 512 MiB without afsctool) stay as they are; the summary line says how many and how
   many GB.

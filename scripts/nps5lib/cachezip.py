@@ -19,12 +19,13 @@ Safe by construction:
     file is restored decompressed and the run exits non-zero. --no-verify skips this (afsctool still verifies itself).
   - tools: /opt/homebrew/bin/afsctool or `afsctool` on PATH (-c -T LZFSE -s 10); otherwise `ditto --hfsCompression`
     (files over 512 MiB are skipped by ditto and stay as they are). Not macOS / no tool: does nothing, exit 0.
-Env (library entry point only): NPS5_CACHE_COMPRESS=1 enables / 0 disables after prepare; unset = ask on a TTY (default yes if the game files were compressed: NPS5_GAME_COMPRESS=1 or `nps5 data compress --apply` done), else DEFAULT_ON, no prompt. Exit codes: 0 ok, 1 verify failure, 2 usage."""
+Env (library entry point only): NPS5_CACHE_COMPRESS=1 enables / 0 disables after prepare; unset = ask on a TTY (default yes), else DEFAULT_ON (True), no prompt. Exit codes: 0 ok, 1 verify failure, 2 usage."""
 import hashlib, os, re, shutil, stat, subprocess, sys, tempfile
 
-# Default for `nps5 cache prepare`. OFF until the in-game warm-start load-time A/B (compressed vs plain cache) has run on a quiet
-# machine; NPS5_CACHE_COMPRESS=1 turns it on, =0 forces it off. Flip to True once the A/B shows no change.
-DEFAULT_ON = False
+# Default for `nps5 cache prepare`: ON since the 2026-11-28 warm-start A/B-A on box 3 (ASTRO + SAROS, plain vs compressed cache,
+# work/research/cachecomp-2026-11-27.md "exec: default"). NPS5_CACHE_COMPRESS=0 forces it off, =1 forces it on. Fallbacks: any
+# failure (no lsof, no tool, game running, verify mismatch -> file restored) leaves the cache as it was and never fails a prepare.
+DEFAULT_ON = True
 UF_COMPRESSED = 0x20
 MAX_SIZE = 2 * 1024 ** 3 - 1
 DITTO_MAX = 512 * 1024 ** 2          # ditto --hfsCompression skips bigger files; afsctool handles up to MAX_SIZE
@@ -264,7 +265,7 @@ def want_compress(environ=None, interactive=None, ask=input, log=print):
             interactive = sys.stdin.isatty()
         except (AttributeError, ValueError):
             interactive = False
-    default = DEFAULT_ON or game_files_answer(environ) is True
+    default = DEFAULT_ON or game_files_answer(environ) is True   # DEFAULT_ON True: the prompt defaults to yes
     if not interactive:
         return DEFAULT_ON
     try:

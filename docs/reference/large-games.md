@@ -43,7 +43,7 @@ unchanged, 12,951 of 12,951 traced reads equal to the segments.
 |---|---|---|
 | a title's big files | `scripts/gamepack.py pack <dump>` | see above |
 | any game folder, no segments | `scripts/nps5 data compress <folder> --apply` (dry run without `--apply`) | files up to 2 GiB, about 3x on textures and models |
-| finished shader caches | `NPS5_CACHE_COMPRESS=1 nps5 cache prepare <id>`, or `python3 scripts/nps5lib/cachezip.py <cache dir>` | an ASTRO BOT cache 5.9 GB -> 2.3 GB; off by default until the warm-start A/B on a quiet machine |
+| finished shader caches | `nps5 cache prepare <id>` (on by default, `NPS5_CACHE_COMPRESS=0` off), or `python3 scripts/nps5lib/cachezip.py <cache dir>` | an ASTRO BOT cache 5.9 GB -> 2.3 GB; on by default since the 2026-11-28 warm-start A/B |
 
 All three are lossless, check a sha256 before and after, never touch a file a process has open, and can be undone
 (`gamepack.py unpack`, `nps5 data decompress`, `afsctool -d`). Developers also compress old run output and captured data with the same
