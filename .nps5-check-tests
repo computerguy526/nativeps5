@@ -42,3 +42,4 @@ python3 -I -m py_compile scripts/nps5lib/keyguard.py tests/test_keyguard.py
 python3 -I tests/test_keyguard.py
 python3 -I -m py_compile scripts/nps5lib/metalexpected.py tests/test_metal_expected.py
 python3 -I tests/test_metal_expected.py   # presence manifest games/<id>/metal-expected.tsv vs the Metal row lists (ship rows present, list rows listed, previous-release rows kept)
+python3 -I tests/test_indreg.py   # indcrash 2026-11-28: the rehearsal r8 in-game regression verdict + save fixture copy rules (synthetic)
