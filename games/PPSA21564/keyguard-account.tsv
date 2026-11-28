@@ -47,7 +47,6 @@ gfx	faab5db4c62846e8/b371c124cc11a48e	g18	nopipe	the pipeline list has this pair
 gfx	170b21d93e803a30/5699d04b836406a2	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	3135f7e5a83364f8/863d751a94a51595	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	3135f7e5a83364f8/ce773383a4f80dfd	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
-gfx	509e2bf1138c18bc/7e08c3be126f0998	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	671e90bf0ded1c9e/f017b0730d47cf36	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	6b84023b62d7e3e7/211c73532bfbeae4	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	6b84023b62d7e3e7/c9d177f337fe0935	g16	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
@@ -66,7 +65,6 @@ gfx	faab5db4c62846e8/b371c124cc11a48e	g16	nopipe	the pipeline list has this pair
 gfx	30694d820384704c/02db1d938f8728b2	g17	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	3135f7e5a83364f8/260486145aae44b0	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	3135f7e5a83364f8/2db9b2c6fdcd0aad	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
-gfx	509e2bf1138c18bc/7e08c3be126f0998	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	572210467077757f/02db1d938f8728b2	g17	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	3135f7e5a83364f8/25ec7210487a193f	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
 gfx	3135f7e5a83364f8/863d751a94a51595	g18	nopipe	the pipeline list has this pair only with the plain fragment twin or another layout or blend. Twin row or removal to decide
@@ -95,3 +93,26 @@ cs	4e5b13c9d031fb8f	*	noprog	not in the fp-8c4b096b programs.bin of this laptop 
 cs	84b2db9850828961	*	noprog	not in the fp-8c4b096b programs.bin of this laptop cache, row text unchanged since v1.4.3, rebuild-exact
 cs	b98b48c2745e55a7	g16	noprog	not in the fp-8c4b096b programs.bin of this laptop cache, row text unchanged since v1.4.3, rebuild-exact
 cs	fba4b753afd16fb8	*	moved	KK keys it 7f80c1e6 on this build, pair check FAILs (448 words, t2 t3), no alias row on g17 or g18, shipped row inert there, g16 alias row exists (bestrows)
+# 2026-11-28 finalchecks: g17add rows inactive on g17 for now (accounted)
+gfx	170b21d93e803a30/5699d04b836406a2	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	3135f7e5a83364f8/863d751a94a51595	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	3135f7e5a83364f8/b656666d88e11d49	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	3135f7e5a83364f8/ce773383a4f80dfd	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	3135f7e5a83364f8/ce93dec35d497aa4	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	383bf9ae9d27e23b/51a10cb604145615	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	47d07a80f6d3f96b/7d7cbfab1e584b5c	g17	moved	g17add row (f7b4136): pair key moved with the v1.4 Kyty base and its g16 alias row is validated on g16 only with no g17 alias so the row is inactive on g17
+gfx	47d07a80f6d3f96b/9d2710ddf7fe5e3b	g17	moved	g17add row (f7b4136): pair key moved with the v1.4 Kyty base and its g16 alias row is validated on g16 only with no g17 alias so the row is inactive on g17
+gfx	52ed886c3e2db1a5/266ce5e7b839aab7	g17	moved	g17add row (f7b4136): pair key moved with the v1.4 Kyty base and its g16 alias row is validated on g16 only with no g17 alias so the row is inactive on g17
+gfx	6131971dd956c85b/52285e3cc30fd4b2	g17	moved	g17add row (f7b4136): pair key moved with the v1.4 Kyty base and its g16 alias row is validated on g16 only with no g17 alias so the row is inactive on g17
+gfx	671e90bf0ded1c9e/f017b0730d47cf36	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	6b84023b62d7e3e7/211c73532bfbeae4	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	6b84023b62d7e3e7/c9d177f337fe0935	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	70e345eb9d6cb92c/2c115bfb0857ad5b	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	9e7ca1d0543f2ea9/ff4af8d8efc435d0	g17	moved	g17add row (f7b4136): pair key moved with the v1.4 Kyty base and its g16 alias row is validated on g16 only with no g17 alias so the row is inactive on g17
+gfx	c14de7bab0900cfa/e4941562143bd0f3	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	c52e4bd00f25a562/ff0a32973dbd6617	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	cee54d594ea031f4/05356c84fc9e2526	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	d9eb5989f437072b/00bc59eacb62eac7	g17	moved	g17add row (f7b4136): pair key moved with the v1.4 Kyty base and its g16 alias row is validated on g16 only with no g17 alias so the row is inactive on g17
+gfx	e2d6371ec80ae0a3/ecadefc9709244a0	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	ef69cbf6571b4d5e/59901de970c0e5f1	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
+gfx	faab5db4c62846e8/081ee09df15a4cf8	g17	nopipe	g17add row (f7b4136): the list has this pair only with the plain fragment twin or another layout or blend so it is inactive on g17 until the list carries the pipeline
