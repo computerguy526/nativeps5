@@ -671,7 +671,7 @@ class AstroPairAliasRowTests(unittest.TestCase):
         for r in al:
             by_cls[r[16]] = by_cls.get(r[16], 0) + 1
         self.assertEqual(by_cls, {"*": 5, "g16": 53, "g17": 5, "g18": 34})
-        self.assertEqual(len(rows) - len(al) - len(mesh), 369)               # the v1.4.4 rows are all still there (352 + the 9 mesh rows, plain rows) + 8 bestrows rows
+        self.assertEqual(len(rows) - len(al) - len(mesh), 433)               # the v1.4.4 rows are all still there (352 + the 9 mesh rows, plain rows) + 8 bestrows rows + 64 g17add rows
         self.assertFalse([r for r in al if r[9].startswith("mesh")])         # mesh pipelines: test_astro_mesh_rows
 
     def test_astro_mesh_rows(self):
@@ -818,6 +818,74 @@ class SearchPathTests(Base):
 
     def test_unknown_id(self):
         with self.assertRaises(game.Err): game.find_profile("PPSA99999", {})
+
+
+class AstroG17AddRowTests(unittest.TestCase):
+    """g17add 2026-11-28 (USER): 64 g17 rows, each the g16 row of the same KosmicKrisp pair (same B texts and modes), validated and timed on M5 macOS 27 (autoval os27 g17 + perf)."""
+    HELD_OUT = {"0a908242723d84ac:b7bfc763afbc9f23", "407d7680da893cf3:2f2339e6280b1910", "45c5cbfeaef6a160:b7e120af08f942d6",
+                "4999e916b42089d7:280602873b1e052d", "4999e916b42089d7:5d1c846e8cba7b01", "a0765260df7818ac:02db1d938f8728b2",
+                "a0765260df7818ac:2f2339e6280b1910", "e53777dc66f2181f:9f7f9428c1071fff", "f36e436c020af866:9568e8c4fe0eee2f"}   # edgeword:32 by word count only
+    SHIPGATE_DROPPED = {"572210467077757f:2f2339e6280b1910"}                                                               # shipgate drop (valfix_dropped.tsv), stays off on g17
+
+    def rows(self):
+        p = os.path.join(game.REPO, "games", "PPSA21564", "metal-gfx-pairs.tsv")
+        return [l.split("\t") for l in open(p).read().splitlines() if l.startswith("gfx\t")]
+
+    def add(self):
+        return [r for r in self.rows() if r[14] == "autoval,g17add-os27"]
+
+    def test_count_and_shape(self):
+        a = self.add()
+        self.assertEqual(len(a), 64)
+        self.assertEqual(len({(r[5], r[6]) for r in a}), 64)
+        for r in a:
+            self.assertEqual(len(r), 20)
+            self.assertEqual((r[16], r[18]), ("g17", "faster"), r[5:7])
+            self.assertLess(float(r[19]), 0.95, r[5:7])
+
+    def test_each_row_is_its_g16_row_with_a_g17_class(self):
+        g16 = {}
+        for r in self.rows():
+            if r[16] == "g16": g16.setdefault((r[5], r[6]), []).append(r)
+        g17 = {}
+        for r in self.rows():
+            if r[16] == "g17": g17.setdefault((r[5], r[6]), []).append(r)
+        for r in self.add():
+            k = (r[5], r[6])
+            self.assertEqual(len(g16.get(k, [])), 1, k)
+            self.assertEqual(len(g17[k]), 1, k)                                    # one g17 row per key, no duplicates
+            b = g16[k][0]
+            self.assertEqual(r[:14], b[:14], k)                                    # guest hashes, kk keys, B text sha256, variant, set0, va, mask, blend
+            self.assertEqual(r[15], b[15], k)                                      # emitter modes
+            self.assertEqual(r[17], b[17], k)                                      # rule as the g16 row
+
+    def test_held_out_rows_have_no_g17_row(self):
+        have = {(r[5] + ":" + r[6]) for r in self.rows() if r[16] == "g17"}
+        for k in self.HELD_OUT | self.SHIPGATE_DROPPED:
+            self.assertNotIn(k, have, k)
+        for r in self.add():
+            self.assertNotIn(r[5] + ":" + r[6], self.HELD_OUT | self.SHIPGATE_DROPPED)
+
+    def test_guest_sidecar_and_fast_math_deny_cover_the_rows(self):
+        d = os.path.join(game.REPO, "games", "PPSA21564")
+        deny = {l.strip() for l in open(os.path.join(d, "fast-math-deny.txt")) if l.strip() and not l.startswith("#")}
+        guests = [l.split("\t") for l in open(os.path.join(d, "metal-guests.tsv")).read().splitlines() if l.startswith(("vs\t", "fs\t"))]
+        for r in self.add():
+            self.assertTrue([x for x in guests if x[0] == "vs" and x[1] == r[5]], r[5])
+            fsg = [x for x in guests if x[0] == "fs" and x[1] == r[6]]
+            if r[6] != "1d32563db057a71b": self.assertTrue(fsg, r[6])                # that fragment key has no sidecar line on its g16 / g18 rows either
+            for x in fsg: self.assertIn(x[2], deny)
+
+    def test_manifest_ships_the_rows_and_names_the_held_out_ones(self):
+        m = {}
+        for l in open(os.path.join(game.REPO, "games", "PPSA21564", "metal-expected.tsv")).read().splitlines():
+            p = l.split("\t")
+            if len(p) == 5 and p[0] == "gfx": m[(p[1], p[2])] = p[3]
+        for r in self.add():
+            self.assertEqual(m[(r[5] + "/" + r[6], "g17")], "ship", r[5:7])
+        for k in self.HELD_OUT:
+            self.assertEqual(m[(k.replace(":", "/"), "g17")], "off:edgeword-unenforced-g17", k)
+        self.assertEqual(m[("572210467077757f/2f2339e6280b1910", "g17")], "off:dropped-correctness:b66a26e")
 
 
 class CliTests(Base):
