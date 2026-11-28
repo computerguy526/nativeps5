@@ -90,3 +90,8 @@ gfx	14a6b8704088a930/212b0122ee269e02	g18	moved	alias dropped 2026-11-27: re-key
 gfx	14a6b8704088a930/d9f92a3b6bab1300	g18	moved	alias dropped 2026-11-27: re-keyed alias 14a6b870/2366977c not validatable: our B vertex text not available (65a9f17)
 gfx	e85ea5f10c69e66e/52c49b0876253c2e	g18	moved	alias dropped 2026-11-27: re-keyed alias e85ea5f1/7e52168d has no local draw evidence profile, not validated (65a9f17)
 gfx	705290fd687d3ed4/3335e87da3837901	g18	moved	alias dropped 2026-11-27: re-keyed alias 705290fd/a9e5c0d8 is in the narrowed hang denylist, not run (65a9f17)
+cs	126d73d55c251115	*	noprog	not in the fp-8c4b096b programs.bin of this laptop cache, row text unchanged since v1.4.3, rebuild-exact
+cs	4e5b13c9d031fb8f	*	noprog	not in the fp-8c4b096b programs.bin of this laptop cache, row text unchanged since v1.4.3, rebuild-exact
+cs	84b2db9850828961	*	noprog	not in the fp-8c4b096b programs.bin of this laptop cache, row text unchanged since v1.4.3, rebuild-exact
+cs	b98b48c2745e55a7	g16	noprog	not in the fp-8c4b096b programs.bin of this laptop cache, row text unchanged since v1.4.3, rebuild-exact
+cs	fba4b753afd16fb8	*	moved	KK keys it 7f80c1e6 on this build, pair check FAILs (448 words, t2 t3), no alias row on g17 or g18, shipped row inert there, g16 alias row exists (bestrows)
